@@ -1,0 +1,724 @@
+= VMware Native NVM Express Driver =
+
+== License ==
+
+Refer to `LICENSE` document.
+
+== Description ==
+
+This is VMware native NVM Express driver for vSphere 2014.
+
+== Change Log ==
+
+2014/10/19 1.0e.0.30-1vmw
+
+   Fix PR 1336768: Initilizing response data of inquiry VPD 83H page.
+
+   Currently some fields of response data are not initilized, like association.
+   This will cause non-deterministic behavior in the following stage of PSA.
+   This change initializes the whole responese data to zero in function
+   NvmeScsiCmd_DoInquiryVpd83.
+
+2014/09/19 1.0e.0.29-1vmw
+
+   Fix PR 1310589: a data corruption observed when using NVMe devices in 3-node
+                   (or more) vSAN cluster
+
+   When using NVMe devices under multi-node vSAN, the IO stack may issue large
+   amount of unaligned IOs down to the driver, and some of the unaligned IOs
+   cannot be properly handled by NVMe controller if the lower two bits of the
+   first scatter-gather element address are not zero. This is because the NVMe
+   spec defines that the last two bits of a PRP entry are reserved and must be
+   zero.
+
+   On Intel NVMe disks, such IO are rejected by firmware as IO ERROR, however,
+   on Samsung and PMCS devices, the firmware processes such IO and returns
+   success silently, but internally the unaligned IOs may cause data issues.
+
+   So far this is only seen when using the NVMe devices in multi-node vSAN
+   environment, and it may cause severe data problems like data corruption,
+   PSOD, or data loss.
+
+   The fix is to advertise an alignment requirement to PSA to ask the stack
+   to re-align IO if necessary.
+
+   Tested with Samsung, Intel, and PMCS NVMe devices in a 3-node vSAN cluster,
+   we can easily hit PSOD when creating a folder or upload a file in the
+   vsanDatastore, we can no longer see PSOD issues after this change.
+
+2014/09/10 1.0e.0.28-1vmw
+
+   Fix PR 1315534: Mark controller offline when the controller is quiesced.
+
+   This change fixes a bug in the management code path that would incorrectly
+   report controllers as Online even when the controller is actually quiesced.
+
+   This change also blocks admin commands if the controller is offline.
+
+2014/08/10 1.0e.0.27-1vmw
+
+   Fix PR 1299256: Replace ':' with ' ' in Model & Serial Number to avoid a conflict.
+
+   According to SPC, any printable ASCII characters should be allowed in Model & Serial
+   Number. However, if ':' is used, there is a conflict with partition showing under
+   /dev/disks. This change replaces ':' in Model Number with ' ' to avoid that conflict.
+
+   This change also fixes a typo with the wrong args sequence in NvmeQueue_Construct.
+
+2014/07/27 1.0e.0.26-1vmw
+
+   Fix PR 1287630: nvmecli returns "status Failed to initialize NVMe".
+
+   Currently, kernel mode is 64 bits while userworld is 32 bits. The structure is
+   aligned to 8 bytes in kernel while 4 bytes in userworld. This will cause the size
+   of structrue nvmeAdapterInfo is different, thus cause fail of API
+   vmk_MgmtUserCallbackInvoke.
+
+   This change uses vmk_uint64 to indicate status of adapter, rather than enum, to make
+   sure the structrue size is same between kernel and userworld.
+
+2014/07/15 1.0e.0.25-1vmw
+
+   Fix PR 1281151 & bring a script to automate nvme.sc according to target version.
+
+   This change avoids the small size, discontiguous and unaligned SG elements to driver,
+   which would hit PSOD in driver. Instead, we set the sgElemSizeMult of DMA constraint
+   to 512 to ensure the size of SG elements to driver is a multiple of 512bytes.
+
+   To verify this change, we also implement a test module (extended_sg_test) to issue
+   crafted SCSI commands at SCSI device layer for bug reproduce and driver testing.
+   Currently only one function is implemented:
+
+   SmallIo: Issue a 512-byte read to the first sector of a SCSI device, with SG
+            elements coming from 3 pages, discontiguous and unaligned.
+            Usage:
+               vmkmgmt-keyval -i <instance> -k SmallIo -v <SCSI device name>
+
+   In addtion, this change brings a bash script: build_fix.sh to automate the nvme.sc
+   file depending on the target (ESXi 5.5 or ESXi 6.0) and ddk versions. We currently
+   reserve the nvme.sc file for internal build system.
+
+2014/07/13 1.0e.0.24-1vmw
+
+   Fix PR 1272104: Expose the Status of namespace (online/offline) to end users.
+
+   Currently we don't expose the status of namespace (online or offline) to end users.
+   In our current implementation, we can only online/offline all namespaces of an
+   adapter. In this change we add the status of adatper in structure nvmeAdapterInfo,
+   shared between driver and userworld. The status of adapter could be shown by nvmecli.
+
+2014/06/13 1.0e.0.23-1vmw
+
+   Fix PR 1267986: Enhance namespace metadata check when starting controller.
+
+   Currently our native nvme driver doesn't support LBA format with metadata. That
+   means we should format the drive/namespace to LBA format with metadata size == 0.
+   If the drive/namespace is formated with metadata, we will hit IOMMU PSOD in
+   NvmeCtrlr_WaitDeviceReady function, which issues read command to firmware without
+   check whether we support the namespace.
+
+   This change adds metadata check in function NvmeCtrlr_WaitDeviceReady and offline
+   the unsupported namespace.
+
+2014/06/04 1.0e.0.22-1vmw
+
+   Fix two DDV related PRs to enhance error handling.
+
+   PR 1258674: Return error status when function vmk_DeviceRegister failed.
+   PR 1258160: Add error handler when function vmk_LogicalCreateBusAddress failed.
+
+2014/04/29 1.0e.0.21-1vmw
+
+   Re-enable SCSI Device ID
+
+   This change re-enables SCSI Device ID reporting via SCSI INQUIRY EVPD 80 and
+   EVPD 83 page, using T10 Vendor ID format.
+
+   In this change, we generate SCSI INQUIRY EVPD 83 ID using T10 Vendor ID
+   format. The translation from NVMe to SCSI T10 Vendor ID is defined by "NVM
+   Express SCSI Translation Reference 1_1 Gold" specification from NVMe WG, with
+   the following modifications for VMware environment:
+
+   1. If the device does report valid EUI64 field in IDENTIFY NAMESPACE
+   response, the T10 VENDOR IDENTIFICATION field is then formed with 40-byte
+   Model string (from IDENTIFY CONTROLLER response) plus 16-byte EUI64 string
+   (hex representation of 64-bit EUI64);
+
+   2. If the device does NOT report valid EUI64 field in IDENTIFY NAMESPACE
+   response, then the T10 VENDOR IDENTIFICATION is generated by a concatenation
+   of 40-byte Model string (from IDENTIFY CONTROLLER response), 20-byte Serial
+   Number string (from IDENTIFY CONTROLLER response), and 8-byte namespace ID
+   (hex representation of 32-bit namespace ID).
+
+   We also implemented a hack for Samsung pre-production devices which have
+   non-unique serial numbers.
+
+2014/04/28 1.0e.0.20-1vmw
+
+   Fix PR 1238010: BlueScreen: ASSERT bora/vmkernel/main/heap.c:4316
+
+   If the controller is hot removed just after entering quiesce state, driver
+   would do NvmeCtrlr_HwStop and do not return VMK_OK. This will cause the
+   quiesce failed. After that PSA detects the device remove and will call
+   quiesce again, thus double free the IO queue in NvmeCtrlr_HwStop and PSOD.
+
+   This change makes NvmeCtrlr_HwStop return VMK_OK if the driver detects the
+   controller is missing when driver is trying to stop it.
+
+2014/04/25 1.0e.0.19-1vmw
+   Fix PR 1239161: BlueScreen: #PF Exception 14 in world 1000014579:helper57-0
+                   IP 0x418032aaa45b addr 0x3 PTEs:0x1327aa027;0x85d9ae027;0x0;
+
+   NvmeCore_PutCmdInfo() should set member of "cleanup" to NULL.
+   NvmeCore_PutCmdInfo() is used to put back current cmdInfo to qinfo->cmdFree.
+   Hence it should reset member of "cleanup" to NULL. Otherwise, the nextnvme
+   command may refer to the member incorrectly.
+
+2014/04/21 1.0e.0.18-1vmw
+
+   Fix PR 1233198: IOMMU Fault detected for 0000:8b:00.0 (vmhba2/nvme) IOaddr:
+                   0x197adf000 Mask: 0x5 Domain: 0x430260f1c090
+
+   If an Admin Passthru command failed due to some reasons (TIMEOUT, or Issuing
+   world being killed), the DMA buffer associated with the command will be
+   freed, however, if the command is still inside hardware after DMA buffer
+   free, the hardware could continue executing the command and then accessing
+   the already-freed DMA buffer, leading to IOMMU faults.
+
+   The fix is to defer DMA buffer free till the actual command completion
+   callback instead of SubmitCommandWait return, to make sure that as long as
+   the command is outstanding in the hardware, the DMA buffer associated with
+   this command is ready.
+
+   Tested with nvmecli, by setting command timeout to a very small value.
+   Observed that no IOMMU fault hit even if command times out and driver can be
+   unloaded cleanly.
+
+   Fix PR 1234212: nvmecli delete all the ns, the vmhba info dispears from
+                   esxcfg-scsidevs -a
+
+   If no namespaces are configured on the device, we could set
+   scsiAdapter->maxLUNs to 0 which is not accepted by vmk_ScsiRegisterAdapter.
+
+   The fix is to put a configurable "max_namespaces" variable as the maxLUNs
+   parameter to make sure that the adapter registration is successful.
+
+   Default max_namespaces is set to 1024.
+
+2014/04/17 1.0e.0.17-1vmw
+
+   Fix PR 1197329: BlueScreen: ASSERT bora/vmkernel/main/heap.c:4328
+
+   - Enhance cleanup when device is hot removed.
+
+     Currently in state transition of controller, we cann't do transition from
+     FAIL state to MISSING state. When the controller is hot removed, it should
+     be set MISSING state, but driver failed to set it to MISSING when its
+     previous state is FAIL. As a result, driver do NvmeCtrlr_HwStop and don't
+     return VMK_OK even if the controller has been removed. This will cause
+     Driver_QuiesceDevice failed. PSA will try quiesce device again and invoke
+     NvmeCtrlr_HwStop the second time, thus double free the IO queue, causing
+     PSOD.
+
+     This change enables the state transition from FAIL to MISSING.
+
+   Fix PR 1119553: Samsung device returns "Namespace Not Ready" after hot insert
+
+   Sumsung device takes some time to be ready after being inserted, this is the
+   fw/hw limitation. If the driver didn't take this into consideration, IO
+   commands issued immediately after insertion would fail with "INVALID NS OR
+   FORMAT". This changeset is to fix this problem by probing the device after
+   its insertion with a read nvme command composed by driver. NvmeCtrlr_Start()
+   will not return successfully until the device is probed as ready. Of course,
+   this probing will not last forever. 60 seconds is the upper line.
+   NvmeCtrlr_Start() will fail if the device is not ready in 60 seconds.
+
+   Per current testing, it generally takes 4 seconds to bring the device up.
+
+2014/04/08 1.0e.0.16-1vmw
+
+   Fix PR 1224837: PSOD when unload the nvme driver while nvmecli is running
+
+   - Skip task management abort if controller is not in OPERATIONAL state.
+
+      When the controller is quiesced (in QUIESCED) state, if a task management
+      abort comes in, it'll make the controller go to SUSPEND state then back to
+      OPERATIONAL, which is not correct.
+
+      This change blocks task management abort request if controller has already
+      been quiesced.
+
+   - Fix a potential command leak.
+
+   - Fix a command timeout issue during driver unload
+
+      Sometimes during driver unload, the driver quiesce could happen before PSA
+      quiesce completes. In that case, the IO queues would have been destroyed
+      while the SCSI HBAs and SCSI LUNs are still registered. When this happens,
+      the stack could possibly issue down a SCSI command, but we fail to find a
+      proper IO queue to handle this command eventually the command times out.
+      During task management, since all the IO queues are destroyed during
+      driver quiesce already, the driver can find no IO queues so the command
+      will be lost forever in the driver.
+
+      The fix is to reject a command to stack directly if no valid IO queues are
+      found.
+
+   - Add assertions before clearing nrAct and cmdActive during queue reset.
+
+   - Fix PR 1224837: PSOD when unload the nvme driver while nvmecli is running
+      There is no controller state check in the admin passthrough interface, so
+      when the controller is doing reset or quiesce, the admin command interface
+      could still be submitting new admin commands into the admin queue and mess
+      up with the quiesce/tear down process.
+
+      This particular PSOD indicates the qinfo->nrAct is positive, while
+      qinfo->cmdActive is an empty list. This happens when we reset the admin
+      queue with new admin command coming in. We reset qinfo->cmdActive in
+      NvmeCore_ResetQueue(), but we does not reset nrAct to 0 and this is
+      causing a mismatch between qinfo->nrAct and qinfo->cmdActive.
+
+      There could be other problems when allowing admin commands to get through
+      while we are doing NVM reset. This could possibly be the root cause of PR
+      1219639 as well.
+
+      The fix comes in two parts:
+
+      1. Reject a command if queue has been suspended. This ensures that a
+         command won't be put down to hardware when a queue has been suspended.
+      2. Reject a command allocation if queue has been suspended. This ensures
+         that no new active commands are allocated while we are
+         resetting/quiescing a queue.
+
+      This change also fixes a command leak problem when SubmitCommandAsync
+      fails.
+
+2014/03/28 1.0e.0.15-1vmw
+
+   Allocate more resources for heap and DMA buffers.
+
+   This change bumps the limits of heap and memory pool to the following value:
+
+   Heap initial from 2MB to 3MB;
+   Heap max from 32MB to 3MB * MAX_ADAPTERS (64);
+   MPOOL reservation from 1MB to 10MB;
+   MPOOL limit from 20MB to 10MB * MAX_ADAPTERS (64);
+
+2014/03/26 1.0e.0.14-1vmw
+
+   Fix PR 1169292: @BlueScreen: Failed at vmkdrivers/native/BSD/Storage/nvme/
+                   kernel/nvme_core.c:1152 -- VMK_ASSERT(qinfo->nrAct == 0)
+
+   Two race conditions identified during NVM Reset regarding this PR:
+
+   1. In NvmeCore_FlushQueue, between NvmeCore_ProcessQueueCompletions() and
+      iteration through qinfo->cmdActive, even if an admin command has been
+      processed and completed in ProcessQueueCompletions(), it would still
+      show up in qinfo->cmdActive because the actual completion (and command
+      removal from qinfo->cmdActive) is done in another thread and is
+      competing the lock that is protecting this list. So if the done()
+      handler has been called in ProcessQueueCompletions(), it will be called
+      a second time during the iteration of cmdActive list.
+
+   2. Same function, between iteration of the cmdActive list and the assertion
+      that checks the active commands to be "0", similar to 1, the actual
+      completion and removal from cmdActive is done in another thread and by
+      the time we reach the assertion, it would never be "0" since the other
+      thread hasn't got its chance to remove the command from the list.
+
+   A proposed fix (may not be very elegant) is to make sure that an active
+   command (NvmeCmdInfo) is put back to the queue (PutCmdInfo() called) in the
+   done() handler. That is, whoever is calling this, it should never reference
+   the NvmeCmdInfo after a done() callback.
+
+   Tested with 3 instances of nvme admin user space thread plus NVM Reset and
+   module unload.
+
+   Integrate changeset 2653216
+
+   Adjust the sequence of usr_io structrue field to ensure the size is same in
+   userworld and vmkernel.
+
+   The structure usr_io is used by userworld and vmkernel. In 32bits
+   userworld, it aligned to 4 bytes, while in vmkernel, it aligned to 8 bytes.
+   The difference will impact the size of the sturcture, which will make
+   invoke of vmk_MgmtUserCallbackInvoke fail.
+
+2014/03/12 1.0e.0.13-1vmw
+
+   Fix two issues in the NVMe driver
+
+   1. Fix PR 1169232. According to the API doc of vmk_WorldWait(), spurious
+      wakeups are possible when calling this API. So in rare circumstances, the
+      driver could get a fake successful immediately after we call
+      NvmeCore_SubmitCommandWait(), and the driver will complete an synchronous
+      command twice, the first time in this fake completion, and the second time
+      when the command is really completed by the hardware and is put to the
+      completion queue. In that case, we hit assertion failure that indicates a
+      double completion fault.
+      The fix is to check for the command completion status (cmdInfo->status)
+      after vmk_WorldWait() returns VMK_OK, and return to waiting when false
+      wakeup is detected.
+   2. Adjust timeout parameters of synchronous command. Make SubmitCommandWait()
+      timeout to be based on number of microseconds (in consistency with the
+      doc).
+
+2014/02/25 1.0e.0.12-1vmw
+
+   Fix two bugs of nvmecli.
+
+   1. Get the namespaceID from command line and fill the namespaceID field
+      when getting SMART log. (PR #1166049)
+   2. Handle invalid input when there are no options for feature in the arguments
+      validation, i.e. the command is like "nvmecli device feature". (PR #1161984)
+
+2014/02/17 1.0e.0.11-1vmw
+
+   Enhance the driver's capablity in hot plug.
+
+   1. Add flushing and reseting Admin Queue before destory in hotplug situation.
+   2. Set admin cmd time out to 2 seconds.
+   3. Judge the correctness of controller version in HwStart.
+   4. Remove assert in Request IOQueue since the caller will handle the exception.
+   See PR #1155334.
+
+2014/01/10 1.0e.0.10-1vmw
+
+   Bulk fixes in task management abort and error handling
+
+   This is an aggregated change with several fixes and enhancements in error
+   handling and task management abort support. Some brief change log includes:
+
+   1. Use NVM READ to implement Test Unit Ready
+   2. Implement error injection option for command timeout simulation
+   3. Assign ranks to spin locks for prevention of dead lock
+   4. Correct SCSI status code blocked commands during task management
+   5. Fix a timing problem during NVM reset, that could caues IOMMU faults
+   6. Implement task management abort
+   7. Enhance queue suspend/resume/reset/flush operations
+
+2014/01/07 1.0e.0.9-1vmw
+
+   Remove underrun/overrun checking for dsm commands
+
+   According to NVMe spec, DSM commands don't have bytesxferred informaiton
+   returned when command is completed. Therefore we have no way to calculate the
+   bytes being transferred in reality, so don't check overrun/underrun.
+
+2013/12/17 1.0e.0.8-1vmw
+
+   [PR#1120839] Add create namespace and delete namespace support
+
+   They are IDT specific management operations, implemented as driver admin
+   paththru commands.
+
+   Two things to be mentioned with this feature:
+   a. Namespace management (creation and deletion) should be done before you use
+      the drive. We don't expect the user to do namespace management while the
+      drive is busy serving IO request. So don't delete a namespace while the
+      namespace is active.  This is what we expect before a namespace is
+      deleted:
+      - stop making any more IO request on a namespace
+      - unmounts the namespace from the system such that nobody can access the
+        namespace anymore
+      - delete the namespace
+   b. If all namespaces on a controller are deleted, next time ESXi is booted,
+      the nvme card will not be successfully attached. But users may use this
+      tool to create namespace and reboot the system to make everyting come
+      back. Note that rebooting is still necessary now. More work needs to be
+      done inside the driver to make it better handled.
+
+2013/12/12 1.0e.0.7-1vmw
+
+   Add support for SET/GET FEATURE and GET LOG management operations.
+
+   This change implements feature set/get and log page get management
+   openrations in the driver and esxcli.
+
+   There are two features that set command may has no effect:
+   - Interrupt Vector Config, it always returns "Coalescing Disable" and the
+     "Interrupt Vector" is all zeros on Samsung devices, since Samsung device
+     don't support interrupt coalescing.
+   - Number of Queues, it always return 127 SQ and 127 CQ, no matter whatever
+     the number to be set. It's set on the driver initialization stage and
+     cann't be set use the command management operations.
+
+2013/12/11 1.0e.0.6-1vmw
+
+   Fix assertion failure in case of IO error
+
+   PR 1146231: @BlueScreen: Failed at kernel/nvme_io.c:326
+
+   The assertion at L326 for checking command completion status is not correct;
+   the command completion status code could be some value other than SUCCESS
+   if there are indeed I/O errors happened. Remove this assertion failure to
+   get over the PSOD.
+
+   PR 1119556: Device hang upon reaching max queue depth of one IO queue
+
+   The driver handles QFULL condition in the following ways now:
+   a. if the SCSI command is NOT splitted, and an designated IO queue is full,
+      then we return VMK_SCSI_HOST_OK|VMK_SCSI_DEVICE_QUEUE_FULL to the upper
+      layer;
+   b. if the SCSI command has been splitted, and a portions of the SCSI command
+      has already been submitted to hardware, then we raise an UNDERRUN
+      condition and let upper layer retry the command.
+      This prevents the SCSI command from hanging in the driver.
+
+2013/12/09 1.0e.0.5-1vmw
+
+   Add support for controller online/offline management operations.
+
+   This change implements controller online/offline management operations in the
+   driver and cli.
+
+2013/12/02 1.0e.0.4-1vmw
+
+   Rework on the NVMe command submission and completionmechanism
+
+   This is an aggregated change that reimplements the NVMe command submission
+   and completion process for simpler code and better error handling. Details
+   of changes include:
+
+   1. Move command submission routine to nvme_core, and provide 3 major
+      interfaces for command submission: async, wait, and poll;
+   2. Make command completion done through callback, this simplifies the
+      processing of the completion queue and make it better to handle the error
+      codes;
+   3. Implement the mapping between NVMe status code in the completion queue
+      entry and Nvme_Status, and between Nvme_Status and SCSI completion status,
+      for a centralized place to map SCSI error return codes;
+   4. Cleaned up SCSI command handling code to cope with the new status mapping
+      mechanism;
+   5. Separate some of the OS functions (like logging, DMA memory management,
+      etc.) into a separate oslib module.
+
+   This is the initial cut of the architectural change to make the source code
+   more clean with the following considerations:
+
+   1. merge NVMe specific handlers into nvme_core;
+   2. merge SCSI emulation layer to nvme_scsi;
+   3. merge OS service routines into oslib;
+   4. merge OS driver and IO stack interfaces to nvme_driver;
+   5. merge management stuff to nvme_mgmt.
+
+   Cautions:
+   60 second wait on device start up is removed, so initial I/O to Samsung
+   device after hot insert may fail.
+
+2013/11/05 1.0e.0.3-1vmw
+
+   Fix PR 1120921: Use global SMART info if per-NS data is not supported
+
+   In current implementation, if the controller doesn't support SMART/HEALTH per
+   namespace basis, empty information will be returned if the user's query
+   identifies a namespace ID. This is not fully compliant with the NVMe spec.
+   According to the spev, global SMART information should be returned in this
+   case. The driver will further print a vmkernel log to identify this
+   situation.
+
+2013/10/10 1.0e.0.2-1vmw
+
+   Add support for Samsung NVMe device with hot plug support
+
+   - Add Samsung PCI vendor ID
+   - Fix a PSOD during device hot remove
+   - Fix a PSOD when Samsung device returns "Namespace Not Ready" during
+     hot insert
+
+2013/09/25 1.0e.0.1-1vmw
+
+   Fix an I/O error in release build
+
+   This change fixes an I/O error in ESXi release build. The I/O submission
+   and completion queue is created uninitialized, so there is a chance that
+   ProcessCq could go across the last valid CqEntry because of the trash memory
+   making phase bit to be 1. This does not happen on beta build because the
+   memory has been pre-poisoned and trash memory contains valid phase bit.
+
+   This change also adds a assertion failure at invalid command id to help
+   debugging such problem.
+
+2013/09/24 1.0e.0.0-1vmw
+
+   Reset version string to 1.0e.0.0-1vmw.
+
+   This change resets NVM Express driver's version string to 1.0e.0.0-1vmw.
+
+   1.0e  : This defines the NVM Express Spec that the driver follows;
+   0     : This defines the major version of the driver, starting from 0;
+   0     : This defines the minor version of the driver, increases per change;
+   1vmw  : This is the VMW revision number, for out-of-release fixes.
+
+2013/09/16 1.3.7-1vmw
+
+   Extend management interface in NVM Express driver
+
+   This change extends the management interface in the NVM Express driver.
+
+   - Add a simple help document for nvme-cli
+   - Fix build errors when turning debug options to 0.
+   - Add an ioctl to dump NVM registers
+   - Implement nvme-cli, a command line tool to interact with the NVMe driver
+   - Implement management facilities in the driver
+      - Add a management interface for global resources. Currently only list of
+        adapters implemented.
+      - Add a management stub for IOCTL command.
+      - Implements basic admin command passthru support in the driver.
+
+2013/09/11 1.3.6-1vmw
+
+   Implement task management reset for NVM Express driver
+
+   This change implements task management reset (lun reset, bus reset, target
+   reset) in NVM Express driver. The driver does NVM reset upon receiving SCSI
+   task management resets.
+
+2013/09/09 1.3.5-1vmw
+
+   This is to solve a memory access fault problem in SMART call back
+
+   The admin command may timeout when there're stressful IOs running, which
+   causes the callback to exit and release the memory reserved for GetLogPage
+   before exiting. Since NVMe has no way to abort a command, the firmware may
+   proceed the GetLogPage command later and try to write data to the memory
+   space that has already been released. This causes an IOMMU fault. This
+   change reserves a 512-byte space in the initialization of smart management
+   handle, and holds it for log page info transfer during its lifetime. It also
+   simulates a thread like behavior to directly return the cached data when a
+   request is quite close to last one to avoid issuging unnecessary GetLogPage
+   commands.
+
+2013/08/28 1.3.4-1vmw
+
+   Set paeCapable to TRUE for SCSI adapter in NVMe driver
+
+   - Reduce logs for split commands in DEBUG log level
+   - Set paeCapale to TRUE for SCSI adapter, This reduces SCSI command splits
+     and improves performance
+
+2013/08/27 1.3.3-1vmw
+
+   Provide more valid value for SMART
+
+   After comparing the NVMe spec and SMART framework, temperature, total read
+   units, total write units, poweron cycles and power on hours are provided.
+
+2013/08/19 1.3.2-1vmw
+
+   Disable INQUIRY VPD80/83 page in nvme driver
+
+   IDT NVM Express controllers do not return globally unique OUI+EUI64
+   conbinations in IDENTIFY CONTROLLER and IDENTIFY NAMESPACE pages, causing
+   the driver to generate identical SCSI Device IDs for different controllers.
+   This change temporarily disable SCSI INQUIRY VPD80/83 page in nvme driver
+   before we can work with PMC to resolve this issue.
+
+2013/08/14 1.3.1-1vmw
+
+   Fix PSOD during SMART data retrival
+
+   - Fix SCSI MQ API usage
+   - Do not PSOD if sync command doesn't complete successfully
+   - Add a simple error injection facility to test error handling of sync
+     command timeout
+
+2013/08/01 1.3.0-1vmw
+
+   Accumulative changes to NVMe driver
+
+   - Refine SMART support. Use mangement handle instead of instance,remove
+     dependency of nvme_mgmt.h
+   - Merge Makefile from vmkapiddk build 1198535
+   - Fix in SGL-PRP translation
+   - Adjust namespace EUI64 reporting according to IDT convention of Windows
+     driver
+   - Fix PSOD during driver unload
+
+   Known Issues:
+      - SCSI task management
+      - Data corruption if partition not aligned
+
+2013/07/08 1.2.0-1vmw
+
+   Add DataSet Management Deallocation to NVMe driver
+
+   DSM Deallocation is the NVMe implementation of TRIM, or SCSI UNMAP in the
+   NVMe spec. With this change, the driver reports TRIM capability by returning
+   required values in INQUIRY B0, READ CAPACITY 16, and MODE SENSE Control Page
+   responses, accepts SCSI UNMAP commands, and translates SCSI UNMAP to DSM
+   Deallocation NVM command to the device.
+
+   This change also implements handlers for MODE SENSE Caching Page, MODE SENSE
+   Power Condition Page according to NVM-Express-SCSI-Translation-Reference
+   document.
+
+2013/07/07 1.1.0-1vmw
+
+   First drop of NVMe driver's smart support.
+
+   Implements initial SMART support with custom management interface
+   support.
+
+2013/06/20 1.0.0-1vmw
+
+   Rebase NVM layer to IDT Generic NVMe Driver 0.91. This change merges
+   IDT Generic NVMe Driver 0.91 to VMware native nvme driver, including
+   NVM specific data structure definition, device bring up, queue and
+   command resource allocation, namespace identification, admin and NVM
+   command submission and completion, etc.
+
+   New Features:
+      - Merges IDT Generic NVMe Driver 0.91 to native nvme driver;
+      - Implements I/O command split for non-virtual congituous I/O
+        buffers;
+
+   Known Issues:
+      - Still missing SCSI task management, error handling, and other
+        NVM features;
+      - Unit test removed due to architecture change.
+
+2013/06/06 0.1.0-1vmw
+
+   Initial cut of VMware native NVM Express driver for vSphere 2014. This
+   version implements basic infrastructure to register a VMware VMkernel
+   native storage device driver, brings up NVM Express controllers, and
+   translate SCSI commands into NVM commands to do I/O.
+
+   New Features:
+      - Implements VMkernel native storage driver hooks;
+      - Implements controller bring up and tear down;
+      - Implements basic SCSI protocol, including INQUIRY (STD, VPD00, 80,
+        83, B1), REPORT LUNS, READ CAP/16, READ/WRITE, etc;
+      - Implements basic I/O functionality;
+
+   Known Issues:
+      - SCSI task management and error handling is not fully implementd;
+      - Many features missing;
+      - I/O failure on non-virtgual contiguous SG arrays.
+
+== Open Work Items ==
+
+   - Robust error handling
+   - Implement the optional feature (LBA Range Type) set/get operation
+
+== Open Bugs ==
+
+   PR 1128216 Data corruption found on the NVMe disk
+
+   Symptoms:
+      PSOD in VMFS during system boot, indicating some VMFS metadata has been
+      corrupted.
+
+   Reproduce steps:
+      Cold reboot server or system crash during heavy IO, the next time system
+      boots up, there is a chance to hit VMFS corruption PSOD.
+
+      This is not consistently reproducible and is not seen on all NVMe drives.
+
+   Root cause:
+      n/a
+
+   Fix:
+      n/a
+
