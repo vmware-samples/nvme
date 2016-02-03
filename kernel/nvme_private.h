@@ -70,7 +70,7 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_DRIVER_VERSION "1.0e.0.30"
+#define NVME_DRIVER_VERSION "1.0e.0.35"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -84,6 +84,7 @@
 #define NVME_DRIVER_IDENT (NVME_DRIVER_NAME "_" NVME_DRIVER_VERSION "-" NVME_DRIVER_RELEASE "vmw")
 
 
+#define NVME_MUL_COMPL_WORLD              1
 
 /*****************************************************************************
  Exported Symbols
@@ -105,6 +106,9 @@ extern int  io_command_id_size;
 extern int  transfer_size;
 extern int  max_io_request;    /** @todo - optimize */
 extern int  max_namespaces;
+#if NVME_MUL_COMPL_WORLD
+extern int  nvme_compl_worlds_num;
+#endif
 
 
 /**
@@ -156,8 +160,18 @@ extern int  max_namespaces;
  Driver Flags
  ****************************************************************************/
 
-
 /* Driver Properties */
+
+#if NVME_MUL_COMPL_WORLD
+#define NVME_MAX_IO_QUEUES               (16)
+#else
+#define NVME_MAX_IO_QUEUES               (2)
+#endif
+
+/**
+ * max completion worlds is equal to max io queues
+ */
+#define NVME_MAX_COMPL_WORLDS         NVME_MAX_IO_QUEUES
 
 /**
  * initial size of the default heap
@@ -167,7 +181,7 @@ extern int  max_namespaces;
 /**
  * max size of the default heap
  */
-#define NVME_DRIVER_PROPS_HEAP_MAX (3 * 1024 * 1024 * (NVME_MAX_ADAPTERS))
+#define NVME_DRIVER_PROPS_HEAP_MAX (1024 * 1024 * (NVME_MAX_IO_QUEUES+1) * (NVME_MAX_ADAPTERS))
 
 /**
  * name of the default heap
@@ -214,7 +228,8 @@ extern int  max_namespaces;
 /**
  * limit of driver's mempool (shared by all controllers)
  */
-#define NVME_DRIVER_PROPS_MPOOL_LIMIT (10 * 1024 * 1024 / VMK_PAGE_SIZE * (NVME_MAX_ADAPTERS))
+#define NVME_DRIVER_PROPS_MPOOL_LIMIT (4 * 1024 * 1024 * (NVME_MAX_IO_QUEUES+1) / VMK_PAGE_SIZE * (NVME_MAX_ADAPTERS))
+
 
 /**
  * name of driver's mempool
@@ -385,6 +400,20 @@ typedef enum {
 
 #define LOG_PG_SIZE          (512)
 
+#if NVME_MUL_COMPL_WORLD
+typedef struct _NvmeIoRequest{
+   vmk_SList_Links     link;
+   vmk_ScsiCommand    *vmkCmd;
+} NvmeIoRequest;
+
+typedef struct _NvmeIoCompletionQueue {
+   vmk_Lock            lock;
+   vmk_SList           complList;
+   vmk_WorldID         worldID;
+   struct NvmeCtrlr *ctrlr;
+} NvmeIoCompletionQueue;
+#endif
+
 struct NvmeCmdInfo {
    /** for list process */
    vmk_ListLinks list;
@@ -440,7 +469,12 @@ struct NvmeCmdInfo {
    NvmeCore_CompleteCommandCb done;
    /** completion callback data */
    void  *doneData;
-   /** cleanup callback */
+   /**
+    * cleanup callback
+    * This callback shall NEVER BLOCK. It only invoked in NvmeCore_SubmitCommandWait()
+    * directly or in ISR completion routine (ProcessCq), in both cases, the qinfo->lock
+    * is held.
+    */
    NvmeCore_CleanupCommandCb cleanup;
    /** cleanup callback data */
    void *cleanupData;
@@ -523,7 +557,6 @@ struct NvmeQueueInfo {
 #define SMART_VALID_TIME_RANGE	(120 * 1000)	/* 2 minutess in miliseconds */
 #define SMART_TIMEOUT_WAIT	(60 * 1000)	/* 1 minute in miliseconds */
 #define SMART_MAX_RETRY_TIMES	10		/* retry 4 times before fail the request*/
-
 
 /**
  * struct NvmeCtrlr - holds a controller (per SBDF)'s instance data.
@@ -659,7 +692,16 @@ struct NvmeCtrlr {
    struct NvmeDmaEntry smartDmaEntry;
    /* Last Update Time */
    volatile vmk_uint64 smartLastUpdateTime;
-
+#if NVME_MUL_COMPL_WORLD
+   /* slab ID for IO completion */
+   vmk_SlabID complWorldsSlabID;
+   /* IO completion queues */
+   NvmeIoCompletionQueue IOCompletionQueue[NVME_MAX_COMPL_WORLDS];
+   /* Flag of NVMe controller shutting down */
+   vmk_Bool shuttingDown;
+   /* Number of completion worlds*/
+   vmk_uint32 numComplWorlds;
+#endif
 };
 
 /**
@@ -872,6 +914,11 @@ Nvme_Status NvmeIo_SubmitIo(struct NvmeNsInfo *ns, vmk_ScsiCommand *vmkCmd);
 Nvme_Status NvmeIo_SubmitDsm(struct NvmeNsInfo *ns, vmk_ScsiCommand *vmkCmd, struct nvme_dataset_mgmt_data *dsmData, int count);
 vmk_ByteCount NvmeIo_ProcessPrps(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo);
 
+#if NVME_MUL_COMPL_WORLD
+VMK_ReturnStatus Nvme_StartCompletionWorlds(struct NvmeCtrlr *ctrlr);
+VMK_ReturnStatus Nvme_EndCompletionWorlds(struct NvmeCtrlr *ctrlr);
+void Nvme_IOCOmpletionEnQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd);
+#endif
 
 /*TODO: funtions to support error handling in the future*/
 //VMK_ReturnStatus NvmeQueue_GetErrorLog(struct NvmeCtrlr *ctrlr, struct NvmeCmdInfo *cmdInfo);

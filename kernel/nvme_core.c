@@ -843,7 +843,20 @@ NvmeCore_SubmitCommandWait(struct NvmeQueueInfo *qinfo,
    nvmeStatus = NvmeCore_SubmitCommandAsync(qinfo, cmdInfo,
                                             nvmeCoreCompleteCommandWait);
    if (!SUCCEEDED(nvmeStatus)) {
+      /*
+       * By the time reach here, command is not submitted into hardware.
+       * Do cleanup work for cmdInfo:
+       * 1. Holding lock to avoid race condition with completion world,
+       *    which maybe access cmdInfo.
+       * 2. Setting cmdInfo->type to ABORT_CONTEXT, so that cleanup callback
+       *    would cleanup uioDmaEntry.
+       * 3. Put cmdInfo back to free list.
+       * */
       qinfo->lockFunc(qinfo->lock);
+      cmdInfo->type = ABORT_CONTEXT;
+      if (cmdInfo->cleanup) {
+         cmdInfo->cleanup(qinfo, cmdInfo);
+      }
       NvmeCore_PutCmdInfo(qinfo, cmdInfo);
       qinfo->timeout[cmdInfo->timeoutId] --;
       qinfo->unlockFunc(qinfo->lock);
@@ -858,6 +871,9 @@ NvmeCore_SubmitCommandWait(struct NvmeQueueInfo *qinfo,
     * Note: Spurious wakeups are possible, so we need to check cmdInfo->status
     *       after wakeup as VMK_OK, to make sure that we have really completed
     *       the command. If not, we should go back to wait again.
+    *
+    * TODO: Checking cmdInfo->status here has a tiny risk when command has been
+    *       completed and put into free list of command queue.
     */
    timeout = OsLib_GetTimerUs() + timeoutUs;
    do {
@@ -870,24 +886,24 @@ NvmeCore_SubmitCommandWait(struct NvmeQueueInfo *qinfo,
             cmdInfo->status == NVME_CMD_STATUS_ACTIVE &&
             OsLib_TimeAfter(OsLib_GetTimerUs(), timeout));
 
-   if (vmkStatus == VMK_OK) {
+   /**
+    * Holding lock to avoid race condition with completion world,
+    * which would access cmdInfo.
+    */
+   qinfo->lockFunc(qinfo->lock);
+   if (cmdInfo->status == NVME_CMD_STATUS_DONE) {
       /**
        * By the time we reach here, we should have the command completed
        * successfully.
        */
-      VMK_ASSERT(cmdInfo->status == NVME_CMD_STATUS_DONE);
-      nvmeStatus = cmdInfo->cmdStatus;
-   } else if (vmkStatus == VMK_TIMEOUT) {
-      nvmeStatus = NVME_STATUS_TIMEOUT;
-      Nvme_LogWarning("command %p failed, putting to abort queue.",
-                       cmdInfo);
-      cmdInfo->type = ABORT_CONTEXT;
+      nvmeStatus = NVME_STATUS_SUCCESS;
    } else {
       nvmeStatus = NVME_STATUS_ABORTED;
       Nvme_LogWarning("command %p failed, putting to abort queue.",
                        cmdInfo);
       cmdInfo->type = ABORT_CONTEXT;
    }
+   qinfo->unlockFunc(qinfo->lock);
 
    return nvmeStatus;
 }

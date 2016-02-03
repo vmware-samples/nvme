@@ -288,3 +288,68 @@ OsLib_StrToUpper(char *str, int length)
       }
    }
 }
+#if NVME_MUL_COMPL_WORLD
+int nvme_compl_worlds_num = -1;
+VMK_MODPARAM(nvme_compl_worlds_num, int,   \
+      "Total number of NVMe completion worlds/queues.");
+#endif
+
+/* round robin for all of completion worlds */
+vmk_uint32
+OsLib_GetQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd)
+{
+#if NVME_MUL_COMPL_WORLD
+   static int qID=0;
+   qID = (qID+1)%(ctrlr->numComplWorlds);
+   return qID;
+#else
+   return vmk_ScsiCommandGetCompletionQueue(ctrlr->scsiAdapter, vmkCmd);
+#endif
+}
+
+vmk_uint32
+OsLib_GetMaxNumQueues(void)
+{
+#if NVME_MUL_COMPL_WORLD
+   return nvme_compl_worlds_num;
+#else
+   return vmk_ScsiGetMaxNumCompletionQueues();
+#endif
+}
+
+static vmk_atomic64 NumPCPUs = 0;
+
+VMK_ReturnStatus
+NVMeStorConstructor(vmk_PCPUID pcpu, void *object, vmk_ByteCountSmall size,  \
+      vmk_AddrCookie arg) {
+   vmk_AtomicInc64(&NumPCPUs);
+   return VMK_OK;
+}
+
+/* Get PCPU number by counting constuctor calling number */
+vmk_uint32
+Oslib_GetPCPUNum(void) {
+   vmk_PCPUStorageProps props;
+   vmk_PCPUStorageHandle handle = VMK_PCPU_STORAGE_HANDLE_INVALID;
+
+   props.type = VMK_PCPU_STORAGE_TYPE_WRITE_LOCAL;
+   props.moduleID = vmk_ModuleCurrentID;
+   vmk_NameInitialize(&props.name, "NVMePerPCPUStor");
+   props.constructor = NVMeStorConstructor;
+   props.destructor = NULL;
+   props.size = 4;
+   props.align = 0;
+
+   vmk_AtomicWrite64(&NumPCPUs, 0);
+   vmk_PCPUStorageCreate(&props, &handle);
+
+   if (VMK_UNLIKELY(handle == VMK_PCPU_STORAGE_HANDLE_INVALID)) {
+      /* failed to get memory, so our CPU number can't be trusted. */
+      VMK_ASSERT(VMK_FALSE);
+      return -1;
+   }
+
+   vmk_PCPUStorageDestroy(handle);
+
+   return NumPCPUs;
+}

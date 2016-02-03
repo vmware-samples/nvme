@@ -10,7 +10,67 @@ This is VMware native NVM Express driver for vSphere 2014.
 
 == Change Log ==
 
-2014/10/19 1.0e.0.30-1vmw
+   2015/1/7 1.0e.0.35-1vmw
+
+   Add support for vendor specific command format of Admin Vendor Specific Commands.
+
+   Currently, vendor specific command format of admin vendor specific commands are
+   not supported, which means this kind of vendor specific operations are not allowed.
+   This change enables this kind of admin vendor specific commands.
+
+   2014/12/17 1.0e.0.34-1vmw
+
+   Fix the race codition issue on admin command submission and completion.
+
+   Add lock protection in the assignment of cmdInfo->status in submission path.  With the lock, we can make sure:
+   1. all the successful completed command will be cleaned up in submission path;
+   2. other submitted commands will be done in completion path.
+   3. Unsubmitted commands will be cleaned up immediately in submission path.
+
+   2014/12/12 1.0e.0.33-1vmw
+
+   Fix PR 1368770: it is re-opened by a regression defect introduced by change #3211338
+
+   Some user admin requests may have zero uio->length, which will not allocate
+   uioDmaEntry, therefore after submitting it to hardware successfully, the code
+   should check uioDmaEntry and only do UnmapUserPages() and free uioDmaEntry in the case
+   that uioDmaEntry is not NULL.
+
+   2014/12/10 1.0e.0.32-1vmw
+
+   Fix PR 1368770: Double cleanup uioDmaEntry for admin command.
+
+   When submitting an admin command, the structure uioDmaEntry can be unmap and
+   freed in both submission path and completion path. However, there is a chance
+   that the two paths would do cleanup at the same time when the command timeout,
+   and meanwhile the interrupt handler is called. This will cause double cleanup
+   uioDmaEntry and hit PSOD.
+
+   This change clears cleanup callback in completion path when the submission path
+   is called to cleanup uioDmaEntry, so that the cleanup would only be called once.
+
+   2014/10/29 1.0e.0.31-1vmw
+
+   Fix PR 1322248: Enable multiple completion worlds in NVMe driver.
+
+   Current NVMe driver hands over command completion request to PSA layer.
+   Allow driver to do command completion may potentially improve IO performance.
+   The reason is driver can do completion in a more efficient and more parallel
+   way. With Thor's fix for PR 1032408, it is possible for driver to implement
+   this feature.
+   Here is a list of code changes:
+   1, Driver creates multiple completion worlds instead of PSA.
+   2, Driver puts a new IO completion request to a completion queue in interrupt
+   world. The enqueue method is flexiable. A basic idea is round robin to all
+   of queues.
+   3, Each completion world gets the new IO completion request and calls scsi
+   command completion callback (AKA. vmkCmd->done).
+   4, Driver provides a module parameter for users to specify the total
+   completion worlds number.
+   5, The scheduling of these completion worlds are done by kernel scheduler.
+   Driver never pins the worlds to dedicated PCPU explicitly.
+
+   2014/10/19 1.0e.0.30-1vmw
 
    Fix PR 1336768: Initilizing response data of inquiry VPD 83H page.
 
@@ -19,7 +79,7 @@ This is VMware native NVM Express driver for vSphere 2014.
    This change initializes the whole responese data to zero in function
    NvmeScsiCmd_DoInquiryVpd83.
 
-2014/09/19 1.0e.0.29-1vmw
+   2014/09/19 1.0e.0.29-1vmw
 
    Fix PR 1310589: a data corruption observed when using NVMe devices in 3-node
                    (or more) vSAN cluster

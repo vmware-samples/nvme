@@ -154,6 +154,10 @@ OsLib_IntrRegister(vmk_Device device, vmk_IntrCookie intrCookie,
 VMK_ReturnStatus
 OsLib_IntrUnregister(vmk_IntrCookie intrCookie, void *handlerData);
 
+vmk_uint32 OsLib_GetMaxNumQueues(void);
+vmk_uint32 OsLib_GetQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd);
+vmk_uint32 Oslib_GetPCPUNum(void);
+
 void
 OsLib_StrToUpper(char *str, int length);
 

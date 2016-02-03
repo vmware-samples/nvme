@@ -272,7 +272,7 @@ MsixSetup(struct NvmeCtrlr *ctrlr)
 
    /* num io queues is determined by how many completion queues SCSI layer supports */
    /* plus 1 for admin queue */
-   numQueues = vmk_ScsiGetMaxNumCompletionQueues() + 1;
+   numQueues = OsLib_GetMaxNumQueues() + 1;
 
    ctrlr->intrArray = Nvme_Alloc(sizeof(vmk_IntrCookie) * numQueues, 0, NVME_ALLOC_ZEROED);
    if (ctrlr->intrArray == NULL) {
@@ -518,6 +518,42 @@ NvmeCtrlr_ValidateParams(struct NvmeCtrlr *ctrlr)
 
    max_prp_list = (transfer_size * 1024) / VMK_PAGE_SIZE;
    Nvme_LogDebug("Max xfer %d, Max PRP %d", transfer_size, max_prp_list);
+
+#if NVME_MUL_COMPL_WORLD
+   /* equal to PCPU number of server */
+   vmk_int32 compl_worlds_upper_limit = Oslib_GetPCPUNum();
+   /* equal to CPU node number of server */
+   vmk_int32 compl_worlds_lower_limit = vmk_ScsiGetMaxNumCompletionQueues();
+
+   /* verify limitation of completion worlds number */
+   if (compl_worlds_lower_limit < 1) {
+      Nvme_LogError("Fatal Error: CPU nodes number is %d.",    \
+            compl_worlds_lower_limit);
+      return VMK_BAD_PARAM;
+   }
+   if (compl_worlds_upper_limit < compl_worlds_lower_limit) {
+      Nvme_LogError("Fatal Error: compl_worlds_upper_limit is less than  \
+            compl_worlds_lower_limit.");
+      return VMK_BAD_PARAM;
+   }
+   if (compl_worlds_upper_limit > NVME_MAX_COMPL_WORLDS) {
+      compl_worlds_upper_limit = NVME_MAX_COMPL_WORLDS;
+   }
+
+   /* verify user configration of completion worlds number */
+   if (nvme_compl_worlds_num < compl_worlds_lower_limit) {
+      nvme_compl_worlds_num = compl_worlds_lower_limit;
+      Nvme_LogError("The range of nvme_compl_worlds_num is [%d, %d].      \
+            Adjusting nvme_compl_worlds_num to %d", compl_worlds_lower_limit, \
+            compl_worlds_upper_limit, nvme_compl_worlds_num);
+   }
+   else if (nvme_compl_worlds_num > compl_worlds_upper_limit) {
+      nvme_compl_worlds_num = compl_worlds_upper_limit;
+      Nvme_LogError("The range of nvme_compl_worlds_num is [%d, %d].      \
+            Adjusting nvme_compl_worlds_num to %d", compl_worlds_lower_limit, \
+            compl_worlds_upper_limit, nvme_compl_worlds_num);
+   }
+#endif
 
    return VMK_OK;
 }
@@ -820,9 +856,23 @@ NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr)
    }
 #endif
 
+#if NVME_MUL_COMPL_WORLD
+   vmkStatus = Nvme_StartCompletionWorlds(ctrlr);
+   if (vmkStatus != VMK_OK) {
+      Nvme_LogError("Failed to create completion worlds. vmkStatus: 0x%x.",  \
+            vmkStatus);
+      goto cleanup_sema;
+
+   }
+#endif
+
    vmkStatus = AdminQueueSetup(ctrlr);
    if (vmkStatus != VMK_OK) {
+#if NVME_MUL_COMPL_WORLD
+      goto cleanup_compl_worlds;
+#else
       goto cleanup_sema;
+#endif
    }
 
    /**
@@ -831,6 +881,11 @@ NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr)
    vmk_ListInit(&ctrlr->nsList);
 
    return VMK_OK;
+
+#if NVME_MUL_COMPL_WORLD
+cleanup_compl_worlds:
+   Nvme_EndCompletionWorlds(ctrlr);
+#endif
 
 cleanup_sema:
    OsLib_SemaphoreDestroy(&ctrlr->taskMgmtMutex);
@@ -872,6 +927,11 @@ NvmeCtrlr_Detach(struct NvmeCtrlr *ctrlr)
 
    vmkStatus = AdminQueueDestroy(ctrlr);
    Nvme_LogDebug("cleaned admin queue, 0x%x.", vmkStatus);
+
+#if NVME_MUL_COMPL_WORLD
+   Nvme_EndCompletionWorlds(ctrlr);
+   Nvme_LogDebug("cleaned IO completion worlds, 0x%x.", vmkStatus);
+#endif
 
    vmkStatus = OsLib_SemaphoreDestroy(&ctrlr->taskMgmtMutex);
    Nvme_LogDebug("cleaned task management mutex, 0x%x.", vmkStatus);
@@ -2100,7 +2160,7 @@ NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr)
     * IRQ vector per SCSI completion queue. The number of SCSI
     * completion queues available is provided by PSA.
     */
-   nrIoQueues = vmk_ScsiGetMaxNumCompletionQueues();
+   nrIoQueues = OsLib_GetMaxNumQueues();
    Nvme_LogDebug("Requesting %d IO queues.", nrIoQueues);
 
    /*
@@ -3164,8 +3224,8 @@ AllowedAdminCmd(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
             NVME_VNDR_CMD_ADM_CODE_START)
          {
             if (!ctrlr->admVendCmdCfg) {
-               DPRINT9("Vendor Specific command not supported.\n");
-               return VMK_NOT_SUPPORTED;
+               DPRINT9("Vendor Specific command 0x%x\n", uio->cmd.header.opCode);
+               return VMK_OK;
             }
             if ((uio->length <
                uio->cmd.cmd.vendorSpecific.buffNumDW >> 2) ||
@@ -3437,8 +3497,7 @@ AdminPassthru(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
    uio->status = vmkStatus;
    DPRINT9("Command completion result 0x%x.", vmkStatus);
 
-   if (cmdInfo->status == NVME_CMD_STATUS_DONE &&
-       uioDmaEntry != NULL) {
+   if (uioDmaEntry != NULL && vmkStatus == VMK_OK) {
       /**
        * We only free DMA buffers inline when the command is successful.
        */

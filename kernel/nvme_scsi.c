@@ -36,6 +36,7 @@
 #include "nvme_private.h"
 #include "nvme_debug.h"
 #include "nvme_scsi_cmds.h"
+#include "oslib.h"
 
 
 /*
@@ -1789,7 +1790,11 @@ out_return:
        */
       vmkStatus = NvmeScsiCmd_SetReturnStatus(vmkCmd, nvmeStatus);
       if (vmkStatus == VMK_OK) {
+#if NVME_MUL_COMPL_WORLD
+         Nvme_IOCOmpletionEnQueue(ctrlr, vmkCmd);
+#else
          NvmeScsiCmd_CompleteCommand(vmkCmd);
+#endif
       }
    }
 
@@ -1947,6 +1952,277 @@ ScsiCheckTarget(void *clientData, int channel, int targetId)
    return (channel == 0 && targetId == 0) ? VMK_OK : VMK_FAILURE;
 }
 
+#if NVME_MUL_COMPL_WORLD
+/**
+ * Do commands completion in a local list
+ */
+static void
+DoLocalCmdCompl(struct NvmeCtrlr *ctrlr, vmk_SList *localComplCmds)
+{
+   vmk_ScsiCommand *vmkCmd;
+   NvmeIoRequest *IORequest;
+
+   VMK_ASSERT(!vmk_SListIsEmpty(localComplCmds));
+   while (!vmk_SListIsEmpty(localComplCmds)) {
+
+      vmk_SList_Links *IOEventList = vmk_SListFirst(localComplCmds);
+      IORequest = VMK_LIST_ENTRY(IOEventList, NvmeIoRequest, link);
+      vmkCmd = IORequest->vmkCmd;
+      VMK_ASSERT(vmkCmd->done);
+
+      vmkCmd->done(vmkCmd);
+      vmk_SListRemove(localComplCmds, IOEventList, NULL);
+      vmk_SlabFree(ctrlr->complWorldsSlabID, IORequest);
+   }
+}
+
+/**
+ * @brief  This function do commands completion.
+ * Driver IO Completion Worlds is controller based.
+ *
+ * @param[in] IOCompletionQueue which is owned by dedicated completion world
+ *
+ * @return VMK_OK
+ */
+VMK_ReturnStatus Nvme_CompletionWorld(void *data)
+{
+   VMK_ReturnStatus status = VMK_OK;
+   NvmeIoCompletionQueue  *IOCompletionQueue = (NvmeIoCompletionQueue *)data;
+   struct NvmeCtrlr *ctrlr = IOCompletionQueue->ctrlr;
+   vmk_SList localComplCmds;
+
+   status = vmk_SpinlockLock(IOCompletionQueue->lock);
+   VMK_ASSERT(status == VMK_OK);
+   /*
+    * Handle IO compeltion requests if any. Or else goto sleep
+    * until new request arriving
+    */
+   vmk_SListInit(&localComplCmds);
+   while (!ctrlr->shuttingDown) {
+      if (vmk_SListIsEmpty(&IOCompletionQueue->complList)) {
+         status = vmk_WorldWait((vmk_WorldEventID)IOCompletionQueue,   \
+               IOCompletionQueue->lock,                                \
+               VMK_TIMEOUT_UNLIMITED_MS,                               \
+               "NVMe I/O Completion Queue: no work to do");
+         if ((status != VMK_OK) && (!ctrlr->shuttingDown)) {
+            Nvme_LogError("In %s: vmk_WorldWait failed with status <%s>",   \
+                  __func__, vmk_StatusToString(status));
+            VMK_ASSERT(VMK_FALSE);
+         }
+      }
+      else {
+         /*
+          * There are new pending requests. Copy all of them into
+          * a local list and complete them.
+          */
+         vmk_SListSplitHead(&IOCompletionQueue->complList, &localComplCmds,
+               vmk_SListLast(&IOCompletionQueue->complList));
+         vmk_SpinlockUnlock(IOCompletionQueue->lock);
+         DoLocalCmdCompl(ctrlr, &localComplCmds);
+      }
+      VMK_ASSERT(vmk_SListIsEmpty(&localComplCmds));
+      status = vmk_SpinlockLock(IOCompletionQueue->lock);
+   }
+
+   vmk_SpinlockUnlock(IOCompletionQueue->lock);
+   vmk_WorldExit(VMK_OK);
+   return VMK_OK;
+}
+
+/**
+ * Flush completion queue
+ */
+VMK_ReturnStatus
+Nvme_FlushCompletionQueue(struct NvmeCtrlr *ctrlr,    \
+      NvmeIoCompletionQueue *IOCompletionQueue)
+{
+   vmk_SList localComplCmds;
+   VMK_ReturnStatus status = VMK_OK;
+
+   status = vmk_SpinlockLock(IOCompletionQueue->lock);
+   /* No pending request */
+   if (vmk_SListIsEmpty(&IOCompletionQueue->complList)) {
+      vmk_SpinlockUnlock(IOCompletionQueue->lock);
+      return VMK_OK;
+   }
+
+   /*
+    * There are new pending requests. Copy all of them into
+    * a local list and complete them.
+    */
+   vmk_SListInit(&localComplCmds);
+   vmk_SListSplitHead(&IOCompletionQueue->complList, &localComplCmds,
+         vmk_SListLast(&IOCompletionQueue->complList));
+   vmk_SpinlockUnlock(IOCompletionQueue->lock);
+   DoLocalCmdCompl(ctrlr, &localComplCmds);
+   VMK_ASSERT(vmk_SListIsEmpty(&localComplCmds));
+
+   return VMK_OK;
+}
+
+/**
+ * Create a slab for commands completion
+ */
+static VMK_ReturnStatus
+CreateIoCompletionSlab(struct NvmeCtrlr *ctrlr)
+{
+   VMK_ReturnStatus vmkStatus = VMK_OK;
+   vmk_SlabCreateProps compl_worlds_slab_props;
+   vmk_Name slabName;
+
+   vmk_Memset(&compl_worlds_slab_props, 0, sizeof(vmk_SlabCreateProps));
+
+   /* Creating slab */
+   compl_worlds_slab_props.type = VMK_SLAB_TYPE_SIMPLE;
+   vmk_NameFormat(&slabName, "nvme_compl_io_slab_%s", Nvme_GetCtrlrName(ctrlr));
+   vmk_NameInitialize(&compl_worlds_slab_props.name, (const char *)&slabName);
+   compl_worlds_slab_props.module = vmk_ModuleCurrentID;
+   compl_worlds_slab_props.objSize = sizeof(NvmeIoRequest);
+   compl_worlds_slab_props.alignment = VMK_L1_CACHELINE_SIZE;
+   /* TODO: double check this value */
+   compl_worlds_slab_props.ctrlOffset = 0;
+   compl_worlds_slab_props.minObj = io_cpl_queue_size * nvme_compl_worlds_num / 2;
+   compl_worlds_slab_props.maxObj = io_cpl_queue_size * nvme_compl_worlds_num;
+
+   vmkStatus = vmk_SlabCreate(&compl_worlds_slab_props,    \
+         &ctrlr->complWorldsSlabID);
+   if (vmkStatus != VMK_OK) {
+      Nvme_LogError("Unable to create slab. vmkStatus: 0x%x.", vmkStatus);
+      return vmkStatus;
+   }
+   return vmkStatus;
+}
+
+/**
+ * Create multiple completion worlds
+ */
+VMK_ReturnStatus
+Nvme_StartCompletionWorlds(struct NvmeCtrlr *ctrlr)
+{
+   VMK_ReturnStatus        status = VMK_OK;
+   vmk_WorldProps          worldProps;
+   char propName[VMK_MISC_NAME_MAX];
+   NvmeIoCompletionQueue    *IOCompletionQueue;
+   vmk_uint32 qID=0;
+
+   status = CreateIoCompletionSlab(ctrlr);
+   if (status != VMK_OK)
+   {
+      VMK_ASSERT(VMK_FALSE);
+      return status;
+   }
+
+   ctrlr->shuttingDown = VMK_FALSE;
+   ctrlr->numComplWorlds = ctrlr->numIoQueues;
+   for(qID=0; qID < ctrlr->numComplWorlds; qID++) {
+      IOCompletionQueue = &(ctrlr->IOCompletionQueue[qID]);
+      IOCompletionQueue->ctrlr = ctrlr;
+      vmk_SListInit(&(IOCompletionQueue->complList));
+
+      /* Create a completion queue lock */
+      vmk_StringFormat(propName, VMK_MISC_NAME_MAX, NULL,   \
+            "nvmeComplQLock-%s-%d", Nvme_GetCtrlrName(ctrlr), qID);
+
+      status = OsLib_LockCreate(ctrlr->lockDomain, NVME_LOCK_RANK_HIGH,
+        propName, &IOCompletionQueue->lock);
+      if (status != VMK_OK) {
+         VMK_ASSERT(VMK_FALSE);
+         return status;
+      }
+
+      /* create a new IO completion world */
+      vmk_StringFormat(propName, VMK_MISC_NAME_MAX, NULL,   \
+            "NVMeComplWorld-%s-%d", Nvme_GetCtrlrName(ctrlr), qID);
+      worldProps.name = propName;
+      worldProps.moduleID = vmk_ModuleCurrentID;
+      worldProps.startFunction = Nvme_CompletionWorld;
+      worldProps.data = IOCompletionQueue;
+      worldProps.schedClass = VMK_WORLD_SCHED_CLASS_QUICK;
+      worldProps.heapID = NVME_DRIVER_RES_HEAP_ID;
+      status = vmk_WorldCreate(&worldProps, &IOCompletionQueue->worldID);
+      if (status != VMK_OK)
+      {
+         Nvme_LogError("%s: Failed to create world <%s>", __func__,   \
+               vmk_StatusToString(status));
+         /* Cleanup resource if world creation failed */
+         vmk_SlabDestroy(ctrlr->complWorldsSlabID);
+         OsLib_LockDestroy(&ctrlr->IOCompletionQueue[qID].lock);
+         for(qID=qID-1; qID>=0; qID--) {
+            vmk_WorldDestroy(ctrlr->IOCompletionQueue[qID].worldID);
+            OsLib_LockDestroy(&ctrlr->IOCompletionQueue[qID].lock);
+         }
+         VMK_ASSERT(VMK_FALSE);
+         return status;
+      }
+   }
+
+   return VMK_OK;
+}
+
+/**
+ * terminate multiple completion worlds and clean up resource
+ */
+VMK_ReturnStatus
+Nvme_EndCompletionWorlds(struct NvmeCtrlr *ctrlr)
+{
+   NvmeIoCompletionQueue    *IOCompletionQueue;
+   vmk_uint32 i=0;
+
+   ctrlr->shuttingDown = VMK_TRUE;
+   for(i=0; i<ctrlr->numComplWorlds; i++) {
+      IOCompletionQueue = &ctrlr->IOCompletionQueue[i];
+      vmk_WorldWakeup((vmk_WorldEventID) IOCompletionQueue);
+      vmk_WorldWaitForDeath(IOCompletionQueue->worldID);
+      Nvme_FlushCompletionQueue(ctrlr, IOCompletionQueue);
+      OsLib_LockDestroy(&IOCompletionQueue->lock);
+   }
+   /* A single slab for all of completion worlds */
+   vmk_SlabDestroy(ctrlr->complWorldsSlabID);
+   ctrlr->numComplWorlds = 0;
+
+   return VMK_OK;
+}
+
+/**
+ * Enqueue IO completion request.
+ */
+void Nvme_IOCOmpletionEnQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd)
+{
+   VMK_ReturnStatus        status;
+   NvmeIoCompletionQueue    *IOCompletionQueue;
+   NvmeIoRequest *IORequest;
+   vmk_Bool needWakeup = VMK_FALSE;
+   vmk_uint32 qID;
+
+   qID = OsLib_GetQueue(ctrlr, vmkCmd);
+   VMK_ASSERT(qID <  ctrlr->numIoQueues);
+   IOCompletionQueue = &(ctrlr->IOCompletionQueue[qID]);
+   VMK_ASSERT(IOCompletionQueue);
+
+   IORequest = vmk_SlabAlloc(ctrlr->complWorldsSlabID);
+   /* complete command immediately if out of memory */
+   if (!IORequest) {
+      Nvme_LogWarning("Failed to allocate memory.   \
+            Fallback to PSA default completion handler.");
+      vmk_ScsiSchedCommandCompletion(vmkCmd);
+      return;
+   }
+
+   IORequest->vmkCmd = vmkCmd;
+   status = vmk_SpinlockLock(IOCompletionQueue->lock);
+   VMK_ASSERT(status == VMK_OK);
+   if (vmk_SListIsEmpty(&IOCompletionQueue->complList)) {
+      needWakeup = VMK_TRUE;
+   }
+   vmk_SListInsertAtTail(&IOCompletionQueue->complList,
+                      &IORequest->link);
+   vmk_SpinlockUnlock(IOCompletionQueue->lock);
+
+   if(needWakeup) {
+      vmk_WorldWakeup((vmk_WorldEventID) IOCompletionQueue);
+   }
+}
+#endif //end of NVME_MUL_COMPL_WORLD
 
 /**
  * Callback to notify when IO is allowed to adapter.
@@ -1971,12 +2247,16 @@ ScsiNotifyIOAllowed(vmk_Device logicalDevice, vmk_Bool ioAllowed)
    ctrlr = (struct NvmeCtrlr *)adapter->clientData;
 
    if (ioAllowed) {
+/* skip PSA completion queue creation if driver already created completion
+ * worlds */
+#if ( !defined(NVME_MUL_COMPL_WORLD) || (!NVME_MUL_COMPL_WORLD) )
       vmkStatus = vmk_ScsiStartCompletionQueues(adapter, ctrlr->numIoQueues);
       if (vmkStatus == VMK_OK) {
          Nvme_LogInfo("started %d io queues.", ctrlr->numIoQueues);
       } else {
          Nvme_LogError("failed to start %d io queues, 0x%x.", ctrlr->numIoQueues, vmkStatus);
       }
+#endif
 
       NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_OPERATIONAL, VMK_TRUE);
 
@@ -2224,6 +2504,18 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr)
    adapter->maxCmdLen = NVME_DRIVER_PROPS_MAX_CMD_LEN;
 
    adapter->flags = VMK_SCSI_ADAPTER_FLAG_NO_PERIODIC_SCAN;
+
+#if NVME_MUL_COMPL_WORLD
+   vmkStatus = vmk_ScsiAdapterSetCapabilities(adapter,
+         VMK_SCSI_ADAPTER_CAP_DRIVER_COMPL_WORLDS);
+   /* Stall driver loading if fail to set capabilities. */
+   if (vmkStatus != VMK_OK) {
+      Nvme_LogError("Fail to set capacity of multiple completion worlds.\n");
+      vmk_DMAEngineDestroy(ctrlr->scsiDmaEngine);
+      vmk_ScsiFreeAdapter(adapter);
+      return vmkStatus;
+   }
+#endif
 
    /* TODO: create NVMe transport */
    adapter->mgmtAdapter.transport = VMK_STORAGE_ADAPTER_PSCSI;

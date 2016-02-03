@@ -386,7 +386,11 @@ scsiIoCompleteCommand(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
       }
    }
    NvmeScsiCmd_SetReturnStatus(vmkCmd, nvmeStatus);
+#if NVME_MUL_COMPL_WORLD
+   Nvme_IOCOmpletionEnQueue(qinfo->ctrlr, vmkCmd);
+#else
    NvmeScsiCmd_CompleteCommand(vmkCmd);
+#endif
 
    NvmeCore_PutCmdInfo(qinfo, cmdInfo);
 }
@@ -618,7 +622,7 @@ NvmeIo_SubmitIo(struct NvmeNsInfo *ns, vmk_ScsiCommand *vmkCmd)
     * Note: we should prevent the mismatch between no. of SCSI completion queues
     * and no. of sq/cqs on the hardware.
     */
-   qid = vmk_ScsiCommandGetCompletionQueue(ctrlr->scsiAdapter, vmkCmd);
+   qid = OsLib_GetQueue(ctrlr, vmkCmd);
    if (qid >= ctrlr->numIoQueues) {
       /**
        * This could only happen if our driver has been quiesced before PSA
@@ -675,7 +679,7 @@ NvmeIo_SubmitDsm(struct NvmeNsInfo *ns, vmk_ScsiCommand *vmkCmd,
    int                      qid;
 
    ctrlr  = ns->ctrlr;
-   qid    = vmk_ScsiCommandGetCompletionQueue(ctrlr->scsiAdapter, vmkCmd);
+   qid = OsLib_GetQueue(ctrlr, vmkCmd);
    if (qid >= ctrlr->numIoQueues) {
       qid = 0;
    }

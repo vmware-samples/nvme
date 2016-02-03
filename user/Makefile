@@ -11,7 +11,7 @@
 #
 
 UWTOOL = nvmecli
-UWTOOL_VERSION = 1.0e.0.30-1vmw
+UWTOOL_VERSION = 1.0e.0.35-1vmw
 
 UWTOOL_SOURCES = nvme_cli.c nvme_lib.c nvme_mgmt_common.c
 DEV_COMMON_DIR = ../common
