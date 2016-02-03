@@ -1,0 +1,71 @@
+== NVMe driver logger and debug utils ==
+
+NVMe driver exposes 2 parameters for users to set log and debug level.
+
+1. nvme_log_level
+
+nvme_log_level determines the log level of nvme driver. There are 5 levels:
+
+   * 1 - error
+   * 2 - warning
+   * 3 - info (default)
+   * 4 - verbose
+   * 5 - debug
+
+Each level has its corresponding Marco. See the table below.  
+
+   +---------------------------------+
+   |  Num   |   Level   |   Macro    |
+   +--------+-----------+------------+
+   |   1    |   error   |   EPRINT   |
+   +--------+-----------+------------+
+   |   2    |   warning |   WPRINT   |
+   +--------+-----------+------------+
+   |   3    |   info    |   IPRINT   |
+   +--------+-----------+------------+
+   |   4    |   verbose |   VPRINT   |
+   +--------+-----------+------------+
+   |   5    |   debug   |   DPRINT   |
+   +---------------------------------+
+
+Log message is incremental, which means, when nvme_log_leve is set to 3 (info), message of which log number less than 3 shall be printed,including EPRINT, WPRINT, IPRINT. 
+When nvme_log_level is set to 5 (debug), all the logs with EPRINT, WPRINT, IPRINT, VPRINT, DPRINT shall be printed.
+
+2. nvme_dbg
+
+nvme_dbg is a 32 bitmap, used to distinguish different component levels, in order to avoid too many log spewing when log level set to 5 (debug), 
+
+  31                               15                              0
+  +----------------------------------------------------------------+
+  |   NVME_DEBUG_DUMP_x            |        DPRINT_x               |
+  +----------------------------------------------------------------+
+ 
+The lower 16 bits are used to print driver differnet components:
+
+   BIT_0:  DPRINT_CTRLR: Print ctrlr level log
+   BIT_1:  DPRINT_NS:    Print namespace level log
+   BIT_2:  DPRINT_Q:     Print queue level log
+   BIT_3:  DPRINT_CMD:   Print IO command level log
+   BIT_4:  DPRINT_ADMIN: Print admin command log
+   BIT_5:  DPRINT_MGMT:  Print management log
+   BIT_6:  DPRINT_EXC:   Print exception handler log
+   BIT_14: DPRINT_INIT:  Print init/cleanup log
+   BIT_15: DPRINT_TEMP:  Print temp log.
+
+
+The higher 16 bits are used to be switches for driver debug utils in nvme_debug.c:
+
+   BIT_16: NVME_DEBUG_DUMP_SG      NvmeDebug_DumpSgArray
+   BIT_17: NVME_DEBUG_DUMP_PRP     NvmeDebug_DumpPrps
+   BIT_18: NVME_DEBUG_DUMP_CDB     NvmeDebug_DumpCdb
+   BIT_19: NVME_DEBUG_DUMP_CMD     NvmeDebug_DumpCmd
+   BIT_20: NVME_DEBUG_DUMP_CPL     NvmeDebug_DumpCpl
+   BIT_21: NVME_DEBUG_DUMP_UIO     NvmeDebug_DumpUio
+   BIT_22: NVME_DEBUG_DUMP_NS      NvmeDebug_DumpNsInfo
+   BIT_23: NVME_DEBUG_DUMP_TIMEOUT NvmeDebug_DumpTimeoutInfo
+   BIT_24: NVME_DEBUG_DUMP_SMART   NvmeDebug_DumpSmart
+
+Usage:
+
+   setting nvme_log_level=5 nvme_dbg=0xf to enable DPRINT_CTRLR, DPRINT_NS, DPRINT_Q, DPRINT_CMD.
+   setting nvme_log_level=5 nvme_dbg=0x10000 to open switch for NvmeDebug_DumpSgArray.

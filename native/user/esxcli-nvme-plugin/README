@@ -1,0 +1,54 @@
+= Plugin of esxcli for NVMe device Management =
+
+== Description ==
+
+This is the plugin of esxcli for NVMe device management.
+
+== Change Log ==
+
+2015/9/7 1.2.0.7-1vmw
+
+   1. Set format timeout value as 30mins, some devices really need a long time to format.
+   2. Fix several typos in esxcli set/get feature.
+
+2015/7/1 1.2.0.6-1vmw
+
+   1. Unify the code convention of this plugin.
+   2. Enhance the process when namespace is already offline.
+   3. Fix several bugs:
+      a) Correct the right nsId instead of numNs in NvmePlugin_DeviceNsGet.
+      b) Fix the printing info in PirntErrorLog function.
+      c) Show other namespaces info when it fails to get device name of one namespace.
+
+2015/6/12 1.2.0.5-1vmw
+
+   Implement nvme.driver.loglevel.set functionality.
+
+2015/6/5 1.2.0.4-1vmw
+
+   Implement nvme.device.firmware.download/activate functionality.
+
+2015/5/29 1.2.0.3-1vmw
+
+   1. Implement nvme.device.feature.set/get/list functionality.
+   2. Implement nvme.device.log.get functionality.
+
+2015/5/15 1.2.0.2-1vmw
+
+   1. Implement nvme.device.namespace.format functionality.
+   2. Implement nvme.device.namespace.list functionality.
+
+2015/4/27 1.2.0.1-1vmw
+
+   Implement nvme.device.namespace.get functionality.
+
+2015/1/22 1.2.0.0-1vmw
+
+   Initial cut of esxcli plugin for NVMe devcie management. Implement build
+   infrastructure and stubs for NVMe esxcli extension.
+
+   This change adds the build support and stubs for the nvme esxcli extension.
+   The nvme esxcli extension is packaged as a standalone vib that includes an
+   XML document for providing the "nvme" esxcli namespace, and a binary named
+   esxcli-nvme-plugin under /opt/vmware/nvme/ for executing the esxcli
+   operations.

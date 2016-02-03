@@ -1,0 +1,345 @@
+<?xml version="1.0"?>
+<plugin xmlns="http://www.vmware.com/Products/ESX/5.0/esxcli/">
+   <version>1.0.0</version>
+
+   <namespaces>
+      <namespace path="nvme">
+         <description>VMware NVMe driver esxcli extensions</description>
+      </namespace>
+      <namespace path="nvme.device">
+      	<description>NVMe devices operations</description>
+      </namespace>
+      <namespace path="nvme.device.namespace">
+      	<description>NVMe namespaces operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature">
+      	<description>NVMe features operations</description>
+      </namespace>
+      <namespace path="nvme.device.log">
+      	<description>NVMe log page operations</description>
+      </namespace>
+      <namespace path="nvme.device.firmware">
+      	<description>NVMe firmware operations</description>
+      </namespace>
+      <namespace path="nvme.driver">
+      	<description>NVMe driver operations</description>
+      </namespace>
+      <namespace path="nvme.driver.loglevel">
+      	<description>NVMe driver log level operations</description>
+      </namespace>
+   </namespaces>
+
+   <commands>
+      <!-- esxcli nvme device list -->
+      <command path="nvme.device.list">
+         <description>List NVMe devices registered to VMware NVMe driver</description>
+         <input-spec />
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.list</execute>
+      </command>
+      <command path="nvme.device.get">
+         <description>Get NVMe device information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.get -A $val{adapter}</execute>
+      </command>
+      <!-- esxcli nvme device namespace list -->
+      <command path="nvme.device.namespace.list">
+         <description>List namespace on NVMe device</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.list -A $val{adapter}</execute>
+      </command>
+ 
+      <command path="nvme.device.namespace.get">
+         <description>Get nvme namespace information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="namespace" type="string" required="true" shortname="n">
+               <description>ID of namespace to get information from. ID starts from 1, "-n 0" prints all namespaces' info</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.get -A $val{adapter} -n $val{namespace}</execute>
+      </command>
+      <command path="nvme.device.namespace.format">
+         <description>Change namespace format</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="namespace" type="int" required="true" shortname="n">
+               <description>Namespace ID</description>
+            </parameter>
+            <parameter name="format" type="int" required="true" shortname="f">
+	       <description>LBA Format(LBAF)</description>
+            </parameter>
+            <parameter name="ses" type="int" required="true" shortname="s">
+               <description>Secure Erase Settings(SES). 0: No secure erase operation requested. 1: User Data Erase. 2: Cryptographic Erase.</description>
+            </parameter>
+            <parameter name="pi" type="int" required="true" shortname="p">
+               <description>Protection Information(PI). 0: Protection information is not enabled. 1: Protection information is enabled, Type 1. 2: Protection information is enabled, Type 2. 3: Protection information is enabled, Type 3.</description>
+            </parameter>
+            <parameter name="pil" type="int" required="true" shortname="l">
+               <description>Protection Information Location(PIL). 0: PI is transferred as the last eight bytes of metadata, if PI is enabled. 1: PI is transferred as the first eight bytes of metadata, if PI is enabled.</description>
+            </parameter>
+            <parameter name="ms" type="int" required="true" shortname="m">
+               <description>Metadata Settings(MS). 0: Metadata is transferred as part of a separate buffer. 1: Metadata is transferred as part of an extended data LBA.</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.format -A $val{adapter} -n $val{namespace} -f $val{format} -s $val{ses} -p $val{pi} -l $val{pil} -m $val{ms}</execute>
+      </command>
+      <command path="nvme.device.log.get">
+         <description>Get NVMe device log information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="logpage" type="int" required="true" shortname="l">
+	       <description>Log page identifier. 1: Error information (gloabal basis). 2: SMART/Health information (global or namespace basis). 3: Firmware Slot Information (global basis).</description>
+            </parameter>
+            <parameter name="namespace" type="int" required="false" shortname="n">
+               <description>Namespace ID. If log page is supported on a per namespace basis this value indicates the ID of namespace you wish to get log from. This parameter can be omitted to request global log page.</description>
+            </parameter>
+            <parameter name="elpe" type="int" required="false" shortname="e">
+	       <description>Error log page entries. If -l parameter is 1(error information) this value indicates the number of log entries you wish to get. The maximum number of entries supported is device-specific.</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l $val{logpage} $if{namespace,-n $val{namespace}} $if{elpe,-e $val{elpe}}</execute>
+      </command>
+      <command path="nvme.device.feature.list">
+         <description>List all NVMe device feature information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.list -A $val{adapter}</execute>
+      </command>
+      <command path="nvme.device.feature.get">
+         <description>Get NVMe device feature information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="feature" type="string" required="true" shortname="f">
+               <description>
+Feature name to get:
+   arbitration
+   pwr_management
+   lba_range_type
+   temp_threshold
+   err_recovery
+   write_cache
+   num_queue
+   int_coalescing
+   int_vector_config
+   write_atomicity
+   asyn_event_config
+   sw_progress_marker
+</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f $val{feature}</execute>
+      </command>
+      <command path="nvme.device.feature.set">
+         <description>Set NVMe device feature information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="feature" type="string" required="true" shortname="f">
+               <description>
+Feature name to set
+   arbitration
+      -v ArbitrationBurst            [0, 7]
+      -x LowPriorityWeight           [0, 255]
+      -y MediumPriorityWeight        [0, 255]
+      -z HighPriorityWeight          [0, 255]
+   pwr_management
+      -v PowerState                  [0, NumPowerState]
+   lba_range_type
+      Not Supported
+   temp_threshold
+      -v TemperatureThreshold        [0, 65535 K]
+   err_recovery
+      -v TimeLimitedErrorRecovery    [0, 65535]
+   write_cache
+      -v VolitileWriteCacheEnabled   [0, 1]
+   num_queue
+      Not Supported
+   int_coalescing
+      -v AggregationThreshold        [0, 255]
+      -x AggregationTime             [0, 255]
+   int_vector_config
+      -v IntterupVector              [0, NumIntVector]
+      -x CoalescingDisable           [0, 1]
+   write_atomicity
+      -v DisableNormal               [0, 1]
+   asyn_event_config
+      -v SMARTHealthCriticalWarnings [0, 255]
+   sw_progress_marker
+      Not Supported
+</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>First value to be set</description>
+            </parameter>
+             <parameter name="value2" type="int" required="false" shortname="x">
+               <description>Second value to be set</description>
+            </parameter>
+             <parameter name="value3" type="int" required="false" shortname="y">
+               <description>Third value to be set</description>
+            </parameter>
+             <parameter name="value4" type="int" required="false" shortname="z">
+               <description>Forth value to be set</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f $val{feature} -v $val{value} $if{value2, -x $val{value2}} $if{value3, -y $val{value3}} $if{value4, -z $val{value4}}</execute>
+      </command>
+      <command path="nvme.device.firmware.download">
+         <description>Download firmware image to a specific slot</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="firmware" type="string" required="true" shortname="f">
+	       <description>Firmware image path</description>
+            </parameter>
+            <parameter name="slot" type="int" required="true" shortname="s">
+               <description>Slot number</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.download -A $val{adapter} -f $val{firmware} -s $val{slot}</execute>
+      </command>
+      <command path="nvme.device.firmware.activate">
+         <description>Activate firmware image in a specific slot</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="slot" type="int" required="true" shortname="s">
+               <description>Slot number</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.activate -A $val{adapter} -s $val{slot}</execute>
+      </command>
+      <command path="nvme.driver.loglevel.set">
+         <description>Set NVMe driver log level and debug level</description>
+         <input-spec>
+            <parameter name="loglevel" type="int" required="true" shortname="l">
+	       <description>
+Log level. This value is used to manupulate NVMe driver parameter: nvme_log_level.
+   1: error
+   2: warning
+   3: info
+   4: verbose
+   5: debug
+	       </description>
+            </parameter>
+            <parameter name="debuglevel" type="string" required="false" shortname="d">
+	       <description>
+Debug level(hex int format). When log level is 5, this value is used to manupulate NVMe driver parameter: nvme_dbg. This parameter can be omitted to indicate value 0.
+   BIT_0:  Print ctrlr level log
+   BIT_1:  Print namespace level log
+   BIT_2:  Print queue level log
+   BIT_3:  Print IO command level log
+   BIT_4:  Print admin command level log
+   BIT_5:  Print management level log
+   BIT_6:  Print exception handler log
+   BIT_14: Print init/cleanup log
+   BIT_15: Print temp log
+   BIT_16: Dump SG array
+   BIT_17: Dump PRP
+   BIT_18: Dump cdb
+   BIT_19: Dump NVM command
+   BIT_20: Dump completion queue entry
+   BIT_21: Dump user passthru data
+   BIT_22: Dump namespace info
+   BIT_23: Dump timeout info
+   BIT_24: Dump smart log info
+	       </description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.driver.loglevel.set -l $val{loglevel} $if{debuglevel, -d $val{debuglevel}}</execute>
+      </command>
+   </commands>
+</plugin>

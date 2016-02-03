@@ -1,0 +1,12 @@
+= Sample Userworld Management Tool =
+
+== Description ==
+
+This is sample userworld management tool for NVMe device.
+
+== Change Log ==
+
+2014/12/29 1.2.0.5-1vmw
+
+   From this version, We decouple the versions of NVMe driver and nvmecli.
+   For previous changelog, please refer to #nvme/native/kernel/README.
