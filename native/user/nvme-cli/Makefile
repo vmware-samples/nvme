@@ -11,11 +11,13 @@
 #
 
 UWTOOL = nvmecli
-UWTOOL_VERSION = 1.2.0.5-1vmw
+UWTOOL_VERSION = 1.2.0.7-1vmw
 
 UWTOOL_SOURCES = nvme_cli.c nvme_lib.c nvme_mgmt_common.c
-UWTOOL_INCLUDES = -I../../../common/kernel -I../../kernel
+UWTOOL_INCLUDES = -I../../../common/kernel -I../../kernel -I../esxcli-nvme-plugin
 DEV_COMMON_DIR = ../../kernel
+
+vpath nvme_lib.c ../esxcli-nvme-plugin
 
 DESC_VENDOR_EMAIL=nvmexpress@vmware.com
 DESC_VERSION=$(UWTOOL_VERSION)

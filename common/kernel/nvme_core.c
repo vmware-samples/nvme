@@ -66,6 +66,9 @@ const char * Nvme_StatusString[] = {
    "FAILURE",
    "MEDIA ERROR",
    "OVERTEMP",
+   "GUARD CHECK ERROR",
+   "APPLICATION TAG CHECK ERROR",
+   "REFERENCE TAG CHECK ERROR",
    "(invalid)",
 };
 
@@ -206,8 +209,41 @@ NvmeCore_ValidateNs(struct NvmeNsInfo *ns)
       goto out;
    }
 
+#if NVME_PROTECTION
    /**
-    * We don't support metadata for now.
+    * We only support 8-byte metadata.
+    */
+   if ((ns->metasize != 8) && (ns->metasize != 0)) {
+      EPRINT("Metadata not supported, current metadata size: %d.",
+             ns->metasize);
+      goto out;
+   }
+   /**
+    * We only support protection information as metadata.
+    */
+   if ((ns->metasize == 8) && (END2END_DPS_TYPE(ns->dataProtSet) == 0)) {
+      EPRINT("Metadata without protection info not supported.");
+      goto out;
+   }
+   /**
+    * We only support metadata as part of separate buffer.
+    */
+   if ((ns->metasize == 8) && (ns->fmtLbaSize & 0x10)) {
+      EPRINT("Metadata as part of extended LBA not supported.");
+      goto out;
+   }
+
+   /**
+    * Some device could be formatted successfully with metasize=0 while PI enabled,
+    * but it should be an invalid format.
+    */
+   if (ns->metasize == 0 && END2END_DPS_TYPE(ns->dataProtSet)) {
+      EPRINT("Invalid format: metadata size is 0 but PI is enabled.");
+      goto out;
+   }
+#else
+   /**
+    * We don't support metadata.
     */
    if (ns->metasize != 0) {
       EPRINT("Metadata not supported, current metadata size: %d.",
@@ -216,13 +252,14 @@ NvmeCore_ValidateNs(struct NvmeNsInfo *ns)
    }
 
    /**
-    * PI not implemented yet
+    * We don't support PI.
     */
    if (ns->dataProtSet) {
       EPRINT("Data Protection not supported, set 0x%x.",
              ns->dataProtSet);
       goto out;
    }
+#endif
 
    return VMK_OK;
 
@@ -440,8 +477,14 @@ NvmeCore_GetStatus(struct cq_entry *cqEntry)
                   nvmeStatus = NVME_STATUS_IO_READ_ERROR;
                   break;
                case SC_MEDIA_ERR_ETE_GUARD_CHK:
+                  nvmeStatus = NVME_STATUS_GUARD_CHECK_ERROR;
+                  break;
                case SC_MEDIA_ERR_ETE_APP_TAG_CHK:
+                  nvmeStatus = NVME_STATUS_APP_CHECK_ERROR;
+                  break;
                case SC_MEDIA_ERR_ETE_REF_TAG_CHK:
+                  nvmeStatus = NVME_STATUS_REF_CHECK_ERROR;
+                  break;
                case SC_MEDIA_ERR_CMP_FAIL:
                default:
                   nvmeStatus = NVME_STATUS_MEDIUM_ERROR;
@@ -1066,11 +1109,6 @@ NvmeCore_SubmitCommandPoll(struct NvmeQueueInfo *qinfo,
 void
 NvmeCore_ProcessQueueCompletions(struct NvmeQueueInfo *qinfo)
 {
-   /**
-    * Call process cq twice, to make sure that all the completed commands in
-    * the cq are processed, regardless the phase bit status.
-    */
-   nvmeCoreProcessCq(qinfo, 0);
    nvmeCoreProcessCq(qinfo, 0);
 }
 
@@ -1277,13 +1315,6 @@ Nvme_Status NvmeCore_FlushQueue(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo* 
 #if ENABLE_REISSUE
       if  (doReissue) {
          /**
-          * Do not return to the SCSI stack, commands that are not targeted to
-          * the namespace passed as an argument.
-          */
-         if (ns && (cmdInfo->ns == ns)) {
-            goto abort_cmd;
-         }
-         /**
           * Do not return to the SCSI stack, commands that timed out.
           */
          if ((newId >= 0) && (cmdInfo->timeoutId == newId)) {
@@ -1297,7 +1328,7 @@ abort_cmd:
 #endif
       cmdInfo->cmdStatus = status;
       if (cmdInfo->done) {
-         DPRINT_CMD("aborting cmd %p [%d], status %d %s.", cmdInfo, cmdInfo->cmdId, status,
+         VPRINT("aborting cmd %p [%d], status %d %s.", cmdInfo, cmdInfo->cmdId, status,
                  NvmeCore_StatusToString(status));
          cmdInfo->done(qinfo, cmdInfo);
       } else {

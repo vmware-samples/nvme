@@ -35,6 +35,7 @@
 
 #define Error(fmt, ...) \
    do {                             \
+      printf("ERROR: ");   \
       printf(fmt, ##__VA_ARGS__);   \
    } while (0)
 
@@ -62,212 +63,246 @@ static const char *nvmNsRelPerf[] = {
 static void
 PrintIdentifyCtrlr(struct iden_controller *id)
 {
-   PrintString(
-      "   PCI Vendor ID:                                          0x%04x\n"
-      "   PCI Subsystem Vendor ID:                                0x%04x\n"
-      "   Serial Number:                                          %.20s\n"
-      "   Model Number:                                           %.40s\n"
-      "   Firmware Revision:                                      %.8s\n"
-      "   Recommended Arbitration Burst:                          %d\n"
-      "   IEEE OUI:                                               0x%02x%02x%02x\n"
-      "   Optional Admin Command Support:                         0x%04x\n"
-      "      Firmware Activate And Download Support:              0x%x\n"
-      "      Format NVM Support:                                  0x%x\n"
-      "      Security Send And Receive Support:                   0x%x\n"
-      "   Abort Command Limit (0's based):                        %d\n"
-      "   Asynchronous Event Request Limit (0's based):           %d\n"
-      "   Firmware Updates:                                       0x%02x\n"
-      "      Firmware Activate Without Reset Support:             0x%x\n"
-      "      Number of Firmware Slot:                             %d\n"
-      "      The First Slot Is Read-Only:                         0x%x\n"
-      "   Log Page Attributes:                                    0x%02x\n"
-      "      Command Effects Log Page Support:                    0x%x\n"
-      "      SMART/Health Log Page Per Namespace Support:         0x%x\n"
-      "   Error Log Page Entries (0's based):                     %d\n"
-      "   Number of Power States Support (0's based):             %d\n"
-      "   Admin Vendor Specific Command Configuration:            0x%02x\n"
-      "      Same Format for Admin Vendor Specific Cmd:           0x%x\n"
-      "   Submission Queue Entry Size:                            0x%02x\n"
-      "      Max Submission Queue Entry Size:                     %d Bytes\n"
-      "      Min Submission Queue Entry Size:                     %d Bytes\n"
-      "   Completion Queue Entry Size:                            0x%02x\n"
-      "      Max Completion Queue Entry Size:                     %d Bytes\n"
-      "      Min Completion Queue Entry Size:                     %d Bytes\n"
-      "   Number of Namespaces:                                   %d\n"
-      "   Optional NVM Command Support:                           0x%04x\n"
-      "      Reservations Support:                                %d\n"
-      "      Save/Select Filed in Set/Get Feature Support:        %d\n"
-      "      Write Zeroes Command Support:                        %d\n"
-      "      Dataset Management Support:                          %d\n"
-      "      Write Uncorrectable Command Support:                 %d\n"
-      "      Compare Command Support:                             %d\n"
-      "   Fused Operation Support:                                0x%04x\n"
-      "      Fused Operation Support:                             0x%x\n"
-      "   Format NVM Attributes:                                  0x%02x\n"
-      "      Cryptographic Erase Support:                         0x%x\n"
-      "      Cryptographic And User Data Erase To All Namespaces: 0x%x\n"
-      "      Format To All Namespaces:                            0x%x\n"
-      "   Volatile Write Cache:                                   0x%02x\n"
-      "      Volatile Write Cache Is Present:                     0x%x\n"
-      "   Atomic Write Unit Normal:                               0x%04x\n"
-      "   Atomic Write Unit Power Fail:                           0x%04x\n"
-      "   NVM Vendor Specific Command Configuration:              0x%02x\n"
-      "      Same Format for All NVM Vendor Specific Command:     0x%x\n",
-      id->pcieVID, id->pcieSSVID, id->serialNum, id->modelNum,
-      id->firmwareRev, id->arbBurstSize, id->ieeeOui[2], id->ieeeOui[1],
-      id->ieeeOui[0], id->adminCmdSup, (id->adminCmdSup & 0x4) >> 2,
-      (id->adminCmdSup & 0x2) >> 1, id->adminCmdSup & 0x1, id->abortCmdLmt,
-      id->asyncReqLmt, id->firmUpdt, (id->firmUpdt & 0x10) >> 4,
-      (id->firmUpdt & 0xe) >> 1, id->firmUpdt & 0x1, id->logPgAttrib,
-      (id->logPgAttrib & 0x2) >> 1, id->logPgAttrib & 0x1, id->errLogPgEntr,
-      id->numPowerSt, id->admVendCmdCfg, id->admVendCmdCfg & 0x1, id->subQSize,
-      1 << ((id->subQSize & 0xf0) >> 4), 1 << (id->subQSize & 0xf), id->compQSize,
-      1 << ((id->compQSize & 0xf0) >> 4), 1 << (id->compQSize & 0xf), id->numNmspc,
-      id->cmdSupt, (id->cmdSupt & 0x20) >> 5, (id->cmdSupt & 0x10) >> 4, (id->cmdSupt & 0x8) >> 3,
-      (id->cmdSupt & 0x4) >> 2, (id->cmdSupt & 0x2) >> 1, id->cmdSupt & 0x1,
-      id->fuseSupt, id->fuseSupt & 0x1, id->cmdAttrib, (id->cmdAttrib & 0x4) >> 2,
-      (id->cmdAttrib & 0x2) >> 1, id->cmdAttrib & 0x1, id->volWrCache,
-      id->volWrCache & 0x1, id->atomWrNorm, id->atomWrFail, id->nvmVendCmdCfg,
-      id->nvmVendCmdCfg & 0x1);
-
+   esxcli_xml_begin_output();
+   xml_struct_begin("DeviceInfo");
+   PINTS("PCIVID", id->pcieVID);
+   PINTS("PCISSVID", id->pcieSSVID);
+   xml_field_begin("Serial Number");
+   printf("<string>%.20s</string>", id->serialNum);
+   xml_field_end();
+   xml_field_begin("Model Number");
+   printf("<string>%.40s</string>", id->modelNum);
+   xml_field_end();
+   xml_field_begin("Firmware Revision");
+   printf("<string>%.8s</string>", id->firmwareRev);
+   xml_field_end();
+   PINT("Recommended Arbitration Burst", id->arbBurstSize);
+   xml_field_begin("IEEE OUI Identifier");
+   printf("<string>%02x%02x%02x</string>", id->ieeeOui[2], id->ieeeOui[1],
+          id->ieeeOui[0]);
+   xml_field_end();
+   PBOOL("Controller Associated with an SR-IOV Virtual Function", id->cmic.sriov);
+   PBOOL("Controller Associated with a PCI Function", !id->cmic.sriov);
+   PBOOL("NVM Subsystem May Contain Two or More Controllers", id->cmic.mulCtrlrs);
+   PBOOL("NVM Subsystem Contains Only One Controller", !id->cmic.mulCtrlrs);
+   PBOOL("NVM Subsystem May Contain Two or More PCIe Ports", id->cmic.mulPorts);
+   PBOOL("NVM Subsystem Contains Only One PCIe Port", !id->cmic.mulPorts);
+   PINT("Max Data Transfer Size", id->mdts);
+   PINT("Controller ID", id->cntlId);
+   xml_field_begin("Version");
+   printf("<string>%d.%d</string>", id->ver.mjr, id->ver.mnr);
+   xml_field_end();
+   PINT("RTD3 Resume Latency", id->rtd3r);
+   PINT("RTD3 Entry Latency", id->rtd3e);
+   PBOOL("Optional Namespace Attribute Changed Event Support", id->oaes.nsChgEvent);
+   PBOOL("Namespace Management and Attachment Support", id->adminCmdSup & 0x8);
+   PBOOL("Firmware Activate and Download Support", id->adminCmdSup & 0x4);
+   PBOOL("Format NVM Support", id->adminCmdSup & 0x2);
+   PBOOL("Security Send and Receive Support", id->adminCmdSup & 0x1);
+   PINT("Abort Command Limit", id->abortCmdLmt);
+   PINT("Async Event Request Limit", id->asyncReqLmt);
+   PBOOL("Firmware Activate Without Reset Support", id->firmUpdt & 0x10);
+   PINT("Firmware Slot Number", (id->firmUpdt & 0xe) >> 1);
+   PBOOL("The First Slot Is Read-only", id->firmUpdt & 0x1);
+   PBOOL("Command Effects Log Page Support", id->logPgAttrib & 0x2);
+   PBOOL("SMART/Health Information Log Page per Namespace Support",
+         id->logPgAttrib & 0x1);
+   PINT("Error Log Page Entries", id->errLogPgEntr);
+   PINT("Number of Power States Support", id->numPowerSt);
+   PBOOL("Format of Admin Vendor Specific Commands Is Same", id->admVendCmdCfg & 0x1);
+   PBOOL("Format of Admin Vendor Specific Commands Is Vendor Specific",
+         (id->admVendCmdCfg & 0x1) == 0);
+   PBOOL("Autonomous Power State Transitions Support", id->apsta.autoPowerStX);
+   PINT("Warning Composite Temperature Threshold", id->wcTemp);
+   PINT("Critical Composite Temperature Threshold", id->ccTemp);
+   PINT("Max Time for Firmware Activation", id->mtfa);
+   PINT("Host Memory Buffer Preferred Size", id->hmPre);
+   PINT("Host Memory Buffer Min Size", id->hmMin);
+   P128BIT("Total NVM Capacity", id->tNVMCap);
+   P128BIT("Unallocated NVM Capacity", id->uNVMCap);
+   PINT("Access Size", id->rpmbs.accessSize);
+   PINT("Total Size", id->rpmbs.accessSize);
+   PINT("Authentication Method", id->rpmbs.authMethod);
+   PINT("Number of RPMB Units", id->rpmbs.rpmbUnitsNum);
+   PINT("Max Submission Queue Entry Size", 1 << ((id->subQSize & 0xf0) >> 4));
+   PINT("Required Submission Queue Entry Size", 1 << (id->subQSize & 0xf));
+   PINT("Max Completion Queue Entry Size", 1 << ((id->compQSize & 0xf0) >> 4));
+   PINT("Required Completion Queue Entry Size", 1 << (id->compQSize & 0xf));
+   PINT("Number of Namespaces", id->numNmspc);
+   PBOOL("Reservation Support", (id->cmdSupt & 0x20) >> 5);
+   PBOOL("Save/Select Field in Set/Get Feature Support", (id->cmdSupt & 0x10) >> 4);
+   PBOOL("Write Zeroes Command Support", (id->cmdSupt & 0x8) >> 3);
+   PBOOL("Dataset Management Command Support", (id->cmdSupt & 0x4) >> 2);
+   PBOOL("Write Uncorrectable Command Support", (id->cmdSupt & 0x2) >> 1);
+   PBOOL("Compare Command Support", id->cmdSupt & 0x1);
+   PBOOL("Fused Operation Support", id->fuseSupt & 0x1);
+   PBOOL("Cryptographic Erase as Part of Secure Erase Support",
+         (id->cmdAttrib & 0x4) >> 2);
+   PBOOL("Cryptographic Erase and User Data Erase to All Namespaces",
+         (id->cmdAttrib & 0x2) >> 1);
+   PBOOL("Cryptographic Erase and User Data Erase to One Particular Namespace",
+         ((id->cmdAttrib & 0x2) >> 1) == 0);
+   PBOOL("Format Operation to All Namespaces", id->cmdAttrib & 0x1);
+   PBOOL("Format Opertaion to One Particular Namespace", (id->cmdAttrib & 0x1) == 0);
+   PBOOL("Volatile Write Cache Is Present", id->volWrCache & 0x1);
+   PINT("Atomic Write Unit Normal", id->atomWrNorm);
+   PINT("Atomic Write Unit Power Fail", id->atomWrFail);
+   PBOOL("Format of All NVM Vendor Specific Commands Is Same", id->nvmVendCmdCfg & 0x1);
+   PBOOL("Format of All NVM Vendor Specific Commands Is Vendor Specific",
+         (id->nvmVendCmdCfg & 0x1) == 0);
+   PINT("Atomic Compare and Write Unit", id->acwu);
+   PBOOL("SGL Length Able to Larger than Data Amount", id->sgls.sglsLargerThanData);
+   PBOOL("SGL Length Shall Be Equal to Data Amount", (id->sgls.sglsLargerThanData == 0));
+   PBOOL("Byte Aligned Contiguous Physical Buffer of Metadata Support",
+         id->sgls.byteAlignedContPhyBufSup);
+   PBOOL("SGL Bit Bucket Descriptor Support", id->sgls.sglsBitBuckDescSup);
+   PBOOL("SGL for NVM Command Set Support", id->sgls.sglsSup);
+   xml_struct_end();
+   esxcli_xml_end_output();
 }
 
 static void
 PrintIdentifyNs(struct iden_namespace *idNs)
 {
    int lbaIndex;
-
-   PrintString(
-      "   Namespace Size:                                %llu logical blocks\n"
-      "   Namespace Capacity:                            %llu logical blocks\n"
-      "   Namespace Utilization:                         %llu logical blocks\n"
-      "   Namespace Features:                            0x%02x\n"
-      "      Deallocated/Unwritten Logical Block Error:  0x%x\n"
-      "      Namespace Atomic Support:                   0x%x\n"
-      "      Thin Provisioning Suppprot:                 0x%x\n"
-      "   Number of LBA Formats:                         0x%02x\n"
-      "   Formatted LBA Size:                            0x%02x\n"
-      "      Extended Metadata:                          0x%x\n"
-      "      LBA Format:                                 0x%x\n"
-      "   Metadata Capabilities:                         0x%02x\n"
-      "      Metadata as Seperate Buffer Capability:     0x%x\n"
-      "      Metadata as Extended Buffer Capability:     0x%x\n"
-      "   End-to-end Data Protection Capabilities:       0x%02x\n"
-      "      PI in Last 8 Bytes of Metadata Capability:  0x%x\n"
-      "      PI in First 8 Bytes of Metadata Capability: 0x%x\n"
-      "      PI Type 3 Capability:                       0x%x\n"
-      "      PI Type 2 Capability:                       0x%x\n"
-      "      PI Type 1 Capability:                       0x%x\n"
-      "   End-to-end Data Protection Type Settings:      0x%02x\n" ,
-      idNs->size, idNs->capacity, idNs->utilization,
-      idNs->feat, (idNs->feat & 0x4) >> 2, (idNs->feat & 0x2) >> 1, idNs->feat & 0x1,
-      idNs->numLbaFmt, idNs->fmtLbaSize, (idNs->fmtLbaSize & 0x10) >> 4, 
-      idNs->fmtLbaSize & 0xf, idNs->metaDataCap, (idNs->metaDataCap & 0x2) >> 1, 
-      idNs->metaDataCap & 0x1, idNs->dataProtCap, (idNs->dataProtCap & 0x10) >> 4,
-      (idNs->dataProtCap & 0x8) >> 3, (idNs->dataProtCap & 0x4) >> 2,
-      (idNs->dataProtCap & 0x2) >> 1, idNs->dataProtCap & 0x1, idNs->dataProtSet);
-
+   esxcli_xml_begin_output();
+   xml_struct_begin("NamespaceInfo");
+   PULL("Namespace Size", idNs->size);
+   PULL("Namespace Capacity", idNs->capacity);
+   PULL("Namespace Utilization", idNs->utilization);
+   PBOOL("Thin Provisioning Support", idNs->feat & 0x1);
+   PBOOL("Namespace Atomic Support", (idNs->feat & 0x2) >> 1);
+   PBOOL("Deallocated or Unwritten Logical Block Error Support", (idNs->feat & 0x4) >> 2);
+   PINT("Number of LBA Formats", idNs->numLbaFmt);
+   PINT("LBA Format", idNs->fmtLbaSize & 0xf);
+   PBOOL("Extended Metadata", (idNs->fmtLbaSize & 0x10) >> 4);
+   PBOOL("Metadata as Seperate Buffer Support", (idNs->metaDataCap & 0x2) >> 1);
+   PBOOL("Metadata as Extended Buffer Support", idNs->metaDataCap & 0x1);
+   PBOOL("PI Type 1 Support", idNs->dataProtCap & 0x1);
+   PBOOL("PI Type 2 Support", (idNs->dataProtCap & 0x2) >> 1);
+   PBOOL("PI Type 3 Support", (idNs->dataProtCap & 0x4) >> 2);
+   PBOOL("PI in First Eight Bytes of Metadata Support", (idNs->dataProtCap & 0x8) >> 3);
+   PBOOL("PI in Last Eight Bytes of Metadata Support", (idNs->dataProtCap & 0x10) >> 4);
+   PINT("PI Enabled Type", idNs->dataProtSet & 0x3);
    if (idNs->dataProtSet & 0x3) {
-      PrintString("      PI Type %d\n", idNs->dataProtSet & 0x3);
-      if (idNs->dataProtSet & 0x8) {
-         PrintString("      Setting PI in Last 8 Bytes of Metadata\n");
-      } else {
-         PrintString("      Setting PI in First 8 Bytes of Metadata\n");
-      }
+      PSTR("MetaData Location",
+           idNs->dataProtSet & 0x8 ? "First Eight Bytes" : "Last Eight Bytes");
    } else {
-      PrintString("      PI Disabled\n");
+      PSTR("MetaData Location", "PI Disabled");
    }
- 
-   PrintString("   LBA Format Support: \n");
-   for (lbaIndex = 0; lbaIndex <= idNs->numLbaFmt; lbaIndex ++) {
-      PrintString("   %02d | Metadata Size: %5u, LBA Data Size: %5d, Relative Performance: %s\n",
-         lbaIndex, idNs->lbaFmtSup[lbaIndex].metaSize,
-         1 << idNs->lbaFmtSup[lbaIndex].dataSize,
-         nvmNsRelPerf[idNs->lbaFmtSup[lbaIndex].relPerf]);
+   PBOOL("Namespace Shared by Multiple Controllers", idNs->nmic.sharedNs);
+   PBOOL("Persist Through Power Loss Support", idNs->resCap.pstThruPowerLoss);
+   PBOOL("Write Exclusive Reservation Type Support", idNs->resCap.wrExcResv);
+   PBOOL("Exclusive Access Reservation Type Support", idNs->resCap.excAcsResv);
+   PBOOL("Write Exclusive Registrants Only Reservation Type Support",
+         idNs->resCap.wrExcRegOnlyResv);
+   PBOOL("Exclusive Access Registrants Only Reservation Type Support",
+         idNs->resCap.excAcsRegOnlyResv);
+   PBOOL("Write Exclusive All Registrants Reservation Type Support",
+         idNs->resCap.wrExcAllRegOnlyResv);
+   PBOOL("Exclusive Access All Registrants Reservation Type Support",
+         idNs->resCap.excAcsAllRegOnlyResv);
+   PBOOL("Format Progress Indicator Support", idNs->fpi.fmtProgIndtSup);
+   PINT("Percentage Remains to Be Formatted", idNs->fpi.pctRemFmt);
+   PINT("Namespace Atomic Write Unit Normal", idNs->nawun);
+   PINT("Namespace Atomic Write Unit Power Fail", idNs->nawupf);
+   PINT("Namespace Atomic Compare and Write Unit", idNs->nacwu);
+   PINT("Namespace Atomic Boundary Size Normal", idNs->nabsn);
+   PINT("Namespace Atomic Boundary Offset", idNs->nabo);
+   PINT("Namespace Atomic Boundary Size Power Fail", idNs->nabspf);
+   P128BIT("NVM Capacity", idNs->NVMCap);
+   xml_field_begin("Namespace Globally Unique Identifier");
+   printf("<string>0x%.16llx%.16llx</string>\n", *(vmk_uint64 *)idNs->nguid.extId,
+          *(vmk_uint64 *)idNs->nguid.vendorSpecExtId);
+   xml_field_end();
+   PULL("IEEE Extended Unique Identifier", (unsigned long long int)idNs->eui64);
+   xml_field_begin("LBA Format Support");
+   xml_list_begin("structure");
+      for (lbaIndex = 0; lbaIndex <= idNs->numLbaFmt; lbaIndex ++) {
+         xml_struct_begin("LBAFormatSupport");
+         PINT("Format ID", lbaIndex);
+         PINT("Metadata Size", idNs->lbaFmtSup[lbaIndex].metaSize);
+         PINT("LBA Data Size", 1 << idNs->lbaFmtSup[lbaIndex].dataSize);
+         PSTR("Relative Performance", nvmNsRelPerf[idNs->lbaFmtSup[lbaIndex].relPerf]);
+         xml_struct_end();
    }
+   xml_list_end();
+   xml_field_end();
+   xml_struct_end();
+   esxcli_xml_end_output();
 }
 
 static void
 PrintErrLog(struct error_log * errLog)
 {
-   PrintString(
-	 "Error Count: %llu\n"
-	 "Submission Queue ID: 0x%x\n"
-	 "Command ID: 0x%x\n"
-	 "Status Field: 0x%x\n"
-	 "Parameter Error Location: 0x%x\n"
-	 "   Byte in Command That Contained the Error: %d\n"
-	 "   Bit in Command That Contained the Error: %d\n"
-	 "LBA: 0x%llx\n"
-	 "Namespace: 0x%x\n"
-	 "Vendor Specific Infomation Available: 0x%x\n",
-	 errLog->errorCount, errLog->sqID,
-	 errLog->cmdID, errLog->status,
-	 ((vmk_uint16*)errLog)[7], errLog->errorByte,
-	 errLog->errorBit, errLog->lba,
-	 errLog->nameSpace, errLog->vendorInfo);
+   xml_struct_begin("ErrorInfo");
+   PULL("Error Count", errLog->errorCount);
+   PINT("Submission Queue ID", errLog->sqID);
+   PINT("Command ID", errLog->cmdID);
+   PINT("Status Field", errLog->status);
+   PINT("Byte in Command That Contained the Error", errLog->errorByte);
+   PINT("Bit in Command That Contained the Error", errLog->errorBit);
+   PULL("LBA", errLog->lba);
+   PINT("Namespace", errLog->nameSpace);
+   PINT("Vendor Specific Information Available", errLog->vendorInfo);
+   xml_struct_end();
 }
 
 static void
 PrintSmartLog(struct smart_log * smartLog)
 {
-   PrintString(
-	 "Critical Warning: 0x%x\n"
-	 "   Availabel Spare Space Below Threshold: %d\n"
-	 "   Temperature Above an Over Temperature Threshold or Below an Under Temperature Threshold: %d\n"
-	 "   NVM Subsystem Reliability Degradation: %d\n"
-	 "   Read Only Mode: %d\n"
-	 "   Volatile Memory Backup Device Failure: %d\n"
-	 "Composite Temperature: %d K\n" 
-	 "Available Spare: %d%%\n"
-	 "Available Spare Threshold: %d%%\n"
-	 "Percentage Used: %d%%\n"
-	 "Data Units Read (reported in 1000 units of 512 bytes): 0x%llx%llx\n"
-	 "Data Units Written (reported in 1000 units of 512 bytes): 0x%llx%llx\n"
-	 "Host Read Commands: 0x%llx%llx\n"
-	 "Host Write Commands: 0x%llx%llx\n"
-	 "Controller Busy Time: 0x%llx%llx\n"
-	 "Power Cycles: 0x%llx%llx\n"
-	 "Power On Hours: 0x%llx%llx\n"
-	 "Unsafe Shutdowns: 0x%llx%llx\n"
-	 "Media Errors: 0x%llx%llx\n"
-	 "Number of Error Info Log Entries: 0x%llx%llx\n",
-	 smartLog->criticalError, smartLog->criticalError & 0x1,
-	 (smartLog->criticalError & 0x2) >> 1, (smartLog->criticalError & 0x4) >> 2,
-	 (smartLog->criticalError & 0x8) >> 3, (smartLog->criticalError & 0x10) >> 4,
-	 *(vmk_uint16 *)smartLog->temperature, smartLog->availableSpace,
-	 smartLog->availableSpaceThreshold, smartLog->precentageUsed,
-	 *(vmk_uint64 *)&smartLog->dataUnitsRead[0], *(vmk_uint64 *)&smartLog->dataUnitsRead[4],
-	 *(vmk_uint64 *)&smartLog->dataUnitsWritten[0], *(vmk_uint64 *)&smartLog->dataUnitsWritten[4],
-	 *(vmk_uint64 *)&smartLog->hostReadCommands[0], *(vmk_uint64 *)&smartLog->hostReadCommands[4],
-	 *(vmk_uint64 *)&smartLog->hostWriteCommands[0], *(vmk_uint64 *)&smartLog->hostWriteCommands[4],
-	 *(vmk_uint64 *)&smartLog->controllerBusyTime[0], *(vmk_uint64 *)&smartLog->controllerBusyTime[4],
-	 *(vmk_uint64 *)&smartLog->powerCycles[0], *(vmk_uint64 *)&smartLog->powerCycles[4],
-	 *(vmk_uint64 *)&smartLog->powerOnHours[0], *(vmk_uint64 *)&smartLog->powerOnHours[4],
-	 *(vmk_uint64 *)&smartLog->unsafeShutdowns[0], *(vmk_uint64 *)&smartLog->unsafeShutdowns[4],
-	 *(vmk_uint64 *)&smartLog->mediaErrors[0], *(vmk_uint64 *)&smartLog->mediaErrors[4],
-	 *(vmk_uint64 *)&smartLog->numberOfErrorInfoLogs[0], *(vmk_uint64 *)&smartLog->numberOfErrorInfoLogs[4]);
+   esxcli_xml_begin_output();
+   xml_struct_begin("SMARTInfo");
+   PBOOL("Available Spare Space Below Threshold", smartLog->criticalError & 0x1);
+   PBOOL("Temperature Warning", (smartLog->criticalError & 0x2) >> 1);
+   PBOOL("NVM Subsystem Reliability Degradation", (smartLog->criticalError & 0x4) >> 2);
+   PBOOL("Read Only Mode", (smartLog->criticalError & 0x8) >> 3);
+   PBOOL("Volatile Memory Backup Device Failure", (smartLog->criticalError & 0x10) >> 4);
+   PINT("Composite Temperature",*(vmk_uint16 *)smartLog->temperature);
+   PINT("Available Spare", smartLog->availableSpace);
+   PINT("Available Spare Threshold", smartLog->availableSpaceThreshold);
+   PINT("Percentage Used", smartLog->percentageUsed);
+   P128BIT("Data Units Read", smartLog->dataUnitsRead);
+   P128BIT("Data Units Written", smartLog->dataUnitsWritten);
+   P128BIT("Host Read Commands", smartLog->hostReadCommands);
+   P128BIT("Host Write Commands", smartLog->hostWriteCommands);
+   P128BIT("Controller Busy Time", smartLog->controllerBusyTime);
+   P128BIT("Power Cycles", smartLog->powerCycles);
+   P128BIT("Power On Hours", smartLog->powerOnHours);
+   P128BIT("Unsafe Shutdowns", smartLog->unsafeShutdowns);
+   P128BIT("Media Errors", smartLog->mediaErrors);
+   P128BIT("Number of Error Info Log Entries", smartLog->numberOfErrorInfoLogs);
+   PINT("Warning Composite Temperature Time", smartLog->warningCompositeTempTime);
+   PINT("Critical Composite Temperature Time", smartLog->criticalCompositeTempTime);
+   PINT("Temperature Sensor 1", smartLog->tempSensor1);
+   PINT("Temperature Sensor 2", smartLog->tempSensor2);
+   PINT("Temperature Sensor 3", smartLog->tempSensor3);
+   PINT("Temperature Sensor 4", smartLog->tempSensor4);
+   PINT("Temperature Sensor 5", smartLog->tempSensor5);
+   PINT("Temperature Sensor 6", smartLog->tempSensor6);
+   PINT("Temperature Sensor 7", smartLog->tempSensor7);
+   PINT("Temperature Sensor 8", smartLog->tempSensor8);
+   xml_struct_end();
+   esxcli_xml_end_output();
 }
 
 static void
 PrintFwSlotLog(struct firmware_slot_log * fwSlotLog)
 {
-   PrintString(
-	 "Active Firmware Info: 0x%x\n"
-	 "   Firmware Slot to Be Activated at Next Controller Reset: %d\n"
-	 "   Firmware Slot Being Activated: %d\n"
-	 "Firmware Revision for Slot 1: %.8s\n"
-	 "Firmware Revision for Slot 2: %.8s\n"
-	 "Firmware Revision for Slot 3: %.8s\n"
-	 "Firmware Revision for Slot 4: %.8s\n"
-	 "Firmware Revision for Slot 5: %.8s\n"
-	 "Firmware Revision for Slot 6: %.8s\n"
-	 "Firmware Revision for Slot 7: %.8s\n",
-	 fwSlotLog->activeFirmwareInfo, (fwSlotLog->activeFirmwareInfo & 0x70) >> 4,
-	 fwSlotLog->activeFirmwareInfo & 0x7, fwSlotLog->FirmwareRevisionSlot1,
-	 fwSlotLog->FirmwareRevisionSlot2, fwSlotLog->FirmwareRevisionSlot3,
-	 fwSlotLog->FirmwareRevisionSlot4, fwSlotLog->FirmwareRevisionSlot5,
-	 fwSlotLog->FirmwareRevisionSlot6, fwSlotLog->FirmwareRevisionSlot7);
+   esxcli_xml_begin_output();
+   xml_struct_begin("FirmwareSlotInfo");
+   PINT("Firmware Slot to Be Activated at Next Controller Reset",
+        (fwSlotLog->activeFirmwareInfo & 0x70) >> 4);
+   PINT("Firmware Slot Being Activated", fwSlotLog->activeFirmwareInfo & 0x7);
+   P8BYTE("Firmware Revision for Slot 1", fwSlotLog->FirmwareRevisionSlot1);
+   P8BYTE("Firmware Revision for Slot 2", fwSlotLog->FirmwareRevisionSlot2);
+   P8BYTE("Firmware Revision for Slot 3", fwSlotLog->FirmwareRevisionSlot3);
+   P8BYTE("Firmware Revision for Slot 4", fwSlotLog->FirmwareRevisionSlot4);
+   P8BYTE("Firmware Revision for Slot 5", fwSlotLog->FirmwareRevisionSlot5);
+   P8BYTE("Firmware Revision for Slot 6", fwSlotLog->FirmwareRevisionSlot6);
+   P8BYTE("Firmware Revision for Slot 7", fwSlotLog->FirmwareRevisionSlot7);
+   xml_struct_end();
+   esxcli_xml_end_output();
 }
 
 /**
@@ -371,6 +406,52 @@ ExecuteCommand(const char* cmd)
    return rc;
 }
 
+/**
+ * Convert hex string to integer.
+ *
+ * @param [in] str
+ * @param [out] value
+ *
+ * @retval return 0 when successful.
+ *         return -1 for failure cases, e.g. input string has illegal characters.
+ */
+static int
+htoi(const char* str, int *value)
+{
+   int i = 0;
+   int n = 0;
+   int v = 0;
+   int tmp = 0;
+
+   if (str == NULL || value == NULL) {
+      return -1;
+   }
+
+   n = strlen(str);
+   if (n > 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+      i = 2;
+   }
+   if (n - i > sizeof(int) * 2 || n - i == 0) {
+      return -1;
+   }
+
+   while (i < n) {
+      if (str[i] >= '0' && str[i] <= '9') {
+         v = str[i] - '0';
+      } else if (str[i] >= 'a' && str[i] <= 'f') {
+         v = str[i] - 'a' + 10;
+      } else if (str[i] >= 'A' && str[i] <= 'F') {
+         v = str[i] - 'A' + 10;
+      } else {
+         return -1;
+      }
+      tmp = (tmp << 4) | (v & 0xf);
+      i = i + 1;
+   }
+   *value = tmp;
+   return 0;      
+}
+
 void
 NvmePlugin_DeviceList(int argc, const char *argv[])
 {
@@ -378,21 +459,23 @@ NvmePlugin_DeviceList(int argc, const char *argv[])
    int    rc;
    int    i;
 
-   PrintString("HBA Name  Status      Signature                     \n");
-   PrintString("--------  ----------  ------------------------------\n");
-
    rc = Nvme_GetAdapterList(&list);
    if (rc != 0) {
       Error("Failed to get adapter list: 0x%x.", rc);
       return;
    }
 
+   esxcli_xml_begin_output();
+   xml_list_begin("structure");
    for (i = 0; i < list.count; i++) {
-      PrintString("%-8s  %-10s  %-30s\n",
-         list.adapters[i].name,
-         list.adapters[i].status == ONLINE ? "Online" : "Offline",
-         list.adapters[i].signature);
+      xml_struct_begin("DeviceList");
+      PSTR("HBA Name", list.adapters[i].name);
+      PSTR("Status", list.adapters[i].status == ONLINE ? "Online" : "Offline");
+      PSTR("Signature", list.adapters[i].signature);
+      xml_struct_end();
    }
+   xml_list_end();
+   esxcli_xml_end_output();
 }
 
 void
@@ -404,8 +487,9 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    struct nvme_adapter_list list;
    struct nvme_handle      *handle;
    struct iden_controller  *idCtrlr;
-   char deviceName[MAX_DEV_NAME_LEN];
    char runtimeName[MAX_DEV_NAME_LEN];
+   char (*devNames)[MAX_DEV_NAME_LEN] = NULL;
+   int  *statusFlags = NULL;
    struct usr_io uio;
    VMK_ReturnStatus status;
 
@@ -453,12 +537,14 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
 
    numNs = (int)idCtrlr->numNmspc;
 
-   PrintString("Namespace ID  Status      Device Name                   \n");
-   PrintString("------------  ----------  ------------------------------\n");
+   devNames = (char(*)[MAX_DEV_NAME_LEN])malloc(numNs * sizeof(char) * MAX_DEV_NAME_LEN);
+   statusFlags = (int *)malloc(numNs * sizeof(int));
+   memset(devNames, 0, numNs * sizeof(*devNames));
+   memset(statusFlags, 0, numNs * sizeof(*statusFlags));
 
    for (i = 1; i <= numNs; i++) {
       snprintf(runtimeName, MAX_DEV_NAME_LEN, "%s:C0:T0:L%d", vmhba, i-1);
-      status = GetDeviceName(runtimeName, deviceName, MAX_DEV_NAME_LEN);
+      status = GetDeviceName(runtimeName, devNames[i-1], MAX_DEV_NAME_LEN);
       if (status == VMK_FAILURE) {
          Error("Failed to get device name of namespace %d.", i);
          goto out_free;
@@ -474,18 +560,36 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
 
       if (status == VMK_NOT_FOUND && uio.status == 0) {
          /* Reach here mostly because the path is not claimed by upper layer.*/
-         snprintf(deviceName, MAX_DEV_NAME_LEN, "N/A");
+         snprintf(devNames[i-1], MAX_DEV_NAME_LEN, "N/A");
       }
-   
-      if (uio.status == 0) {
-         PrintString("%-12d  %-10s  %-30s\n", i, "Online", deviceName);
-      } else {
-         PrintString("%-12d  %-10s  %-30s\n", i, "Offline", "N/A");
-      }
+      statusFlags[i-1] = uio.status;
    }
+
+   esxcli_xml_begin_output();
+   xml_list_begin("structure");
+   for (i = 0; i < numNs; i++) {
+      xml_struct_begin("NamespaceList");
+      PINT("Namespace ID", i+1);
+      if (statusFlags[i]) {
+         PSTR("Status", "Offline");
+         PSTR("Device Name", "N/A");
+      } else {
+         PSTR("Status", "Online");
+         PSTR("Device Name", devNames[i]);
+      }
+      xml_struct_end();
+   }
+   xml_list_end();
+   esxcli_xml_end_output();
 
 out_free:
    free(idCtrlr);
+   if (devNames) {
+      free(devNames);
+   }
+   if (statusFlags) {
+      free(statusFlags);
+   }
 out:
    Nvme_Close(handle);
 }
@@ -493,7 +597,7 @@ out:
 void
 NvmePlugin_DeviceNsGet(int argc, const char *argv[])
 {
-   int                      ch, i, numNs, nsId = 0;
+   int                      ch, numNs, nsId = 0;
    int                      rc;
    const char              *vmhba = NULL;
    struct nvme_adapter_list list;
@@ -555,28 +659,14 @@ NvmePlugin_DeviceNsGet(int argc, const char *argv[])
 
    numNs = (int)idCtrlr->numNmspc;
 
-   /* If nsId is 0, get all namespaces info on the controller. */
-   if (nsId > numNs || nsId < 0) {
+   if (nsId > numNs || nsId <= 0) {
       Error("Invalid namespace Id.");
       goto out_free_all;
-   } else if (nsId == 0) {
-      for (i = 1; i <= numNs; i++) {
-         rc = Nvme_Identify(handle, i, idNs);
-         if (rc) {
-            PrintString("Failed to get identify data for namespace %d, %s.", i, strerror(rc));
-         } else {
-            PrintString("Identify Namespace: %d\n", i);
-            PrintString("--------------------------\n");
-            PrintIdentifyNs(idNs);
-         }
-      }
    } else {
       rc = Nvme_Identify(handle, nsId, idNs);
       if (rc) {
-         PrintString("Failed to get identify data for namespace %d, %s.", nsId, strerror(rc));
+         Error("Failed to get identify data for namespace %d, %s.", nsId, strerror(rc));
       } else {
-         PrintString("Identify Namespace: %d\n", nsId);
-         PrintString("--------------------------\n");
          PrintIdentifyNs(idNs);
       }
    }
@@ -641,8 +731,6 @@ NvmePlugin_DeviceGet(int argc, const char *argv[])
       goto out_free;
    }
 
-   PrintString("%s\n", vmhba);
-   PrintString("--------\n");
    PrintIdentifyCtrlr(id);
 
 out_free:
@@ -779,12 +867,12 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
       Error("Format fails or timeout, 0x%x. Offline namespace.", rc);
       goto out_free;
    } else { 
-      PrintString("Format successfully.\n");
       memset(&uio, 0, sizeof(uio));
       uio.namespaceID = nsid;
       rc = Nvme_Ioctl(handle, NVME_IOCTL_UPDATE_NS, &uio);
       if (rc || uio.status) {
-         Error("Failed to update namespace attributes after format. Offline namespace.");
+         Error("Format successfully, but failed to update namespace attributes after"
+               " format. Offline namespace.");
          goto out_free;
       }
    }
@@ -793,9 +881,24 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
    uio.namespaceID = nsid;
    rc = Nvme_Ioctl(handle, NVME_IOCTL_SET_NS_ONLINE, &uio);
    if (rc || uio.status) {
-      Error("Failed to online namespace.");
+      Error("Format and update namespace attributes successfully,"
+            " but failed to online namespace.");
+      goto out_free;
    }
-   goto out_free;
+
+   snprintf(cmd, MAX_CMD_LEN, "esxcli storage filesystem rescan");
+   rc = ExecuteCommand(cmd);
+   if (rc) {
+      Error("Format, update namesapce attributes and online namespace successfully,"
+            " but failed to rescan the filesystem. A stale entry may exist.");
+      goto out_free;
+   }
+
+   esxcli_xml_begin_output();
+   xml_list_begin("string");
+   xml_format("string", "Format successfully!");
+   xml_list_end();
+   esxcli_xml_end_output();
 
 out_reclaim:
    snprintf(cmd, MAX_CMD_LEN, "esxcfg-rescan -a %s", vmhba);
@@ -957,10 +1060,13 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
    switch (lid)
    {
       case GLP_ID_ERR_INFO:
+         esxcli_xml_begin_output();
+         xml_list_begin("structure");
          for (i = 0; i < elpe; i++) {
-            PrintString("---------------log page %d---------------\n", i);
             PrintErrLog(&log.errLog[i]);
          }
+         xml_list_end();
+         esxcli_xml_end_output();
          break;
       case GLP_ID_SMART_HEALTH:
          PrintSmartLog(&log.smartLog);
@@ -1028,7 +1134,8 @@ GetFeature(struct nvme_handle *handle, struct usr_io *uiop, int fid)
 
       vectNum = uioVect.length;
       Debug("vectNum: %d\n", vectNum);
-      PrintString("INTERRUPT VECTOR CONFIGURATION:\n");
+      esxcli_xml_begin_output();
+      xml_list_begin("structure");
       for (i = 0; i < vectNum; i++) {
          uiop->cmd.cmd.getFeatures.numSubQReq = i;
          rc = Nvme_AdminPassthru(handle, uiop);
@@ -1037,9 +1144,13 @@ GetFeature(struct nvme_handle *handle, struct usr_io *uiop, int fid)
             continue;
          }
          value = uiop->comp.param.cmdSpecific;
-         PrintString("   Interrupt Vector: %d", value & 0xffff);
-         PrintString("   Coalescing Disable: %d\n", (value & 0x10000) >> 16);
+         xml_struct_begin("InterruptVectorConfiguration");
+         PINT("Interrupt Vector", value & 0xffff);
+         PBOOL("Coalescing Disable", (value & 0x10000) >> 16);
+         xml_struct_end();
       }
+      xml_list_end();
+      esxcli_xml_end_output();
       return rc;
    }
 
@@ -1051,62 +1162,77 @@ GetFeature(struct nvme_handle *handle, struct usr_io *uiop, int fid)
 
    value = uiop->comp.param.cmdSpecific;
    Debug("value = %x\n", value);
+   esxcli_xml_begin_output();
    switch (fid)
    {
    case FTR_ID_ARBITRATION:
-      PrintString("ARBITRATION:\n   HPW: %d\tMPW: %d\tLPW: %d\tAB: %d\n", (value & 0xff000000)>> 24, (value & 0xff0000) >> 16, (value & 0xff00) >> 8, value & 0x7);
+      xml_struct_begin("Arbitration");
+      PINT("Arbitration Burst", value & 0x7);
+      PINT("Low Priority Weight", (value & 0xff00) >> 8);
+      PINT("Medium Priority Weight", (value & 0xff0000) >> 16);
+      PINT("High Priority Weight", (value & 0xff000000) >> 24); 
       break;
 
    case FTR_ID_PWR_MANAGEMENT:
-      PrintString("POWER MANAGEMENT:\n   Power State: %d\n", value & 0x1f);
+      xml_struct_begin("PowerManagement");
+      PINT("Power State", value & 0x1f);
       break;
 
-   case FTR_ID_LBA_RANGE_TYPE:
-      PrintString("LBA RANGE TYPE:\n   Unsupported Feature\n");
-      break;
+//   case FTR_ID_LBA_RANGE_TYPE:
+//      PrintString("LBA RANGE TYPE:\n   Unsupported Feature\n");
+//      break;
 
    case FTR_ID_TEMP_THRESHOLD:
-      PrintString("TEMPERATURE THRESHOLD:\n   Temperature Threshold: %d K (%d C)\n", value & 0xffff, (value & 0xffff) - 273);
+      xml_struct_begin("TemperatureThreshold");
+      PINT("Temperature Threshold", value & 0xffff);
       break;
 
    case FTR_ID_ERR_RECOVERY:
-      PrintString("ERROR RECOVERY:\n   Time Limited Error Recovery: %d\n", value & 0xffff);
+      xml_struct_begin("ErrorRecovery");
+      PINT("Time Limited Error Recovery", value & 0xffff);
       break;
 
    case FTR_ID_WRITE_CACHE:
-      PrintString("VOLATILE WRITE CACHE:\n   Volatile Write Cache Enable: %d\n", value & 0x1);
+      xml_struct_begin("VolatileWriteCache");
+      PBOOL("Volatile Write Cache Enabled", value & 0x1);
       break;
 
    case FTR_ID_NUM_QUEUE:
-      PrintString("NUMBER OF QUEUES:\n   Number of Submission Queues Allocated: %d\n   Number of Completion Queues Allocated: %d\n", value & 0xffff, (value & 0xffff0000) >> 16);
+      xml_struct_begin("NumberOfQueue");
+      PINT("Number of Submission Queues Allocated", value & 0xffff);
+      PINT("Number of Completion Queues Allocated", (value & 0xffff0000) >> 16);
       break;
 
    case FTR_ID_INT_COALESCING:
-      PrintString("INTERRUPT COALESCING:\n   Aggregation Time: %d\n   Aggregation Threshold: %d\n", (value & 0xff00) >> 8, value & 0xff);
+      xml_struct_begin("InterruptCoalescing");
+      PINT("Aggregation Time", (value & 0xff00) >> 8);
+      PINT("Aggregation Threshold", value & 0xff);
       break;
 
    case FTR_ID_WRITE_ATOMICITY:
-      PrintString("WRITE ATOMICITY:\n   Disable Normal: %d\n", value & 0x1);
+      xml_struct_begin("WriteAtomicity");
+      PBOOL("Disable Normal", value & 0x1);
       break;
 
    case FTR_ID_ASYN_EVENT_CONFIG:
-      PrintString("ASYN EVENT CONFIGURATION:\n");
-      PrintString("   Available Spare Space: %d\n", value & 0x1);
-      PrintString("   Temperature:           %d\n", (value & 0x2) >> 1);
-      PrintString("   Media Error:           %d\n", (value & 0x4) >> 2);
-      PrintString("   Read Only Mode:        %d\n", (value & 0x8) >> 3);
-      PrintString("   Backup Device Fail:    %d\n", (value & 0x10) >> 4);
+      xml_struct_begin("AsyncEventConfiguration");
+      PBOOL("Available Spare Space", value & 0x1);
+      PBOOL("Temperature", (value & 0x2) >> 1);
+      PBOOL("Media Error", (value & 0x4) >> 2);
+      PBOOL("Read Only Mode", (value & 0x8) >> 3);
+      PBOOL("Backup Device Fail", (value & 0x10) >> 4);
       break;
 
-   case FTR_ID_SW_PROGRESS_MARKER:
-      PrintString("SOFTWARE PROGRESS MARKER:\n   Unsupported Feature\n");
-      break;
+//   case FTR_ID_SW_PROGRESS_MARKER:
+//      PrintString("SOFTWARE PROGRESS MARKER:\n   Unsupported Feature\n");
+//      break;
 
    default:
-      PrintString("Failed to get feature info, %s.", strerror(rc));
       break;
    }
 
+   xml_struct_end();
+   esxcli_xml_end_output();
    return rc;
 }
 
@@ -1163,7 +1289,7 @@ NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
 
    rc = GetFeature(handle, &uio, fid);
    if (rc) {
-      PrintString("Failed to get feature info, %s.", strerror(rc));
+      Error("Failed to get feature info, %s.", strerror(rc));
       Nvme_Close(handle);
       return;
    }
@@ -1294,7 +1420,6 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
       }
       uio.cmd.cmd.setFeatures.numSubQReq = value | value2 << 8;
       uio.cmd.cmd.setFeatures.numCplQReq = value3 | value4 << 8;
-      PrintString("Currently driver only supports Round Robin Arbitration, only Arbitration Burst will be effective");
       break;
 
    case FTR_ID_INT_COALESCING:
@@ -1399,6 +1524,12 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
    rc = Nvme_AdminPassthru(handle, &uio);
    if (rc) {
       Error("Failed to set feature info, %s.", strerror(rc));
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 
 out:
@@ -1543,19 +1674,22 @@ NvmePlugin_DeviceFirmwareDownload(int argc, const char *argv[])
       Error("Failed to download firmware, 0x%x", rc);
       goto out_free;
    }
-   else {
-      PrintString("Download firmware to NVMe controller successfully.\n");
-   }
 
    rc = Nvme_FWActivate(handle, slot, NVME_FIRMWARE_ACTIVATE_ACTION_NOACT);
-   if (!rc) {
-      PrintString("Commit downloaded firmware to slot %d successfully.\n", slot);
-   }
-   else if (rc == NVME_NEED_COLD_REBOOT) {
-      PrintString("Commit downloaded firmware to slot %d successfully but need cold reboot.\n", slot);
-   }
-   else {
+   if (rc != NVME_NEED_COLD_REBOOT && rc != 0) {
       Error("Failed to commit downloaded firmware to slot %d, 0x%x", slot, rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      if (rc == NVME_NEED_COLD_REBOOT) {
+         printf("<string>Commit downloaded firmware to slot %d successfully"
+                " but need cold reboot.</string>", slot);
+      } else {
+         printf("<string>Commit downloaded firmware to slot %d successfully.</string>",
+                slot);
+      }
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 
 out_free:
@@ -1630,14 +1764,20 @@ NvmePlugin_DeviceFirmwareActivate(int argc, const char *argv[])
    }
 
    rc = Nvme_FWActivate(handle, slot, NVME_FIRMWARE_ACTIVATE_ACTION_ACTIVATE);
-   if (!rc) {
-      PrintString("Activate firmware in slot %d successfully.\n", slot);
-   }
-   else if (rc == NVME_NEED_COLD_REBOOT) {
-      PrintString("Activate firmware in slot %d successfully but need code reboot.\n", slot);
-   }
-   else {
-      Error("Failed to activate firmware in slot %d, 0x%x.", slot, rc);
+
+   if (rc != NVME_NEED_COLD_REBOOT && rc != 0) {
+      Error("Failed to activate firmware in slot %d, 0x%x", slot, rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      if (rc == NVME_NEED_COLD_REBOOT) {
+         printf("<string>Activate firmware in slot %d successfully"
+                " but need cold reboot.</string>", slot);
+      } else {
+         printf("<string>Activate firmware in slot %d successfully.</string>", slot);
+      }
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 
 out_free:
@@ -1683,11 +1823,11 @@ NvmePlugin_DriverLoglevelSet(int argc, const char *argv[])
          return;
       }
       if (logLevel != 5) {
-         PrintString("Debug level is invalid when setting log level to %d. Set debug level to 0.\n", logLevel);
+         Error("Debug level is invalid when setting log level to %d.\n", logLevel);
       }
       else {
-         rc = sscanf(debugString, "%x", &debugLevel);
-         if (rc != 1) {
+         rc = htoi(debugString, &debugLevel);
+         if (rc) {
             Error("Invalid debug level.");
             return;
          }
@@ -1699,7 +1839,12 @@ NvmePlugin_DriverLoglevelSet(int argc, const char *argv[])
       Error("Failed to set log level, 0x%x.", rc);
    }
    else {
-      PrintString("Successfully set log level to %d and debug level to 0x%x.", logLevel, debugLevel);
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      printf("<string>Successfully set log level to %d"
+             " and debug level to 0x%x.</string>", logLevel, debugLevel);
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -1784,10 +1929,6 @@ main(int argc, const char * argv[]) {
    const char        *op;
    int                rc;
 
-   esxcli_xml_begin_output();
-   xml_list_begin("string");
-   printf("<string>");
-
    if (argc < 3) {
       Error("Invalid argument.\n");
       rc = -EINVAL;
@@ -1816,10 +1957,6 @@ main(int argc, const char * argv[]) {
    rc = 0;
 
 out:
-   printf("</string>\n");
-   xml_list_end();
-   esxcli_xml_end_output();
-
    return rc;
 }
 

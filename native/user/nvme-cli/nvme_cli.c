@@ -736,7 +736,7 @@ PrintSmartLog(struct smart_log * smartLog)
       "Number of Error Info Log Entries: 0x%llx%llx\n",
       smartLog->criticalError,
       *(vmk_uint16 *)smartLog->temperature, smartLog->availableSpace,
-      smartLog->availableSpaceThreshold, smartLog->precentageUsed,
+      smartLog->availableSpaceThreshold, smartLog->percentageUsed,
       *(vmk_uint64 *)&smartLog->dataUnitsRead[0], *(vmk_uint64 *)&smartLog->dataUnitsRead[4],
       *(vmk_uint64 *)&smartLog->dataUnitsWritten[0], *(vmk_uint64 *)&smartLog->dataUnitsWritten[4],
       *(vmk_uint64 *)&smartLog->hostReadCommands[0], *(vmk_uint64 *)&smartLog->hostReadCommands[4],
