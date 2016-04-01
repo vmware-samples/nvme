@@ -28,12 +28,11 @@ BULL_VENDOR_CODE=VMW
 HAS_NATIVEDDK := $(shell rpm -qa | grep vmware-esx-nativeddk-devtools)
 ifdef HAS_NATIVEDDK
 DDK=vmware-esx-nativeddk-devtools
-HEXDK=vmware-esx-hexdk-devtools
 else
 DDK=vmware-esx-vmkapiddk-devtools
-HEXDK=vmware-esx-esxcli-devtools
 endif
 
+HEXDK=vmware-esx-esxcli-devtools
 VMKAPIDDK_ROOT = $(shell rpm -q --qf '%{INSTPREFIXES}\n' $(DDK))
 BUILD_NUMBER=$(shell echo $(VMKAPIDDK_ROOT) | cut -d '-' -f3)
 DESC_ESX_VERSION=$(shell echo $(VMKAPIDDK_ROOT) | cut -d '-' -f2)
@@ -160,8 +159,9 @@ GREP := /build/toolchain/lin32/grep-2.5.1a/bin/grep
 
 IMPORT_DEVKIT = $(shell rpm -q --qf '%{INSTPREFIXES}\n' $(1) | $(GREP) $(BUILD_NUMBER))
 
-HEXDK_BASE := $(call IMPORT_DEVKIT,$(HEXDK))
+HEXDK_BASE := $(shell rpm -q --qf '%{INSTPREFIXES}\n' $(HEXDK))
 VMKAPIDDK_BASE := $(call IMPORT_DEVKIT,$(DDK))
+VMW_VMKAPIDDK_BASE := $(VMKAPIDDK_BASE)
 
 ifeq ($(DESC_ESX_VERSION),6.5.0)
 VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_4_0_0
