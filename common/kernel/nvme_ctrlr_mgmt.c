@@ -459,6 +459,63 @@ DumpRegs(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
 
    return vmk_CopyToUser(uio->addr, ctrlr->regs, length);
 }
+/**
+ * PCIe registers read/write
+ *
+ * @param [in] ctrlr controller instance
+ * @param [in] uio pointer to the uio structure
+ *
+ * @return VMK_OK if completes successfully;
+ * otherwise return error code
+ */
+static VMK_ReturnStatus
+PciRegsOP(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
+{
+    struct pcie_regs_rw regs;
+    vmk_PCIDevice dev = ctrlr->ctrlOsResources.pciDevice;
+    VMK_ReturnStatus vmkStatus = VMK_OK;
+
+    VMK_ASSERT(uio->length == sizeof(regs));
+    vmk_CopyFromUser((vmk_VA)&regs, uio->addr, sizeof(regs));
+    VMK_ASSERT(regs.size == 4);
+
+    if (regs.op == PCI_REG_READ)
+    {
+        vmkStatus = vmk_PCIReadConfig(vmk_ModuleCurrentID, dev, VMK_PCI_CONFIG_ACCESS_32, regs.offset, &regs.val);
+        if (vmkStatus != VMK_OK)
+        {
+            EPRINT("Unable to read PCI Command register (%s)",
+                    vmk_StatusToString(vmkStatus));
+            return vmkStatus;
+        }
+        VPRINT("regs.offset = %u, regs.op=0x%x, regs.size=%u\n", regs.offset, regs.op, regs.size);
+        VPRINT("read: offset = %u, val= 0x%x.\n", regs.offset, regs.val);
+        vmk_CopyToUser(uio->addr, (vmk_VA)&regs, sizeof(regs));
+    }
+    else if (regs.op == PCI_REG_WRITE)
+    {
+        VPRINT("regs.offset = %u, regs.op=0x%x, regs.size=%u\n", regs.offset, regs.op, regs.size);
+        VPRINT("write: offset = %u, val= 0x%x.\n", regs.offset, regs.val);
+        vmkStatus = vmk_PCIWriteConfig(vmk_ModuleCurrentID, dev,
+                VMK_PCI_CONFIG_ACCESS_32,
+                regs.offset, regs.val);
+        if (vmkStatus != VMK_OK)
+        {
+            EPRINT("Unable to write PCI Command register (%s)",
+                    vmk_StatusToString(vmkStatus));
+            return vmkStatus;
+        }
+    }
+    else
+    {
+        EPRINT("Invalid pcie register operation.\n");
+        VMK_ASSERT(VMK_FALSE);
+        return VMK_FAILURE;
+    }
+
+    return VMK_OK;
+}
+
 
 /**
  * Dump statistics data
@@ -655,6 +712,9 @@ NvmeCtrlr_IoctlCommon(struct NvmeCtrlr *ctrlr, vmk_uint32 cmd,
          break;
       case NVME_IOCTL_GET_INT_VECT_NUM:
          vmkStatus = nvmeMgmtGetIntVectNum(ctrlr, uio);
+         break;
+      case NVME_IOCTL_REGS_OP:
+         vmkStatus = PciRegsOP(ctrlr, uio);
          break;
       default:
          EPRINT("unknown ioctl command %d.", cmd);

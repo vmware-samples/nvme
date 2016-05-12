@@ -811,6 +811,27 @@ typedef enum
     NVM_CMD_DATASET_MGMNT = 0x09
 } nvm_cmd_opcodes_e;
 
+/**
+ * @brief PCIe register Opcodes
+ */
+typedef enum
+{
+    /**
+     * @brief register read.
+     */
+    PCI_REG_READ = 0x00,
+    /**
+     * @brief register write.
+     */
+    PCI_REG_WRITE = 0x01,
+} ioctl_regop_e;
+
+struct pcie_regs_rw {
+    vmk_uint32 offset;
+    ioctl_regop_e op;
+    vmk_uint16 size;
+    vmk_uint32 val;
+};
 
 /**
  * Queue Priorities
@@ -3490,6 +3511,7 @@ enum {
    NVME_IOCTL_UPDATE_NS,         /* Update namespace attributes */
    NVME_IOCTL_GET_NS_STATUS,     /* Get status of specific namespace */
    NVME_IOCTL_GET_INT_VECT_NUM,  /* Get number of interrupt vectors */
+   NVME_IOCTL_REGS_OP,           /* Read/Write PCIe registers */
 };
 
 /* full name space for get log page query*/
