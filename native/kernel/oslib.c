@@ -367,11 +367,12 @@ OsLib_LockDestroy(vmk_Lock *lock)
  *
  * @param [in] ctrlr controller instance
  * @param [in] size size in bytes to be allocated
+ * @param [in] timeout for allocating memory 
  * @param [out] dmaEntry used to save intermediate data that is used during dma free
  */
 VMK_ReturnStatus
 OsLib_DmaAlloc(struct NvmeCtrlOsResources *ctrlOsResources, vmk_ByteCount size,
-               struct NvmeDmaEntry *dmaEntry)
+               struct NvmeDmaEntry *dmaEntry, vmk_uint32 timeout)
 {
    VMK_ReturnStatus vmkStatus;
    vmk_MemPoolAllocProps allocProps;
@@ -386,7 +387,7 @@ OsLib_DmaAlloc(struct NvmeCtrlOsResources *ctrlOsResources, vmk_ByteCount size,
    /* first, allocate a physically contiguous region of pages */
    allocProps.physContiguity = VMK_MEM_PHYS_CONTIGUOUS;
    allocProps.physRange = VMK_PHYS_ADDR_ANY;
-   allocProps.creationTimeoutMS = VMK_TIMEOUT_UNLIMITED_MS;
+   allocProps.creationTimeoutMS = timeout;
 
    allocRequest.numPages = VMK_UTIL_ROUNDUP(size, VMK_PAGE_SIZE) >> VMK_PAGE_SHIFT;
    allocRequest.numElements = 1;
@@ -796,6 +797,38 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr)
    }
 #endif
 
+#if ((NVME_PROTECTION) && (VMKAPIDDK_VERSION >= 600))
+   vmk_ScsiProtTypes protMask= 0;
+   struct NvmeNsInfo *ns;
+   vmk_ListLinks     *itemPtr;
+   itemPtr = vmk_ListFirst(&ctrlr->nsList);
+   ns = VMK_LIST_ENTRY(itemPtr, struct NvmeNsInfo, list);
+   if (END2END_CAP_TYPE(ns->dataProtCap) & END2END_CAP_TYPE1) {
+      protMask |= VMK_SCSI_TYPE1_PROT | VMK_SCSI_DIX_TYPE1_PROT;
+   }
+   if (END2END_CAP_TYPE(ns->dataProtCap) & END2END_CAP_TYPE3) {
+      protMask |= VMK_SCSI_TYPE3_PROT | VMK_SCSI_DIX_TYPE3_PROT;
+   }
+   /*
+    * Currently driver only support protection data as seperate buffer. 
+    */
+   if ((ns->metaDataCap & 0x2) == 0) {
+      protMask = 0;
+   }
+
+   if (protMask) {
+      vmkStatus = vmk_ScsiAdapterSetCapabilities(adapter,VMK_SCSI_ADAPTER_CAP_DATA_INTEGRITY);
+      if (vmkStatus != VMK_OK) {
+         EPRINT("Fail to set capacity of data integrity.");
+         vmk_DMAEngineDestroy(ctrlr->ctrlOsResources.scsiDmaEngine);
+         vmk_ScsiFreeAdapter(adapter);
+         return vmkStatus;
+      }
+      vmk_ScsiAdapterSetProtMask(adapter, protMask);
+      vmk_ScsiAdapterSetSupportedGuardTypes(adapter, VMK_SCSI_GUARD_CRC); 
+   }
+#endif
+
    /* TODO: create NVMe transport */
    adapter->mgmtAdapter.transport = VMK_STORAGE_ADAPTER_PSCSI;
 
@@ -862,9 +895,19 @@ DoLocalCmdCompl(struct NvmeCtrlr *ctrlr, vmk_SList *localComplCmds)
       vmkCmd = IORequest->vmkCmd;
       VMK_ASSERT(vmkCmd->done);
 
-      vmkCmd->done(vmkCmd);
       vmk_SListRemove(localComplCmds, IOEventList, NULL);
+
+      /*
+       * Remember that preallocated IORequest frames are destroyed along with
+       * the owning SCSI commands. We must not touch the IORequest after the
+       * command is done with.
+       */
+      vmkCmd->done(vmkCmd);
+
+#if VMKAPIDDK_VERSION < 650
       vmk_SlabFree(ctrlr->complWorldsSlabID, IORequest);
+#endif
+
       /* Yield the CPU to avoid CPU heartbeat NMI PSOD's. See PR #1451047 */
       vmk_WorldYield();
    }
@@ -954,6 +997,7 @@ OsLib_FlushCompletionQueue(struct NvmeCtrlr *ctrlr,    \
    return VMK_OK;
 }
 
+#if VMKAPIDDK_VERSION < 650
 /**
  * Create a slab for commands completion
  */
@@ -986,7 +1030,7 @@ CreateIoCompletionSlab(struct NvmeCtrlr *ctrlr)
    }
    return vmkStatus;
 }
-
+#endif
 
 static void DestroyComplWorldLocks(struct NvmeCtrlr*  ctrlr, vmk_int32 numLocks)
 {
@@ -1017,15 +1061,30 @@ OsLib_StartCompletionWorlds(struct NvmeCtrlr *ctrlr)
    vmk_uint32 qID=0;
    vmk_int32 lockNum=0;
 
+#if VMKAPIDDK_VERSION < 650
    status = CreateIoCompletionSlab(ctrlr);
-   if (status != VMK_OK)
-   {
+   if (status != VMK_OK) {
       VMK_ASSERT(VMK_FALSE);
       return status;
    }
+#endif
 
    ctrlr->shuttingDown = VMK_FALSE;
    ctrlr->numComplWorlds = ctrlr->numIoQueues;
+
+#if VMKAPIDDK_VERSION >= 650
+   /*
+    * For the affinity mask ideally we should use a number of completion worlds
+    * that is power of 2, since modulo operations are expensive for each IO.
+    * Determine the affinity mask for the current number of numComplWorlds.
+    */
+
+   ctrlr->affinityMask = 0;
+   while (ctrlr->affinityMask < ctrlr->numComplWorlds) {
+      ctrlr->affinityMask = (ctrlr->affinityMask << 1) | 1;
+   }
+   ctrlr->affinityMask = ctrlr->affinityMask ? ctrlr->affinityMask >> 1 : 0;
+#endif
 
    for(lockNum=0; lockNum < ctrlr->numComplWorlds; lockNum++) {
       IOCompletionQueue = &(ctrlr->IOCompletionQueue[lockNum]);
@@ -1075,7 +1134,9 @@ OsLib_StartCompletionWorlds(struct NvmeCtrlr *ctrlr)
 cleanup:
    DestroyComplWorldLocks(ctrlr,lockNum);
    DestroyComplWorldWorlds(ctrlr,qID);
+#if VMKAPIDDK_VERSION < 650
    vmk_SlabDestroy(ctrlr->complWorldsSlabID);
+#endif
    return status;
 
 }
@@ -1097,9 +1158,16 @@ OsLib_EndCompletionWorlds(struct NvmeCtrlr *ctrlr)
       OsLib_FlushCompletionQueue(ctrlr, IOCompletionQueue);
       OsLib_LockDestroy(&IOCompletionQueue->lock);
    }
+#if VMKAPIDDK_VERSION < 650
    /* A single slab for all of completion worlds */
    vmk_SlabDestroy(ctrlr->complWorldsSlabID);
+#endif
    ctrlr->numComplWorlds = 0;
+
+#if VMKAPIDDK_VERSION >= 650
+   ctrlr->useQueueAffinityHint = VMK_FALSE;
+   ctrlr->affinityMask = 0;
+#endif
 
    return VMK_OK;
 }
@@ -1107,19 +1175,44 @@ OsLib_EndCompletionWorlds(struct NvmeCtrlr *ctrlr)
 /**
  * Enqueue IO completion request.
  */
-void OsLib_IOCOmpletionEnQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd)
+void OsLib_IOCompletionEnQueue(struct NvmeCtrlr *ctrlr,
+                               vmk_ScsiCommand *vmkCmd)
 {
-   VMK_ReturnStatus        status;
-   NvmeIoCompletionQueue    *IOCompletionQueue;
+   VMK_ReturnStatus status;
+   NvmeIoCompletionQueue *IOCompletionQueue;
    NvmeIoRequest *IORequest;
    vmk_Bool needWakeup = VMK_FALSE;
    vmk_uint32 qID;
 
    qID = OsLib_GetQueue(ctrlr, vmkCmd);
-   VMK_ASSERT(qID <  ctrlr->numIoQueues);
+   VMK_ASSERT(qID < ctrlr->numIoQueues);
    IOCompletionQueue = &(ctrlr->IOCompletionQueue[qID]);
    VMK_ASSERT(IOCompletionQueue);
 
+#if VMKAPIDDK_VERSION >= 650
+   /*
+    * PSA provides a small amount of preallocated memory per SCSI command,
+    * which can be used (for any purposes) by device drivers. The address
+    * of said memory block (which is guaranteed to be cacheline-aligned)
+    * can be obtained by calling vmk_ScsiCmdGetDriverFrame(). The size of
+    * the block (which is constant but may change between VMKAPI versions)
+    * can be obtained by calling vmk_ScsiCmdGetDriverFrameSize(). Note
+    * that querying the memory block address does not allocate anything;
+    * as such, the call always succeeds (so there's no need to check if
+    * the returned address is NULL and handle out-of-memory conditions).
+    * There's also no need for deallocation upon command completion.
+    *
+    * Using preallocated frames is fast and convenient; however, the
+    * amount of preallocated memory is limited. Drivers that choose to
+    * use preallocated frames MUST call vmk_ScsiCmdGetDriverFrameSize()
+    * to ensure that the preallocated frame is large enough for its
+    * intended use (see the assert in init_module() in nvme_module.c).
+    * If more memory for per-command data is needed, the driver must
+    * employ traditional allocation methods (that is, allocating from
+    * private heaps or slabs).
+    */
+   IORequest = vmk_ScsiCmdGetDriverFrame(vmkCmd);
+#else
    IORequest = vmk_SlabAlloc(ctrlr->complWorldsSlabID);
    /* complete command immediately if out of memory */
    if (!IORequest) {
@@ -1128,6 +1221,7 @@ void OsLib_IOCOmpletionEnQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd)
       vmk_ScsiSchedCommandCompletion(vmkCmd);
       return;
    }
+#endif
 
    IORequest->vmkCmd = vmkCmd;
    status = vmk_SpinlockLock(IOCompletionQueue->lock);
@@ -1135,15 +1229,14 @@ void OsLib_IOCOmpletionEnQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd)
    if (vmk_SListIsEmpty(&IOCompletionQueue->complList)) {
       needWakeup = VMK_TRUE;
    }
-   vmk_SListInsertAtTail(&IOCompletionQueue->complList,
-                      &IORequest->link);
+   vmk_SListInsertAtTail(&IOCompletionQueue->complList, &IORequest->link);
    vmk_SpinlockUnlock(IOCompletionQueue->lock);
 
    if(needWakeup) {
       vmk_WorldWakeup((vmk_WorldEventID) IOCompletionQueue);
    }
 }
-#endif //end of NVME_MUL_COMPL_WORLD
+#endif // end of NVME_MUL_COMPL_WORLD
 
 /**
  * Callback to notify when IO is allowed to adapter.
@@ -1302,6 +1395,20 @@ OsLib_GetQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd)
 {
 #if NVME_MUL_COMPL_WORLD
    static int qID=0;
+#if VMKAPIDDK_VERSION >= 650
+   vmk_uint16 affinityHint = vmk_ScsiCmdGetAffinityHint(vmkCmd);
+   if (ctrlr->useQueueAffinityHint) {
+      return affinityHint & ctrlr->affinityMask;
+
+   } else if (affinityHint) {
+      /*
+       * Commands carry affinity hints. Do not use round robin in that case
+       * and switch to the queue ID based on affinity hint starting with
+       * IOs following this one.
+       */
+       ctrlr->useQueueAffinityHint = VMK_TRUE;
+   }
+#endif
    qID = (qID+1)%(ctrlr->numComplWorlds);
    return qID;
 #else

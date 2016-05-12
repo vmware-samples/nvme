@@ -6,6 +6,14 @@ This is sample userworld management tool for NVMe device.
 
 == Change Log ==
 
+2015/12/8 1.2.0.7-1vmw
+
+   Move nvme_lib.c and nvme_lib.h from nvme-cli to esxcli-nvme-plugin.
+
+2015/11/17 1.2.0.6-1vmw
+
+   Correct the precentageUsed in structure smart_log.
+
 2014/12/29 1.2.0.5-1vmw
 
    From this version, We decouple the versions of NVMe driver and nvmecli.

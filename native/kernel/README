@@ -6,23 +6,40 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
 
 == Change Log ==
 
-2015/10/15 1.2.0.27-4vmw
+2016/3/10 1.2.0.32-1vmw
 
-   1. Only check timeout for read & write commands.
-   2. Add a module parameter to adjust the timeout value for IO checker.
+   1. Make VMKAPI usage compatible with previous version.
+   2. Fix an incorrect sizeof expression.
 
-2015/9/7 1.2.0.27-3vmw
+2016/2/28 1.2.0.31-1vmw
 
-   1. Enhance exception handler during device surprise removal.
-   2. Correct the copyright statement in the header of files.
+   1. Fix PR #1606450: Abort all active commands when controller enters failed state.
+   2. Fix PR #1568844: Check whether device is physically removed during test unit ready.
 
-2015/7/22 1.2.0.27-2vmw
+2015/11/10 1.2.0.30-1vmw
 
-   1. Hide five parameters: nvme_force_intx, max_io_request, max_prp_list, tranfer_size
-      and io_command_id_size.
-   2. Set the default log level as NVME_LOG_LEVEL_WARNING.
-   3. Fix two typos.
-   4. Add Micron P610DC device.
+   Add fields in identify and smart log page defined in NVMe 1.2 compatiable with 1.0e.
+
+2015/11/10 1.2.0.29-1vmw
+
+   1. Update protection type with hardware info
+   2. Re-issue commands in the reset flow
+   3. Merge from async release branch (1.2.0.27-2vmw ~ 1.2.0.27-4vmw)
+      a. Only check timeout for read & write commands.
+      b. Add a module parameter to adjust the timeout value for IO checker.
+      c. Correct the copyright statement in the header of files.
+      d. Hide five parameters: nvme_force_intx, max_io_request, max_prp_list,
+         tranfer_size and io_command_id_size.
+      e. Set the default log level as NVME_LOG_LEVEL_WARNING.
+      f. Add Micron P610DC device.
+ 
+2015/8/28 1.2.0.28-1vmw
+
+   1. Add PI (DIF/DIX) Support.
+   2. Fix the wrong report of async event when controller is in reset.
+   3. Enhance exception handler during device surprise removal.
+   4. Remove the redundant call of nvmeCoreProcessCq in NvmeCore_ProcessQueueCompletions.
+   5. Enhance the check of input hex string when setting debug level.
 
 2015/7/20 1.2.0.27-1vmw
 
@@ -278,7 +295,7 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
 
    Bump the version to 1.2.0.0-1vmw as the first version for vsphere-2016.
 
-   2015/1/7 1.0e.0.35-1vmw
+2015/1/7 1.0e.0.35-1vmw
 
    Add support for vendor specific command format of Admin Vendor Specific Commands.
 
@@ -286,7 +303,7 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
    not supported, which means this kind of vendor specific operations are not allowed.
    This change enables this kind of admin vendor specific commands.
 
-   2014/12/17 1.0e.0.34-1vmw
+2014/12/17 1.0e.0.34-1vmw
 
    Fix the race codition issue on admin command submission and completion.
 
@@ -295,7 +312,7 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
    2. other submitted commands will be done in completion path.
    3. Unsubmitted commands will be cleaned up immediately in submission path.
 
-   2014/12/12 1.0e.0.33-1vmw
+2014/12/12 1.0e.0.33-1vmw
 
    Fix PR 1368770: it is re-opened by a regression defect introduced by change #3211338
 
@@ -304,7 +321,7 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
    should check uioDmaEntry and only do UnmapUserPages() and free uioDmaEntry in the case
    that uioDmaEntry is not NULL.
 
-   2014/12/10 1.0e.0.32-1vmw
+2014/12/10 1.0e.0.32-1vmw
 
    Fix PR 1368770: Double cleanup uioDmaEntry for admin command.
 
@@ -317,7 +334,7 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
    This change clears cleanup callback in completion path when the submission path
    is called to cleanup uioDmaEntry, so that the cleanup would only be called once.
 
-   2014/10/29 1.0e.0.31-1vmw
+2014/10/29 1.0e.0.31-1vmw
 
    Fix PR 1322248: Enable multiple completion worlds in NVMe driver.
 
@@ -338,7 +355,7 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
    5, The scheduling of these completion worlds are done by kernel scheduler.
    Driver never pins the worlds to dedicated PCPU explicitly.
 
-   2014/10/19 1.0e.0.30-1vmw
+2014/10/19 1.0e.0.30-1vmw
 
    Fix PR 1336768: Initilizing response data of inquiry VPD 83H page.
 
@@ -347,7 +364,7 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
    This change initializes the whole responese data to zero in function
    NvmeScsiCmd_DoInquiryVpd83.
 
-   2014/09/19 1.0e.0.29-1vmw
+2014/09/19 1.0e.0.29-1vmw
 
    Fix PR 1310589: a data corruption observed when using NVMe devices in 3-node
                    (or more) vSAN cluster

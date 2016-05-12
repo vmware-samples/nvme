@@ -825,7 +825,7 @@ NvmeCtrlrCmd_GetLogPageSync(struct NvmeCtrlr *ctrlr, struct nvme_cmd *cmd, void*
    struct NvmeDmaEntry  dmaEntry;
 
    /*create dma entry*/
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry);
+   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
       EPRINT("failed to allocate memory!");
       return VMK_FAILURE;
@@ -1022,7 +1022,7 @@ NvmeCtrlr_GetIdentify(struct NvmeCtrlr *ctrlr)
    VMK_ReturnStatus vmkStatus;
    struct NvmeDmaEntry dmaEntry;
 
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry);
+   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
       return vmkStatus;
    }
@@ -1224,7 +1224,7 @@ NvmeCtrlr_AllocNs(struct NvmeCtrlr *ctrlr, int nsId)
        return (NULL);
    }
 
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry);
+   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
       goto free_ns;
    }
@@ -1278,6 +1278,7 @@ NvmeCtrlr_AllocNs(struct NvmeCtrlr *ctrlr, int nsId)
    ns->fmtLbaSize  = ident->fmtLbaSize;
    ns->dataProtCap = ident->dataProtCap;
    ns->dataProtSet = ident->dataProtSet;
+   ns->metaDataCap = ident->metaDataCap;
    ns->ctrlr       = ctrlr;
 
    ns->eui64       = ident->eui64;
@@ -1476,6 +1477,9 @@ NvmeCtrlr_CheckIOFunction(struct NvmeNsInfo *ns, struct NvmeQueueInfo *qinfo)
    cmdInfo->timeoutId = ctrlr->timeoutId;
    cmdInfo->doneData = NULL;
    cmd->cmd.read.numLBA = 1;
+   if (END2END_DPS_TYPE(ns->dataProtSet)) {
+      cmd->cmd.read.protInfo = 0x8;
+   }
 
    qinfo->timeout[cmdInfo->timeoutId] ++;
 
@@ -1559,6 +1563,17 @@ NvmeCtrlr_WaitDeviceReady(struct NvmeCtrlr *ctrlr)
    do {
       nvmeStatus = NvmeCtrlr_CheckIOFunction(ns, qinfo);
       DPRINT_CTRLR("check IO function status 0x%x, %s", nvmeStatus, NvmeCore_StatusToString(nvmeStatus));
+
+      /**
+       * Check device whether device is physically removed.
+       * If yes, we should return immediately. See PR 1568844.
+       **/
+      if (NvmeCore_IsCtrlrRemoved(ctrlr) == VMK_TRUE) {
+          WPRINT("device is missing.");
+          NvmeCtrlr_SetMissing(ctrlr);
+          return NVME_STATUS_FAILURE;
+      }
+
       if(!OsLib_TimeAfter(OsLib_GetTimerUs(), timeout)) {
          VPRINT("device not ready after 60 seconds, quit");
          nvmeStatus = NVME_STATUS_FAILURE;
@@ -2075,6 +2090,12 @@ NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns , Nvme_Status s
        */
        return VMK_BUSY;
    }
+   if (state == NVME_CTRLR_STATE_FAILED) {
+      /**
+       * State transition from FAILED to OPERATIONAL is not allowed
+       */
+       return VMK_NOT_SUPPORTED;
+   }
 
 
    /**
@@ -2178,8 +2199,6 @@ NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns , Nvme_Status s
     * IO queue processing.
     */
    vmk_SpinlockLock(ctrlr->lock);
-   NvmeCtrlr_ResumeIoQueues(ctrlr);
-
    NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_OPERATIONAL, VMK_FALSE);
    vmk_SpinlockUnlock(ctrlr->lock);
 
@@ -2201,7 +2220,14 @@ err_out:
    vmk_SpinlockLock(ctrlr->lock);
    NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_FAILED, VMK_FALSE);
    vmk_SpinlockUnlock(ctrlr->lock);
-
+#if ENABLE_REISSUE
+   /**
+    * Abort all commands in active list.
+    */
+   if (doReissue) {
+      NvmeCtrlr_FlushIoQueues(ctrlr, ns, status, VMK_FALSE);
+   }
+#endif
    return VMK_FAILURE;
 }
 
@@ -2349,7 +2375,7 @@ VMK_ReturnStatus NvmeCtrlr_DoTaskMgmtReset(struct NvmeCtrlr *ctrlr, Nvme_ResetTy
           *                   the submission queue, otherwise by returning
           *                   FUNCTION COMPLETE.
           */
-         vmkStatus = NvmeCtrlr_HwReset(ctrlr, NULL, NVME_STATUS_RESET, VMK_FALSE);
+         vmkStatus = NvmeCtrlr_HwReset(ctrlr, NULL, NVME_STATUS_RESET, VMK_TRUE);
          break;
       case NVME_TASK_MGMT_LUN_RESET:
          /**
@@ -2365,7 +2391,7 @@ VMK_ReturnStatus NvmeCtrlr_DoTaskMgmtReset(struct NvmeCtrlr *ctrlr, Nvme_ResetTy
           *                      (EN) field of Controller Configuration
           *                      register
           */
-         vmkStatus = NvmeCtrlr_HwReset(ctrlr, NULL, NVME_STATUS_RESET, VMK_FALSE);
+         vmkStatus = NvmeCtrlr_HwReset(ctrlr, NULL, NVME_STATUS_RESET, VMK_TRUE);
          break;
       default:
          vmkStatus = VMK_BAD_PARAM;
@@ -2660,9 +2686,12 @@ static void
 AsyncEventReportComplete (struct NvmeQueueInfo *qinfo,
       struct NvmeCmdInfo *cmdInfo)
 {
-
    struct NvmeCtrlr *ctrlr = qinfo->ctrlr;
 
+   if (cmdInfo->cmdStatus == NVME_STATUS_IN_RESET) {
+      /* Not an event when async event cmd is completed by hw reset. */
+      goto out;
+   }
 
    /**
     * Three types of event reported -
@@ -2703,6 +2732,8 @@ AsyncEventReportComplete (struct NvmeQueueInfo *qinfo,
             break;
       }
    }
+
+out:
    ctrlr->curAen--;
    NvmeCore_PutCmdInfo (qinfo, cmdInfo);
 
