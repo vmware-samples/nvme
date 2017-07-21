@@ -45,22 +45,23 @@ void xml_format_bool_field(const char *name, int output)
 
 void xml_format_int2string_field(const char *name, int output)
 {
-   printf("<field name=\"%s\"><string>%x</string></field>\n", name, output);
+   printf("<field name=\"%s\"><string>0x%x</string></field>\n", name, output);
 }
 
 void xml_format_ull2string_field(const char *name, vmk_uint64 output)
 {
-   printf("<field name=\"%s\"><string>0x%llx</string></field>\n", name, output);
+   printf("<field name=\"%s\"><string>0x%" VMK_FMT64 "x</string></field>\n",
+          name, output);
 }
 
 void xml_format_128b2string_field(const char *name, vmk_uint8 *output)
 {
    xml_field_begin(name);
    if (*(vmk_uint64 *)(output + 8) == 0) {
-      printf("<string>0x%llx</string>\n", *(vmk_uint64 *)output);
+      printf("<string>0x%" VMK_FMT64 "x</string>\n", *(vmk_uint64 *)output);
    } else {
-      printf("<string>0x%llx%llx</string>\n", *(vmk_uint64 *)(output + 8),
-             *(vmk_uint64 *)output);
+      printf("<string>0x%" VMK_FMT64 "x%" VMK_FMT64 "x</string>\n",
+             *(vmk_uint64 *)(output + 8), *(vmk_uint64 *)output);
    }
    xml_field_end();
 }

@@ -61,7 +61,7 @@ ValidateUio(struct NvmeCtrlr *ctrlr, struct usr_io *uio, vmk_Bool usr_io)
     * Validate data access.
     */
    if (uio->length) {
-      if (uio->length > (transfer_size * 1024)) {
+      if (uio->length > ctrlr->maxXferLen) {
          EPRINT("Request transfer length exceeds maximum allowed %d",
             uio->length);
          return VMK_BAD_PARAM;
@@ -172,129 +172,6 @@ AllowedAdminCmd(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
    }
 }
 
-
-/**
- * @brief This function maps user pages into kernel memory
- *
- * @param[in] ctrlr Pointer NVME device context
- * @param[in] uio Pointer to user request
- * @param[in] cmdInfo Pointer to Command Information Block
- *
- * @return This function returns VMK_OK if successful, otherwise Error Code
- *
- * @note: We have blocked meta data and fail any request with non-zero length.
- * @note: We currently do not actually map user pages into the kernel address
- *        space. instead, we do bounce buffers for the user io and copy from/to
- *        user space address at the entry and exit of IOCTL command.
- */
-static VMK_ReturnStatus
-MapUserPages(struct NvmeCtrlr *ctrlr, struct usr_io *uio,
-             struct NvmeDmaEntry *dmaEntry)
-{
-   VMK_ReturnStatus vmkStatus;
-
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, uio->length, dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
-   if (vmkStatus) {
-      DPRINT_ADMIN("Failed to allocate dma buffer for uio, 0x%x.", vmkStatus);
-      return vmkStatus;
-   }
-
-   if(uio->direction == XFER_TO_DEV) {
-      vmkStatus = vmk_CopyFromUser(dmaEntry->va, uio->addr, uio->length);
-      if (vmkStatus) {
-         DPRINT_ADMIN("Failed to copy from user buffer, 0x%x.", vmkStatus);
-         goto err_free_dmabuffer;
-      }
-   }
-
-   return VMK_OK;
-
-
-err_free_dmabuffer:
-   OsLib_DmaFree(&ctrlr->ctrlOsResources, dmaEntry);
-
-   return vmkStatus;
-}
-
-
-/**
- * @brief This function unmaps user data from kernel address space.
- *
- * @param[in] ctrlr Pointer NVME device context
- * @param[in] uio Pointer to user request
- * @param[in] cmdInfo Pointer to Command Information Block
- *
- * @return This function returns VMK_OK if successful, otherwise Error Code
- *
- */
-static VMK_ReturnStatus
-UnmapUserPages(struct NvmeCtrlr *ctrlr, struct usr_io *uio,
-               struct NvmeDmaEntry *dmaEntry)
-{
-   VMK_ReturnStatus vmkStatus = VMK_OK;
-
-   /**
-    * Since we are doing bounce buffer, copy the data back to user buffer if
-    * requesting data from device
-    */
-   if(uio->direction == XFER_FROM_DEV) {
-      vmkStatus = vmk_CopyToUser(uio->addr, dmaEntry->va, uio->length);
-      if (vmkStatus) {
-         DPRINT_ADMIN("Failed to copy to user buffer, 0x%x.", vmkStatus);
-      }
-   }
-
-   OsLib_DmaFree(&ctrlr->ctrlOsResources, dmaEntry);
-
-   return vmkStatus;
-}
-
-
-/**
- * @brief This function updates user uio data structure.
- *    This function is called by pass-through function to update
- *    user uio data structure, updating data length, meta data
- *    length, status and completion entry.
- *
- * @param[in] uio Pointer to uio structure in kernel address
- * @param[in] cmdInfo Pointer to command information block.
- *
- * @return This function returns VMK_OK if successful, otherwise Error Code
- *
- * @note: We only copy the cq_entry back to uio here.
- *
- */
-static VMK_ReturnStatus
-PutUio(struct usr_io *uio)
-{
-   return VMK_OK;
-}
-
-/**
- * Free DMA buffer allocated for an Admin Passthru command, in ABORT context.
- *
- * If an admin passthru command failed (due to TIMEOUT or other reasons), the
- * DMA buffer cannot be freed inline since the command may still be outstanding
- * in the hardware and freeing the DMA buffer inline may introduce problems
- * when hardware tries to access the DMA buffer which has alrady been freed.
- *
- * In that case, this function is called during command completion time, to
- * free the DMA buffer when we are guaranteed that the command is leaving
- * hardware.
- */
-static void
-AdminPassthruFreeDma(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
-{
-   struct NvmeDmaEntry *dmaEntry = cmdInfo->cleanupData;
-
-   if (cmdInfo->type == ABORT_CONTEXT) {
-      VPRINT("Freeing DMA buffer from cmd %p.", cmdInfo);
-      OsLib_DmaFree(&qinfo->ctrlr->ctrlOsResources, dmaEntry);
-      Nvme_Free(dmaEntry);
-   }
-}
-
-
 /**
  * @brief This function process user Admin request.
  *    This function is called by IOCTL function to perform
@@ -311,13 +188,9 @@ AdminPassthruFreeDma(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
 static VMK_ReturnStatus
 AdminPassthru(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
 {
-   Nvme_Status           nvmeStatus;
    VMK_ReturnStatus      vmkStatus;
-   struct NvmeCmdInfo   *cmdInfo;
-   struct NvmeQueueInfo *qinfo;
-   struct NvmeDmaEntry  *uioDmaEntry = NULL;
-   vmk_ByteCount         length;
    Nvme_CtrlrState       state;
+   vmk_uint8            *buf = NULL;
 
    /**
     * Block admin commands if the controller is not in STARTED DEGRADED or OPERATIONAL
@@ -339,104 +212,40 @@ AdminPassthru(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
       return vmkStatus;
    }
 
-   qinfo = &ctrlr->adminq;
-   LOCK_FUNC(qinfo);
-   cmdInfo = NvmeCore_GetCmdInfo(qinfo);
-   UNLOCK_FUNC(qinfo);
-   if (!cmdInfo) {
-      DPRINT_ADMIN("Out of Cmd_Info data %p", qinfo);
-      return VMK_NO_MEMORY;
-   }
-   Nvme_Memcpy64(&cmdInfo->nvmeCmd, &uio->cmd,
-      sizeof(struct nvme_cmd)/sizeof(vmk_uint64));
-
-#if NVME_DEBUG
-   if (nvme_dbg & NVME_DEBUG_DUMP_CMD) {
-      NvmeDebug_DumpCmd(&cmdInfo->nvmeCmd);
-   }
-#endif
-
-   cmdInfo->uio = uio;
-   cmdInfo->type = ADMIN_CONTEXT;
-   cmdInfo->count = uio->length;
-   cmdInfo->nvmeCmd.header.cmdID = cmdInfo->cmdId;
-   DPRINT_ADMIN("command ID %d", cmdInfo->cmdId);
-
-   /**
-    * Map user space and Create an scatter gather list of user data.
-    */
    if (uio->length) {
-
-      uioDmaEntry = Nvme_Alloc(sizeof(*uioDmaEntry), 0, NVME_ALLOC_ZEROED);
-      if (!uioDmaEntry) {
-         /**
-          * Need to free the cmdInfo allocated before exit.
-          */
-         LOCK_FUNC(qinfo);
-         NvmeCore_PutCmdInfo(qinfo, cmdInfo);
-         UNLOCK_FUNC(qinfo);
-
-         goto out;
+      buf = Nvme_Alloc(uio->length, 0, NVME_ALLOC_ZEROED);
+      if (buf == NULL) {
+         EPRINT("Failed to allocate buffer memory.");
+         return VMK_NO_MEMORY;
       }
 
-      vmkStatus = MapUserPages(ctrlr, uio, uioDmaEntry);
-      if (vmkStatus) {
-         Nvme_Free(uioDmaEntry);
-
-         /**
-          * Need to free the cmdInfo allocated before exit.
-          */
-         LOCK_FUNC(qinfo);
-         NvmeCore_PutCmdInfo(qinfo, cmdInfo);
-         UNLOCK_FUNC(qinfo);
-
-         goto out;
+      if(uio->direction == XFER_TO_DEV) {
+         vmkStatus = vmk_CopyFromUser((vmk_VA)buf, uio->addr, uio->length);
+         if (vmkStatus) {
+            DPRINT_ADMIN("Failed to copy from user buffer, 0x%x.", vmkStatus);
+            goto free_buf;
+         }
       }
-
-      cmdInfo->cleanup     = AdminPassthruFreeDma;
-      cmdInfo->cleanupData = uioDmaEntry;
-
-      /**
-       * Initialzie sgPosition so that we can process SG to PRPs later
-       */
-      vmkStatus = vmk_SgFindPosition(uioDmaEntry->sgOut, 0,
-                                     &cmdInfo->sgPosition);
-      VMK_ASSERT(vmkStatus == VMK_OK);
-
-      cmdInfo->cmdBase = cmdInfo;
-      cmdInfo->requiredLength= uio->length;
-      cmdInfo->requestedLength = 0;
-      length = NvmeIo_ProcessPrps(qinfo, cmdInfo);
-
-      /**
-       * We allocate physically contiguous buffer for uio, so we should
-       * not need to split the command for this IO.
-       */
-      VMK_ASSERT(length == uio->length);
    }
 
-   /**
-    * Now submit the command to HW and wait for completion
-    */
-   nvmeStatus = NvmeCore_SubmitCommandWait(qinfo, cmdInfo,
-                                           &uio->comp, uio->timeoutUs);
-   vmkStatus = SUCCEEDED(nvmeStatus) ? VMK_OK : VMK_FAILURE;
+   vmkStatus = NvmeCtrlrCmd_SendAdmin(ctrlr, &uio->cmd, buf, uio->length, &uio->comp,
+                                      uio->timeoutUs);
+   if (vmkStatus == VMK_OK) {
+      if(uio->direction == XFER_FROM_DEV && uio->length) {
+         vmkStatus = vmk_CopyToUser(uio->addr, (vmk_VA)buf, uio->length);
+         if (vmkStatus) {
+            DPRINT_ADMIN("Failed to copy from user buffer, 0x%x.", vmkStatus);
+            goto free_buf;
+         }
+      }
+   }
+
    uio->status = vmkStatus;
-   DPRINT_ADMIN("Command completion result 0x%x.", vmkStatus);
 
-   if (uioDmaEntry != NULL && vmkStatus == VMK_OK) {
-      /**
-       * We only free DMA buffers inline when the command is successful.
-       */
-      UnmapUserPages(ctrlr, uio, uioDmaEntry);
-      Nvme_Free(uioDmaEntry);
+free_buf:
+   if (buf != NULL) {
+      Nvme_Free(buf);
    }
-
-   vmkStatus = PutUio(uio);
-
-out:
-   DPRINT_ADMIN("Result 0x%x, uio status 0x%x.", vmkStatus, uio->status);
-
    return vmkStatus;
 }
 
@@ -453,9 +262,17 @@ static VMK_ReturnStatus
 DumpRegs(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
 {
    int length;
+   Nvme_CtrlrState state;
 
    length = min_t(int, ctrlr->barSize, uio->length);
    uio->meta_length = length;
+
+   state = NvmeState_GetCtrlrState(ctrlr, VMK_TRUE);
+   if (state != NVME_CTRLR_STATE_OPERATIONAL) {
+      DPRINT_ADMIN("Receive registers dump request while controller is in %s state.",
+                   NvmeState_GetCtrlrStateString(state));
+      return VMK_NOT_READY;
+   }
 
    return vmk_CopyToUser(uio->addr, ctrlr->regs, length);
 }
@@ -534,28 +351,26 @@ nvmeMgmtUpdateNs(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
 {
    VMK_ReturnStatus vmkStatus = VMK_NOT_SUPPORTED;
    struct iden_namespace *ident;
-   struct NvmeDmaEntry dmaEntry;
    vmk_ListLinks     *itemPtr, *nextPtr;
    struct NvmeNsInfo *ns;
    vmk_uint32 lba_format;
 
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
-   if (vmkStatus != VMK_OK) {
-      EPRINT("Failed to alloc dma.");
-      return vmkStatus;
+   ident = Nvme_Alloc(sizeof(*ident), 0, NVME_ALLOC_ZEROED);
+   if (ident == NULL) {
+      EPRINT("Failed to allocate namespace %d identify data.", uio->namespaceID);
+      return VMK_NO_MEMORY;
    }
-   vmkStatus = NvmeCtrlrCmd_Identify(ctrlr, uio->namespaceID, dmaEntry.ioa);
+
+   vmkStatus = NvmeCtrlrCmd_Identify(ctrlr, uio->namespaceID, (vmk_uint8 *)ident);
    if (vmkStatus != VMK_OK) {
-      EPRINT("Failed to identify namespace %d.", uio->namespaceID);
-      goto free_dma;
+      EPRINT("Failed to get identify namespace %d.", uio->namespaceID);
+      goto free_ident;
    }
-   
-   ident = (struct iden_namespace *)dmaEntry.va;
 
    vmk_SpinlockLock(ctrlr->lock);
    VMK_LIST_FORALL_SAFE(&ctrlr->nsList, itemPtr, nextPtr) {
       ns = VMK_LIST_ENTRY(itemPtr, struct NvmeNsInfo, list);
-      /* Keep the validation criteria consistent with format command since 
+      /* Keep the validation criteria consistent with format command since
        * this function is always called after completing format command.*/
       if (ns->id == uio->namespaceID && !NvmeCore_IsNsOnline(ns)) {
          vmk_SpinlockLock(ns->lock);
@@ -576,9 +391,8 @@ nvmeMgmtUpdateNs(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
    }
    vmk_SpinlockUnlock(ctrlr->lock);
 
-free_dma:
-   OsLib_DmaFree(&ctrlr->ctrlOsResources, &dmaEntry);
-
+free_ident:
+   Nvme_Free(ident);
    return vmkStatus;
 }
 
@@ -590,7 +404,49 @@ nvmeMgmtGetIntVectNum(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
    return VMK_OK;
 }
 
+static VMK_ReturnStatus
+nvmeMgmtSetTimeout(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
+{
+   VMK_ReturnStatus vmkStatus = VMK_OK;
 
+#if USE_TIMER
+   int newVal, oldVal;
+   newVal = uio->length;
+   if (newVal < 0 || newVal > NVME_IO_TIMEOUT) {
+      vmkStatus = VMK_BAD_PARAM;
+      uio->status = vmkStatus;
+      return vmkStatus;
+   }
+
+   vmk_SpinlockLock(ctrlr->lock);
+   oldVal = ctrlr->ioTimeout;
+   ctrlr->ioTimeout = newVal;
+   if (oldVal == 0 && newVal > 0) {
+      NvmeExc_SignalException(ctrlr, NVME_EXCEPTION_TASK_TIMER);
+   }
+   vmk_SpinlockUnlock(ctrlr->lock);
+#else
+   DPRINT_MGMT("Timeout checker is disabled.");
+   vmkStatus = VMK_NOT_SUPPORTED;
+#endif
+
+   uio->status = vmkStatus;
+   return vmkStatus;
+}
+
+static VMK_ReturnStatus
+nvmeMgmtGetTimeout(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
+{
+   VMK_ReturnStatus vmkStatus = VMK_OK;
+#if USE_TIMER
+   uio->length = ctrlr->ioTimeout;
+#else
+   DPRINT_MGMT("Timeout checker is disabled.");
+   vmkStatus = VMK_NOT_SUPPORTED;
+#endif
+   uio->status = vmkStatus;
+   return vmkStatus;
+}
 
 /**
  * Process ioctl commands
@@ -655,6 +511,12 @@ NvmeCtrlr_IoctlCommon(struct NvmeCtrlr *ctrlr, vmk_uint32 cmd,
          break;
       case NVME_IOCTL_GET_INT_VECT_NUM:
          vmkStatus = nvmeMgmtGetIntVectNum(ctrlr, uio);
+         break;
+      case NVME_IOCTL_SET_TIMEOUT:
+         vmkStatus = nvmeMgmtSetTimeout(ctrlr, uio);
+         break;
+      case NVME_IOCTL_GET_TIMEOUT:
+         vmkStatus = nvmeMgmtGetTimeout(ctrlr, uio);
          break;
       default:
          EPRINT("unknown ioctl command %d.", cmd);

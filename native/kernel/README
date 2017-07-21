@@ -6,6 +6,149 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
 
 == Change Log ==
 
+2017/4/5 1.2.1.16-1vmw
+
+   Enhance the check of SCSI command data-in and data-out buffer length.
+
+   1. Define NvmeScsiCmd_SgCopyTo and NvmeScsiCmd_SgCopyFrom for safely copying data to/from SCSI command sg array.
+   2. Add a new nvme status to indicate invalid parameter list length.
+   3. Fix PR #1840406: Not copy more than sg array length data in mode select command.
+
+2017/3/26 1.2.1.15-1vmw
+
+   Unify admin command submission interfaces in both sync and async manners
+
+   1. Provide two unified interfaces for driver and user tool to submit admin commands in both sync and async manners
+      * SYNC:  NvmeCtrlrCmd_SendAdmin
+      * ASYNC: NvmeCtrlrCmd_SendAdminAsync
+   2. Update the functions of get identify, set/get features, get log page, async event and admin passthru using the two interfaces
+   3. Use cmdInfo DMA buffer as the admin command data buffer if its length <= 4K, otherwise, allocate DMA buffer.
+      In fact, almost all admin commands are in the former case, exception are getting error log page and firmware download whose
+      data size may be > 4K.
+   4. This change fixes PR #1826136: IOMMU fault when admin command issued internally timeout.
+   5. This change fixes PR #1838737: Not allowed to set "Coalescing Disable" value for admin queue.
+
+2017/3/20 1.2.1.14-1vmw
+
+   Fix 2 PSODs introduced by driver synchronization improvement change.
+
+   1. Fix PR #1829430: Increase IOCompletionQueue lock rank to avoid lock rank violation in NvmeCore_FlushQueue.
+   2. Fix PR #1832027: Fix an overreactive assertion in nvmeCoreProcessCq.
+
+2017/3/15 1.2.1.13-1vmw
+
+   Enhance default level log message and fix one tiny issue
+
+   1. Fix PR #1809001: Enhance nvme driver log message with default log level
+   2. Allocate errorLog and smartLog when needed in exception handler
+
+2017/3/14 1.2.1.12-1vmw
+
+   Fix PR #1751311: Report a queue depth of (qsize - 1) to PSA.
+
+   In the NVMe device's queue, one entry is not available for use due to Head
+   and Tail entry pointer definition. So each queue should report one less
+   than the queue size to upper layer. Otherwise, QFULL error may be hit and
+   cause PSA to reduce the queue depth by half.
+
+2017/3/8 1.2.1.11-1vmw
+
+   Enhance controller start process and several admin command
+
+   1. Fix PR #1767464: Remove the redundent controller reset when starting controller
+   2. Fix PR #1819773: Check the arbitration support before setting arbituration feature
+   3. Fix PR #1781272: Check NVM format support before formatting namespace
+
+2017/2/8 1.2.1.10-1vmw
+
+   Fix PR #1810438 : NVMe driver performance is affected by sharing common locks and state between submission and completion paths.
+
+   Improve synchronization in the driver by eliminating the need for locking on hot paths.
+   Reduce the state shared between submission and completion paths.
+
+2017/1/8 1.2.1.9-1vmw
+
+   Fix PR #1790032: nvmeCoreLogError doesn't log any useful information
+
+   Log below information when NVMe command returned failure by controller:
+      - command status, opcode, qID, cmdID, nsID.
+      - lba and lbc if it's a read/write command.
+
+2017/1/4 1.2.1.8-1vmw
+
+   Fix PR #1789718: Don't check and split admin command due to stripe size for Intel device
+
+   For admin pass through command, we don't need to check and split command due to
+   stripe size for Intel device, because the data buffer is page size and page aligned,
+   it does not cross stripe boundry. Otherwise, it causes PSOD due to no namespace
+   structure attached to cmdInfo, which would be used by split command.
+
+2016/12/17 1.2.1.7-1vmw
+
+   Fix PR #1780457: Fix the performance drop in some Intel devices
+
+   Some Intel devices have a vendor specific limitation on their firmware/hardware.
+   With this limitation, all IOs across the stripe size (or boundary) delivered to
+   NVMe device suffer from significant performance drop.
+
+   Driver checks all IOs and splits command if it crosses the stripe on these device.
+
+   In addtion, this change also increases the max_prp_list to 512, thus max tranfer size
+   in one command could be MIN(mtds, 2MB).
+
+2016/11/25 1.2.1.6-1vmw
+
+   Fix PR #1745050: Support dynamic timeout configuration per device.
+
+   The code changes include:
+   1. Remove module parameter: io_timeout.
+   2. Remove timeoutId field in qinfo struct and add ioTimeout field in ctrlr struct.
+   2. Add USE_TIMER check for timeout checker related code.
+   3. Add 2 ioctl functions to set and get controller's timeout value.
+
+2016/11/24 1.2.1.5-1vmw
+
+   Fix PR #1747157: Write Cache Enable is reported mistakenly
+
+   LSOM enable/disable write cache by mode sense/select cache page command.
+   However, driver doesn't support this page. This change add this support
+   in scsi-nvme translation.
+
+   In addition, this change also removes an invalid return when IMMED bit is
+   assigned as 0 in sync cache command.
+
+2016/11/7 1.2.1.4-1vmw
+
+   1. Add controller state check in dump register management operation.
+   2. Correct wrong register definitions and add registers defined in NVMe 1.2.
+
+2016/9/13 1.2.1.3-1vmw
+
+   Fix PR #1705146: Enhance the check for device presence in driver initialization.
+
+   The code changes include:
+   1. Check for VMK_IO_ERROR return status from vmk_PCIAllocIntrCookie().
+   2. Fix NvmeCore_IsCtrlrRemoved() to use PCI config read of vendorID or device ID.
+   3. Add NvmeCore_IsCtrlrRemoved() in the process of waiting controller status
+      in NvmeCtrlr_HwStart() and NvmeCtrlr_HwStop().
+
+2016/8/19 1.2.1.2-1vmw
+
+   1. Fix PR #1712253: Use MDTS as a factor to set max host sector of scsi adapter
+   2. Enhance translation of VPD B0H page.
+
+2016/7/21 1.2.1.1-1vmw
+
+   Merge from vsphere-2016 branch (1.2.0.32-2vmw)
+
+   1. Fix PR #1693956: Fix a Memory leak when MSIx interrupt cookies allcation failed.
+   2. Correct the driver name as "nvme" instead of "nvme ".
+
+2016/5/12 1.2.1.0-1vmw
+
+   1. Enable 4k blocksize support in NVMe driver.
+   2. Enhance Makefile.inc and remove driver Makefile.
+
 2016/3/10 1.2.0.32-1vmw
 
    1. Make VMKAPI usage compatible with previous version.

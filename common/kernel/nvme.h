@@ -26,7 +26,7 @@
 /**
  * @file
  * @brief Hand generated based on NVM Express 1.0 Specification.
- * @defgroup nvme_regs NVM Express Registers.
+ * @defgroup nvme_regs NVM Express Registers based on NVM Express 1.2 spec.
  * These registers are mapped to memory space at the address specified by
  * the MLBAR/MUBAR (PCIe BAR 0 & 1) registers. All registers should be accessed
  * in their native widths, i.e a 16-bit register should be accessed as a 16-bit
@@ -37,10 +37,10 @@
 /**
  * @brief PCI - PCI Register.
  */
-
+#define NVME_PCI_ID_OFFSET 0x0
 #define NVME_PCI_CMDREG_OFFSET 0x4
 #define NVME_PCI_CMD_BUSMASTER 0x4
- 
+
 /**
  * @defgroup nvme_cap_fields NVM Express CAP Register Fields.
  *
@@ -49,121 +49,146 @@
  * - 63:56 RO 0h Reserved
  *
  * - 55:52 RO Impl Spec
- * Memory Page Size Maximum (MPSMAX):  This field indicates the maximum host
- * memory page size that the controller supports.  The maximum memory page size
- * is (2 ^ (12 + MPSMAX)).  The host shall not configure a memory page size in
+ * Memory Page Size Maximum (MPSMAX): This field indicates the maximum host
+ * memory page size that the controller supports. The maximum memory page size
+ * is (2 ^ (12 + MPSMAX)). The host shall not configure a memory page size in
  * CC.MPS that is larger than this value.
  *
  * - 51:48 RO Impl Spec
- * Memory Page Size Minimum (MPSMIN):   This field indicates the minimum host
- * memory page size that the controller supports.  The minimum memory page
- * size is (2 ^ (12 + MPSMIN)).  The host shall not configure a memory page
+ * Memory Page Size Minimum (MPSMIN): This field indicates the minimum host
+ * memory page size that the controller supports. The minimum memory page
+ * size is (2 ^ (12 + MPSMIN)). The host shall not configure a memory page
  * size in CC.MPS that is smaller than this value.
  *
- * - 47:41 RO 0h Reserved
+ * - 47:45 RO 0h Reserved
  *
- * - 40:37 RO Impl Spec
+ * - 44:37 RO Impl Spec
  * Command Sets Supported (CSS): This field indicates the command set(s) that
- * the controller supports.  A minimum of one command set shall be supported.
- * The field is bit significant.  If a bit is set to 1, then the corresponding
- * command set is supported.
- * If a bit is cleared to 0, then the corresponding command set is not
- * supported.
+ * the controller supports. A minimum of one command set shall be supported.
+ * The field is bit significant. If a bit is set to '1', then the corresponding
+ * command set is supported. If a bit is cleared to '0', then the corresponding
+ * command set is not supported.
  *  - Bit 37 NVM command set
  *  - Bit 38 Reserved
  *  - Bit 39 Reserved
  *  - Bit 40 Reserved
+ *  - Bit 41 Reserved
+ *  - Bit 42 Reserved
+ *  - Bit 43 Reserved
+ *  - Bit 44 Reserved
  *
- * - 36:32 RO 0h Reserved
+ * - 36 RO Impl Spec
+ * NVM Subsystem Reset Supported (NSSRS): This field indicates whether the
+ * controller supports the NVM Subsystem Reset feature defined in section
+ * 7.3.1. This field is set to '1' if the controller supports the NVM
+ * Subsystem Reset feature. This field is cleared to '0' if the controller
+ * does not support the NVM Subsystem Reset feature.
+ *
+ * - 35:32 RO Impl Spec
+ * Doorbell Stride (DSTRD): Each Submission Queue and Completion Queue
+ * Doorbell register is 32-bits in size. This register indicates the stride
+ * between doorbell registers. The stride is specified as (2 ^ (2 + DSTRD))
+ * in bytes. A value of 0h indicates a stride of 4 bytes, where the doorbell
+ * registers are packed without reserved space between each register.
  *
  * - 31:24 RO Impl Spec
- * Timeout (TO):  This is the worst case time that host software shall wait
- * for the controller to become ready (CSTS.RDY set to 1) after a power-on or
- * reset event (CC.EN is set to 1 by software).  This worst case time may be
- * experienced after an unclean shutdown; typical times are expected to be
- * much shorter.  This field is in 500 millisecond units.
+ * Timeout (TO): This is the worst case time that host software shall wait for
+ * CSTS.RDY to transition from:
+ * a) '0' to '1' after CC.EN transitions from '0' to '1'; or
+ * b) '1' to '0' after CC.EN transitions from '1' to '0'.
+ * This worst case time may be experienced after events such as an abrupt
+ * shutdown or activation of a new firmware image; typical times are expected
+ * to be much shorter. This field is in 500 millisecond units.
  *
  * - 23:19 RO 0h Reserved
  *
  * - 18:17 RO Impl Spec
  * Arbitration Mechanism Supported (AMS): This field is bit significant and
  * indicates the optional arbitration mechanisms supported by the controller.
- * If a bit is set to 1, then the corresponding arbitration mechanism is
- * supported by the controller.  The round robin arbitration mechanism is not
+ * If a bit is set to '1', then the corresponding arbitration mechanism is
+ * supported by the controller. The round robin arbitration mechanism is not
  * listed since all controllers shall support this arbitration mechanism.
- * Refer to section 4.7 for arbitration details.
+ * Refer to section 4.11 for arbitration details.
  *  - Bit 17 Weighted Round Robin + Urgent
  *  - Bit 18 Vendor Specific
  *
  * - 16 RO Impl Spec
- * Contiguous Queues Required (CQR):  This field is set to 1 if the controller
+ * Contiguous Queues Required (CQR): This field is set to '1' if the controller
  * requires that I/O Submission and I/O Completion Queues are required to be
- * physically contiguous.  This field is cleared to 0 if the controller
+ * physically contiguous. This field is cleared to '0' if the controller
  * supports I/O Submission and I/O Completion Queues that are not physically
- * contiguous.  If this field is set to 1, then the Physically Contiguous bit
+ * contiguous. If this field is set to '1', then the Physically Contiguous bit
  * CDW11.PC) in the Create I/O Submission Queue and Create I/O Completion
- * Queue commands shall be set to 1.
+ * Queue commands shall be set to '1'.
  *
  * - 15:00 RO Impl Spec
- * Maximum Queue Entries Supported (MQES):  This field indicates the maximum
- * individual queue size that the controller supports.  This value applies to
+ * Maximum Queue Entries Supported (MQES): This field indicates the maximum
+ * individual queue size that the controller supports. This value applies to
  * each of the I/O Submission Queues and I/O Completion Queues that software
- * may create.  This is a 0s based value.  The minimum value is 1h, indicating
+ * may create. This is a 0's based value. The minimum value is 1h, indicating
  * two entries.
  */
 /** @{ */
 /**
  * @brief CAP - Controller Capabilities Register Offset.
  */
-#define NVME_CAP     0x0000
+#define NVME_CAP                  0x0000
 
-#define NVME_CAP_MQES_LSB     0
-#define NVME_CAP_MQES_MSB     15
-#define NVME_CAP_MQES_MSK64      0x000000000000FFFF
-#define NVME_CAP_MQES_MSKL    0x0000FFFF
-#define NVME_CAP_MQES_MSKU    0x00000000
+#define NVME_CAP_MQES_LSB         0
+#define NVME_CAP_MQES_MSB         15
+#define NVME_CAP_MQES_MSK64       0x000000000000FFFF
+#define NVME_CAP_MQES_MSKL        0x0000FFFF
+#define NVME_CAP_MQES_MSKU        0x00000000
 
-#define NVME_CAP_CQR_LSB         16
-#define NVME_CAP_CQR_MSB      16
-#define NVME_CAP_CQR_MSK64    0x0000000000010000
-#define NVME_CAP_CQR_MSKL     0x00010000
-#define NVME_CAP_CQR_MSKU     0x00000000
+#define NVME_CAP_CQR_LSB          16
+#define NVME_CAP_CQR_MSB          16
+#define NVME_CAP_CQR_MSK64        0x0000000000010000
+#define NVME_CAP_CQR_MSKL         0x00010000
+#define NVME_CAP_CQR_MSKU         0x00000000
 
-#define NVME_CAP_AMS_LSB      17
-#define NVME_CAP_AMS_MSB      18
-#define NVME_CAP_AMS_MSK64    0x0000000000060000
-#define NVME_CAP_AMS_MSKL     0x00060000
-#define NVME_CAP_AMS_MSKU     0x00060000
+#define NVME_CAP_AMS_LSB          17
+#define NVME_CAP_AMS_MSB          18
+#define NVME_CAP_AMS_MSK64        0x0000000000060000
+#define NVME_CAP_AMS_MSKL         0x00060000
+#define NVME_CAP_AMS_MSKU         0x00000000
 
-#define NVME_CAP_TO_LSB       24
-#define NVME_CAP_TO_MSB       31
-#define NVME_CAP_TO_MSK64     0x00000000FF000000
-#define NVME_CAP_TO_MSKL            0xFF000000
-#define NVME_CAP_TO_MSKU            0x00000000
+#define NVME_CAP_TO_LSB           24
+#define NVME_CAP_TO_MSB           31
+#define NVME_CAP_TO_MSK64         0x00000000FF000000
+#define NVME_CAP_TO_MSKL          0xFF000000
+#define NVME_CAP_TO_MSKU          0x00000000
 
-#define NVME_CAP_CSS_LSB      37
-#define NVME_CAP_CSS_MSB      40
-#define NVME_CAP_CSS_MSK64    0x000001E000000000
+#define NVME_CAP_DSTRD_LSB        32
+#define NVME_CAP_DSTRD_MSB        35
+#define NVME_CAP_DSTRD_MSK64      0x0000000F00000000
 
-#define NVME_CAP_MPSMIN_LSB      48
-#define NVME_CAP_MPSMIN_MSB      51
-#define NVME_CAP_MPSMIN_MSK64    0x0000F00000000000
-#define NVME_CAP_MPSMIN_MSKL     0x00000000
-#define NVME_CAP_MPSMIN_MSKU     0x0000F000
+#define NVME_CAP_NSSRS_LSB        36
+#define NVME_CAP_NSSRS_MSB        36
+#define NVME_CAP_NSSRS_MSK64      0x0000001000000000
 
-#define NVME_CAP_MPSMAX_LSB      52
-#define NVME_CAP_MPSMAX_MSB      55
-#define NVME_CAP_MPSMAX_MSK64    0x00F0000000000000
-#define NVME_CAP_MPSMAX_MSKL     0x00000000
-#define NVME_CAP_MPSMAX_MSKU     0x00F00000
+#define NVME_CAP_CSS_LSB          37
+#define NVME_CAP_CSS_MSB          44
+#define NVME_CAP_CSS_MSK64        0x00001FE000000000
 
-#define NVME_CAP_DEFAULT_VALUE64 0x00F000201401FFFF
-#define NVME_CAP_DEFAULT_VALUEL     0x1401FFFF
-#define NVME_CAP_DEFAULT_VALUEU     0x00F00020
+#define NVME_CAP_MPSMIN_LSB       48
+#define NVME_CAP_MPSMIN_MSB       51
+#define NVME_CAP_MPSMIN_MSK64     0x000F000000000000
+#define NVME_CAP_MPSMIN_MSKL      0x00000000
+#define NVME_CAP_MPSMIN_MSKU      0x000F0000
 
-#define NVME_CAP_RW_MSK64     0x0000000000000000
-#define NVME_CAP_RW_MSKL      0x00000000
-#define NVME_CAP_RW_MSKU      0x00000000
+#define NVME_CAP_MPSMAX_LSB       52
+#define NVME_CAP_MPSMAX_MSB       55
+#define NVME_CAP_MPSMAX_MSK64     0x00F0000000000000
+#define NVME_CAP_MPSMAX_MSKL      0x00000000
+#define NVME_CAP_MPSMAX_MSKU      0x00F00000
+
+#define NVME_CAP_DEFAULT_VALUE64  0x00F000201401FFFF
+#define NVME_CAP_DEFAULT_VALUEL   0x1401FFFF
+#define NVME_CAP_DEFAULT_VALUEU   0x00F00020
+
+#define NVME_CAP_RW_MSK64         0x0000000000000000
+#define NVME_CAP_RW_MSKL          0x00000000
+#define NVME_CAP_RW_MSKU          0x00000000
 
 /** @} */
 
@@ -171,33 +196,42 @@
 /**
  * @defgroup nvme_vs_fields NVM Express Version Register Fields.
  *
- * This  register indicates the major and minor version of the NVM Express
- * specification that the controller implementation supports.  The upper two
- * bytes represent the major version number, and the lower two bytes represent
- * the minor version number.  Example:  Version 3.12 would be represented as
- * 00030102h.  Valid versions of the specification are: 1.0.
+ * This register indicates the major and minor version of the NVM Express
+ * specification that the controller implementation supports. Valid
+ * versions of the specification are: 1.0, 1.1, 1.2.
  *
- * - 31:16 RO 0001h  Major Version Number (MJR): Indicates the major ver. is 1.
+ * VS Value for 1.0 Compliant Controllers
+ * - 31:16 RO 0001h  Major Version Number (MJR): Indicates the major version is "1".
+ * - 15:08 RO 00h    Minor Version Number (MNR): Indicates the minor version is "0".
+ * - 07:00 RO 00h    Reserved
  *
- * - 15:00 RO 0000h  Minor Version Number (MNR):  Indicates the minor ver. is 0.
+ * VS Value for 1.1 Compliant Controllers
+ * - 31:16 RO 0001h  Major Version Number (MJR): Indicates the major version is "1".
+ * - 15:08 RO 00h    Minor Version Number (MNR): Indicates the minor version is "1".
+ * - 07:00 RO 00h    Reserved
+ *
+ * VS Value for 1.2 Compliant Controllers
+ * - 31:16 RO 0001h  Major Version Number (MJR): Indicates the major version is "1".
+ * - 15:08 RO 00h    Minor Version Number (MNR): Indicates the minor version is "2".
+ * - 07:00 RO 00h    Reserved
  */
 /** @{ */
 /**
  * @brief VS - Version Register Offset.
  */
-#define NVME_VS                 0x0008
+#define NVME_VS                   0x0008
 
-#define NVME_VS_MNR_LSB       0
-#define NVME_VS_MNR_MSB       15
-#define NVME_VS_MNR_MSK       0x0000FFFF
+#define NVME_VS_MNR_LSB           8
+#define NVME_VS_MNR_MSB           15
+#define NVME_VS_MNR_MSK           0x0000FF00
 
-#define NVME_VS_MJR_LSB       16
-#define NVME_VS_MJR_MSB       16
-#define NVME_VS_MJR_MSK       0xFFFF0000
+#define NVME_VS_MJR_LSB           16
+#define NVME_VS_MJR_MSB           31
+#define NVME_VS_MJR_MSK           0xFFFF0000
 
-#define NVME_VS_DEFAULT_VALUE    0x00010000
+#define NVME_VS_DEFAULT_VALUE     0x00010000
 
-#define NVME_VS_RW_MSK        0x00000000
+#define NVME_VS_RW_MSK            0x00000000
 /** @} */
 
 
@@ -205,96 +239,97 @@
  * @defgroup nvme_intms_fields NVM Express Interrupt Mask Set Register Fields.
  *
  * This register is used to mask interrupts when using pin-based interrupts,
- * single message MSI, or multiple message MSI.  When using MSI-X, the
+ * single message MSI, or multiple message MSI. When using MSI-X, the
  * interrupt mask table defined as part of MSI-X should be used to
- * mask interrupts.  Host software shall not access this register when
+ * mask interrupts. Host software shall not access this register when
  * configured for MSI-X; any accesses when configured for MSI-X is undefined.
  *
  * - 31:00 RW1S 0h
- * Interrupt Vector Mask Set (IVMS): This field is bit significant.  If a  1
- * is written to a bit, then the corresponding interrupt vector is masked.
- * Writing a 0 to a bit has no effect. When read, this field returns the
- * current interrupt mask value.  If a bit has a value of a 1, then the
- * corresponding interrupt vector is masked.  If a bit has a value
- * of 0,  then the corresponding interrupt vector is not masked.
+ * Interrupt Vector Mask Set (IVMS): This field is bit significant. If a '1'
+ * is written to a bit, then the corresponding interrupt vector is masked
+ * from generating an interrupt or reporting a pending interrupt in the
+ * MSI Capability Structure. Writing a '0' to a bit has no effect. When read,
+ * this field returns the current interrupt mask value. If a bit has a value
+ * of a '1', then the corresponding interrupt vector is masked. If a bit has
+ * a value of '0', then the corresponding interrupt vector is not masked.
  */
 /** @{ */
 /**
  * @brief INTMS - Interrupt Mask Set Register  Offset.
  */
-#define NVME_INTMS              0x000C
+#define NVME_INTMS                0x000C
 
-#define NVME_INTMS_LSB        0
-#define NVME_INTMS_MSB        31
-#define NVME_INTMS_MSK        0xFFFFFFFF
+#define NVME_INTMS_LSB            0
+#define NVME_INTMS_MSB            31
+#define NVME_INTMS_MSK            0xFFFFFFFF
 
-#define NVME_INTMS_DEFAULT_VALUE 0x00000000
+#define NVME_INTMS_DEFAULT_VALUE  0x00000000
 
-#define NVME_INTMS_RW_MSK     0xFFFFFFFF
+#define NVME_INTMS_RW_MSK         0xFFFFFFFF
 /** @} */
 
 /**
  * @defgroup nvme_intmc_fields NVM Express Interrupt Mask Clear Register Fields.
  *
- * This  register is used to unmask interrupts when  using pin-based interrupts,
- * single message MSI, or multiple message MSI.  When using MSI-X, the
+ * This  register is used to unmask interrupts when using pin-based interrupts,
+ * single message MSI, or multiple message MSI. When using MSI-X, the
  * interrupt mask table defined as part of MSI-X should be used to unmask
- * interrupts.  Host software shall not access this register when configured
+ * interrupts. Host software shall not access this register when configured
  * for MSI-X; any accesses when configured for MSI-X is undefined.
  *
  * - 31:00 RW1C 0h
- * Interrupt Vector Mask Clear (IVMC): This field is bit significant.  If a 1
+ * Interrupt Vector Mask Clear (IVMC): This field is bit significant. If a '1'
  * is written to a bit, then the corresponding interrupt vector is unmasked.
- * Writing a 0 to a bit has no effect. When read, this field returns the
- * current interrupt mask value. If a bit has a value of a 1, then the
+ * Writing a '0' to a bit has no effect. When read, this field returns the
+ * current interrupt mask value. If a bit has a value of a '1', then the
  * corresponding interrupt vector is masked, If a bit has a value of
- * 0, then the corresponding interrupt vector is not masked.
+ * '0', then the corresponding interrupt vector is not masked.
  */
 /** @{ */
 /**
  * @brief INTMC - Interrupt Mask Clear Register Offset.
  */
-#define NVME_INTMC              0x0010
+#define NVME_INTMC                0x0010
 
-#define NVME_INTMC_LSB        0
-#define NVME_INTMC_MSB        31
-#define NVME_INTMC_MSK        0xFFFFFFFF
+#define NVME_INTMC_LSB            0
+#define NVME_INTMC_MSB            31
+#define NVME_INTMC_MSK            0xFFFFFFFF
 
-#define NVME_INTMC_DEFAULT_VALUE 0x00000000
+#define NVME_INTMC_DEFAULT_VALUE  0x00000000
 
-#define NVME_INTMC_RW_MSK     0xFFFFFFFF
+#define NVME_INTMC_RW_MSK         0xFFFFFFFF
 /** @} */
 
 /**
  * @defgroup nvme_cc_fields NVM Express Controller Configuration Register
  * Fields.
  *
- * This register modifies settings for the controller.   Host software shall
+ * This register modifies settings for the controller. Host software shall
  * set the Arbitration Mechanism (CC.AMS), the Memory Page Size (CC.MPS), and
  * the Command Set (CC.CSS) to valid values prior to enabling the controller
- * by setting CC.EN to 1.
+ * by setting CC.EN to '1'.
  *
- * - 63:24 RO 0 Reserved
+ * - 31:24 RO 0 Reserved
  *
  * - 23:20 RW 0
  * I/O Completion Queue Entry Size (IOCQES): This field defines the I/O
  * Completion Queue entry size that is used for the selected I/O Command Set.
  * The required and maximum values for this field are specified in the Identify
- * Controller data structure for each I/O Command Set.  The value is in bytes
+ * Controller data structure for each I/O Command Set. The value is in bytes
  * and is specified as a power of two (2^n).
  *
  * - 19:16 RW 0
  * I/O Submission Queue Entry Size (IOSQES): This field defines the I/O
  * Submission Queue entry size that is used for the selected I/O Command Set.
  * The required and maximum values for this field are specified in the Identify
- * Controller data structure for each I/O Command Set.  The value is in bytes
+ * Controller data structure for each I/O Command Set. The value is in bytes
  * and is specified as a power of two (2^n).
  *
  * - 15:14 RW 0h
  * Shutdown Notification (SHN): This field is used to initiate shutdown
  * processing when a shutdown is occurring, i.e., a power down condition is
- * expected.  For a normal shutdown notification, it is expected that the
- * controller is given time to process the shutdown  notification.  For an
+ * expected. For a normal shutdown notification, it is expected that the
+ * controller is given time to process the shutdown notification. For an
  * abrupt shutdown notification, the host may not wait for shutdown
  * processing to complete before power is lost. The shutdown notification
  * values are defined as:
@@ -304,139 +339,172 @@
  *  - 11b Reserved
  *
  * Shutdown notification should be issued by host software prior to any power
- * down condition and prior to any change of the PCI power management state.  It
+ * down condition and prior to any change of the PCI power management state. It
  * is recommended that shutdown notification also be sent prior to a warm
  * reboot.
  * To determine when shutdown processing is complete, refer to CSTS.SHST.
  * Refer to section 7.6.2 for additional shutdown processing details.
  *
  * - 13:11 RW 0h
- * Arbitration Mechanism Selected (AMS):  This field selects the arbitration
- * mechanism to be used.  This value shall only be changed when EN is cleared
- * to 0.  Software shall only set this field to supported arbitration
- * mechanisms indicated in CAP.AMS.
- *
+ * Arbitration Mechanism Selected (AMS): This field selects the arbitration
+ * mechanism to be used. This value shall only be changed when EN is cleared
+ * to '0'. Software shall only set this field to supported arbitration
+ * mechanisms indicated in CAP.AMS. If this field is set to an unsupported
+ * value, the behavior is undefined.
  *  - 000b Round Robin
  *  - 001b Weighted Round Robin + Urgent
  *  - 010b  110b Reserved
  *  - 111b Vendor Specific
  *
  * - 10:07 RW 0h
- * Memory Page Size (MPS):  This field indicates the host memory page size.
- * The memory page size is (2 ^ (12 + MPS)).  Thus, the minimum host memory
- * page size is 4KB and the maximum host memory page size is 128MB.  The
+ * Memory Page Size (MPS): This field indicates the host memory page size.
+ * The memory page size is (2 ^ (12 + MPS)). Thus, the minimum host memory
+ * page size is 4KB and the maximum host memory page size is 128MB. The
  * value set by host software shall be a supported value as indicated by the
- * CAP.MPSMAX and CAP.MPSMIN fields.  This field describes the value used
- * for PRP entry size.
+ * CAP.MPSMAX and CAP.MPSMIN fields. This field describes the value used
+ * for PRP entry size. This field shall only be modified when EN is cleared
+ * to '0'.
  *
  * - 06:04 RW 0h
  * Command Set Selected (CSS): This field specifies the command set that is
- * selected for use for the I/O Submission Queues.  Software shall only select
- * a supported command set, as indicated in CAP.CSS.  The command set shall
- * only be changed when the controller is disabled (CC.EN is cleared to 0). The
- * command set selected shall be used for all I/O Submission Queues.
+ * selected for use for the I/O Submission Queues. Software shall only select
+ * a supported command set, as indicated in CAP.CSS. The command set shall
+ * only be changed when the controller is disabled (CC.EN is cleared to '0').
+ * The command set selected shall be used for all I/O Submission Queues.
  *  - 000b NVM command set
  *  - 001b  111b Reserved
  *
  * - 03:01 RO 0 Reserved
  *
  * - 00 RW 0
- * Enable (EN): When set to 1, then the controller shall process commands
- * based on Submission Queue Tail doorbell writes.  When cleared to 0, then the
- * controller shall not process commands nor submit completion entries to
- * Completion Queues.  When this field transitions from 1 to 0, the controller
- * is reset (referred to as a Controller Reset).  The reset deletes all I/O
- * Submission Queues and I/O Completion Queues created, resets the Admin
- * Submission and Completion Queues, and brings the hardware to an idle state.
- * The reset does not affect PCI Express registers nor the Admin Queue
- * registers (AQA, ASQ, or ACQ).  All other controller registers defined in
- * this section are reset. The controller shall ensure that there is no data
- * loss for commands that have been completed to the host as part of the
- * reset operation.
+ * Enable (EN): When set to '1', then the controller shall process commands
+ * based on Submission Queue Tail doorbell writes. When cleared to '0', then
+ * the controller shall not process commands nor submit completion entries to
+ * Completion Queues. When this field transitions from '1' to '0', the
+ * controller is reset (referred to as a Controller Reset). The reset deletes
+ * all I/O Submission Queues and I/O Completion Queues created, resets the
+ * Admin Submission and Completion Queues, and brings the hardware to an idle
+ * state. The reset does not affect PCI Express registers nor the Admin Queue
+ * registers (AQA, ASQ, or ACQ). All other controller registers defined in
+ * this section and internal controller state (e.g., Feature values defined
+ * in section 0 that are not persistent across power states) are reset to
+ * their default values. The controller shall ensure that there is no data
+ * loss for commands that have had corresponding completion queue entries
+ * posted to an I/O Completion Queue prior to the reset operation.
  *
- * When this field is cleared to 0, the CSTS.RDY bit is cleared to 0 by the
- * controller.  When this field is set to 1, the controller sets CSTS.RDY to 1
- * when it is ready to process commands.  The Admin Queue registers (AQA,
- * ASQ, and ACQ) shall only be modified when EN is cleared to 0.
+ * When this field is cleared to '0', the CSTS.RDY bit is cleared to '0' by
+ * the controller once the controller is ready to be re-enabled. When this
+ * field is set to '1', the controller sets CSTS.RDY to '1' when it is ready
+ * to process commands. CSTS.RDY may be set to '1' before namespace(s) are
+ * ready to be accessed.
+ * Setting this field from a '0' to a '1' when CSTS.RDY is a '1', or setting
+ * this field from a '1' to a '0' when CSTS.RDY is a '0', has undefined
+ * results. The Admin Queue registers (AQA, ASQ, and ACQ) shall only be
+ * modified when EN is cleared to '0'.
  */
 /** @{ */
 /**
  * @brief CC - Controller Configuration Register Offset.
  */
-#define NVME_CC                 0x0014
+#define NVME_CC                   0x0014
 
-#define NVME_CC_ENABLE        1
-#define NVME_CC_EN_LSB        0
-#define NVME_CC_EN_MSB        0
-#define NVME_CC_EN_MSK64      0x0000000000000001
-#define NVME_CC_EN_MSKL          0x00000001
-#define NVME_CC_EN_MSKU          0x00000000
+#define NVME_CC_ENABLE            1
+#define NVME_CC_EN_LSB            0
+#define NVME_CC_EN_MSB            0
+#define NVME_CC_EN_MSK            0x00000001
+#define NVME_CC_EN_MSK64          0x0000000000000001
+#define NVME_CC_EN_MSKL           0x00000001
+#define NVME_CC_EN_MSKU           0x00000000
 
-#define NVME_CC_CSS_NVM       0
-#define NVME_CC_CSS_LSB       4
-#define NVME_CC_CSS_MSB       6
-#define NVME_CC_CSS_MSK64     0x0000000000000070
-#define NVME_CC_CSS_MSKL         0x00000070
-#define NVME_CC_CSS_MSKU         0x00000000
+#define NVME_CC_CSS_NVM           0
+#define NVME_CC_CSS_LSB           4
+#define NVME_CC_CSS_MSB           6
+#define NVME_CC_CSS_MSK           0x00000070
+#define NVME_CC_CSS_MSK64         0x0000000000000070
+#define NVME_CC_CSS_MSKL          0x00000070
+#define NVME_CC_CSS_MSKU          0x00000000
 
-#define NVME_CC_MPS_LSB       7
-#define NVME_CC_MPS_MSB       10
-#define NVME_CC_MPS_MSK64     0x0000000000000780
-#define NVME_CC_MPS_MSKL         0x00000780
-#define NVME_CC_MPS_MSKU         0x00000000
+#define NVME_CC_MPS_LSB           7
+#define NVME_CC_MPS_MSB           10
+#define NVME_CC_MPS_MSK           0x00000780
+#define NVME_CC_MPS_MSK64         0x0000000000000780
+#define NVME_CC_MPS_MSKL          0x00000780
+#define NVME_CC_MPS_MSKU          0x00000000
 
-#define NVME_CC_ARB_RR        0
-#define NVME_CC_ARB_WRR       1
-#define NVME_CC_AMS_LSB       11
-#define NVME_CC_AMS_MSB       13
-#define NVME_CC_AMS_MSK64     0x0000000000003800
-#define NVME_CC_AMS_MSKL         0x00003800
-#define NVME_CC_AMS_MSKU         0x00000000
+#define NVME_CC_ARB_RR            0
+#define NVME_CC_ARB_WRR           1
+#define NVME_CC_AMS_LSB           11
+#define NVME_CC_AMS_MSB           13
+#define NVME_CC_AMS_MSK           0x00003800
+#define NVME_CC_AMS_MSK64         0x0000000000003800
+#define NVME_CC_AMS_MSKL          0x00003800
+#define NVME_CC_AMS_MSKU          0x00000000
 
-#define NVME_CC_SHN_LSB       14
-#define NVME_CC_SHN_MSB       15
-#define NVME_CC_SHN_MSK64        0x000000000000C000
-#define NVME_CC_SHN_MSKL         0x0000C000
-#define NVME_CC_SHN_MSKU         0x00000000
+#define NVME_CC_SHN_LSB           14
+#define NVME_CC_SHN_MSB           15
+#define NVME_CC_SHN_MSK           0x0000C000
+#define NVME_CC_SHN_MSK64         0x000000000000C000
+#define NVME_CC_SHN_MSKL          0x0000C000
+#define NVME_CC_SHN_MSKU          0x00000000
 
-#define NVME_CC_IOSQES_LSB       16
-#define NVME_CC_IOSQES_MSB       19
-#define NVME_CC_IOSQES_MSK64     0x00000000000F0000
-#define NVME_CC_IOSQES_MSKL      0x000F0000
-#define NVME_CC_IOSQES_MSKU      0x00000000
+#define NVME_CC_IOSQES_LSB        16
+#define NVME_CC_IOSQES_MSB        19
+#define NVME_CC_IOSQES_MSK        0x000F0000
+#define NVME_CC_IOSQES_MSK64      0x00000000000F0000
+#define NVME_CC_IOSQES_MSKL       0x000F0000
+#define NVME_CC_IOSQES_MSKU       0x00000000
 
-#define NVME_CC_IOCQES_LSB       20
-#define NVME_CC_IOCQES_MSB       23
-#define NVME_CC_IOCQES_MSK64     0x0000000000F00000
-#define NVME_CC_IOCQES_MSKL      0x00F00000
-#define NVME_CC_IOCQES_MSKU      0x00000000
+#define NVME_CC_IOCQES_LSB        20
+#define NVME_CC_IOCQES_MSB        23
+#define NVME_CC_IOCQES_MSK        0x00F00000
+#define NVME_CC_IOCQES_MSK64      0x0000000000F00000
+#define NVME_CC_IOCQES_MSKL       0x00F00000
+#define NVME_CC_IOCQES_MSKU       0x00000000
 
-#define NVME_CC_AMS_RR        0x00000000
-#define NVME_CC_AMS_WRU       0x00000001
-#define NVME_CC_AMS_VNDR      0x00000002
+#define NVME_CC_AMS_RR            0x00000000
+#define NVME_CC_AMS_WRU           0x00000001
+#define NVME_CC_AMS_VNDR          0x00000002
 
-#define NVME_CC_SHN_NONE      0x00000000
-#define NVME_CC_SHN_NORMAL    0x00000001
-#define NVME_CC_SHN_ABRUPT    0x00000002
+#define NVME_CC_SHN_NONE          0x00000000
+#define NVME_CC_SHN_NORMAL        0x00000001
+#define NVME_CC_SHN_ABRUPT        0x00000002
 
-#define NVME_CC_DEFAULT_VALUE64     0x0000000000000000
-#define NVME_CC_DEFAULT_VALUEL      0x00000000
-#define NVME_CC_DEFAULT_VALUEU      0x00000000
+#define NVME_CC_DEFAULT_VALUE64   0x0000000000000000
+#define NVME_CC_DEFAULT_VALUEL    0x00000000
+#define NVME_CC_DEFAULT_VALUEU    0x00000000
 
-#define NVME_CC_RW_MSK64      0x0000000000FFFFF1
-#define NVME_CC_RW_MSKL       0x00FFFFF1
-#define NVME_CC_RW_MSKU       0x00000000
+#define NVME_CC_RW_MSK64          0x0000000000FFFFF1
+#define NVME_CC_RW_MSKL           0x00FFFFF1
+#define NVME_CC_RW_MSKU           0x00000000
 /** @} */
 
 /**
  * @defgroup nvme_csts_fields NVM Express Controller Status Register Fields.
  *
- * - 31:04 RO 0 Reserved
+ * - 31:06 RO 0 Reserved
+ *
+ * - 05 RO 0
+ * Processing Paused (PP): This bit indicates whether the controller is
+ * processing commands. If this bit is cleared to '0', then the controller
+ * is processing commands normally. If this bit is set to '1', then the
+ * controller has temporarily stopped processing commands in order to
+ * handle an event (e.g., firmware activation). This bit is only valid
+ * when CC.EN = '1'.
+ *
+ * - 04 RW1C HwInit
+ * NVM Subsystem Reset Occurred (NSSRO): The initial value of this field is
+ * '1' if the last occurance of an NVM Subsystem Reset occured while power
+ * was applied to the NVM subsystem. The initial value of this field is '0'
+ * following an NVM Subsystem Reset due to application of power to the NVM
+ * subsystem. This field is only valid if the controller supports the NVM
+ * Subsystem Reset feature defined in section 7.3.1 as indicated by
+ * CAP.NSSRS set to '1'.
+ * The reset value of this field is '0' if an NVM Subsystem Reset causes
+ * activation of a new firmware image.
  *
  * - 03:02 RO 0
  * Shutdown Status (SHST): This field indicates the status of shutdown
- * processing that is initiated by the host setting the CC.SHN field
- * appropriately.
+ * processing that is initiated by the host setting the CC.SHN field.
  * The shutdown status values are defined as:
  *  - 00b Normal operation (no shutdown has been requested)
  *  - 01b Shutdown processing occurring
@@ -444,106 +512,144 @@
  *  - 11b Reserved
  *
  * To start executing commands on the controller after a shutdown operation
- * (CSTS.SHST set to 10b), a reset (CC.EN cleared to 0) is required.  If host
+ * (CSTS.SHST set to 10b), a reset (CC.EN cleared to '0') is required. If host
  * software issues commands to the controller without issuing a reset, the
  * behavior is undefined.
  *
- * - 01 RO 0
+ * - 01 RO HwInit
  * Controller Fatal Status (CFS): Indicates that a fatal controller error
  * occurred that could not be communicated in the appropriate Completion Queue.
+ * This field is cleared to '0' when a fatal controller error has not occurred.
+ * The reset value of this field is '1' when a fatal controller error is
+ * detected during controller initialization.
  *
  * - 00 RO 0
- * Ready (RDY):  This field is set to 1 when  the controller is ready to
- * process commands after CC.EN is set to 1.  This field shall be cleared to 0
- * when CC.EN is
- * cleared to 0.  Commands shall not be issued to the controller until this
- * field is set to 1 after the CC.EN bit is set to 1.  Failure to follow this
- * requirement produces undefined results. Software shall wait a minimum
- * of CAP.TO seconds for this field to be set to 1 after CC.EN transitions
- * from 0 to 1.
+ * Ready (RDY): This field is set to '1' when the controller is ready to
+ * process commands after CC.EN is set to '1'. This field shall be cleared to
+ * '0' when CC.EN is cleared to '0'. Commands shall not be submitted to the
+ * controller until this field is set to '1' after the CC.EN bit is set to '1'.
+ * Failure to follow this requirement produces undefined results. Software
+ * shall wait a minimum of CAP.TO seconds for this field to be set to '1'
+ * after setting CC.EN to '1' from a previous value of '0'.
  */
 /** @{ */
 /**
  * @brief CSTS - Controller Status Register Offset.
  */
-#define NVME_CSTS               0x001C
+#define NVME_CSTS                 0x001C
 
-#define NVME_CSTS_RDY_LSB     0
-#define NVME_CSTS_RDY_MSB     0
-#define NVME_CSTS_RDY_MSK     0x00000001
-#define NVME_CSTS_RDY         (1 << NVME_CSTS_RDY_LSB)
+#define NVME_CSTS_RDY_LSB         0
+#define NVME_CSTS_RDY_MSB         0
+#define NVME_CSTS_RDY_MSK         0x00000001
+#define NVME_CSTS_RDY             (1 << NVME_CSTS_RDY_LSB)
 
-#define NVME_CSTS_CFS_LSB     1
-#define NVME_CSTS_CFS_MSB     1
-#define NVME_CSTS_CFS_MSK     0x00000002
+#define NVME_CSTS_CFS_LSB         1
+#define NVME_CSTS_CFS_MSB         1
+#define NVME_CSTS_CFS_MSK         0x00000002
 
-#define NVME_CSTS_SHST_LSB    2
-#define NVME_CSTS_SHST_MSB    3
-#define NVME_CSTS_SHST_MSK    0x0000000C
+#define NVME_CSTS_SHST_LSB        2
+#define NVME_CSTS_SHST_MSB        3
+#define NVME_CSTS_SHST_MSK        0x0000000C
 
-#define NVME_CSTS_SHST_NRML      (0x00 << NVME_CSTS_SHST_LSB)
-#define NVME_CSTS_SHST_PRCSING      (0x01 << NVME_CSTS_SHST_LSB)
-#define NVME_CSTS_SHST_CPL    (0x02 << NVME_CSTS_SHST_LSB)
+#define NVME_CSTS_SHST_NRML       (0x00 << NVME_CSTS_SHST_LSB)
+#define NVME_CSTS_SHST_PRCSING    (0x01 << NVME_CSTS_SHST_LSB)
+#define NVME_CSTS_SHST_CPL        (0x02 << NVME_CSTS_SHST_LSB)
 
-#define NVME_CSTS_DEFAULT_VALUE     0x00000000
+#define NVME_CSTS_NSSRO_LSB       4
+#define NVME_CSTS_NSSRO_MSB       4
+#define NVME_CSTS_NSSRO_MSK       0x00000010
 
-#define NVME_CSTS_RW_MSK      0x00000000
+#define NVME_CSTS_PP_LSB          5
+#define NVME_CSTS_PP_MSB          5
+#define NVME_CSTS_PP_MSK          0x00000020
+
+#define NVME_CSTS_DEFAULT_VALUE   0x00000000
+
+#define NVME_CSTS_RW_MSK          0x00000000
 /** @} */
 
+/**
+ * @defgroup nvme_nssr_fields NVM Express NVM Subsystem Reset Register Fields.
+ *
+ * This optional register provides host software with the capability to
+ * initiate an NVM Subsystem Reset. Support for this register is indicated
+ * by the state of the NVM Subsystem Reset Supported (CAP.NSSRS) field.
+ * If the register is not supported, then the address range occupied by the
+ * register is reserved.
+ *
+ * - 31:00 RW 0
+ * NVM Subsystem Reset Control (NSSRC): A write of the value 4E564D65h ("NVMe")
+ * to this field initiates an NVM Subsystem Reset. A write of any other value
+ * has no functional effect on the operation of the NVM subsystem. This field
+ * shall return the value 0h when read.
+ */
+/** @{ */
+/**
+ * @brief NSSR - NVM Subsystem Reset Register Offset.
+ */
+#define NVME_NSSR                 0x0020
+
+#define NVME_NSSR_NSSRC_LSB       0
+#define NVME_NSSR_NSSRC_MSB       31
+#define NVME_NSSR_NSSRC_MSK       0xFFFFFFFF
+/** @} */
 
 /**
  * @defgroup nvme_aqa_fields NVM Express Admin Queue Attributes Register Fields.
  *
  * This register defines the attributes for the Admin Submission Queue and
- * Admin Completion Queue.  The Queue ID for the Admin Submission Queue and
- * Admin Completion Queue is 0h.  The Admin Submission Queues priority is
- * determined by the arbitration mechanism selected, refer to section 4.7.
+ * Admin Completion Queue. The Queue ID for the Admin Submission Queue and
+ * Admin Completion Queue is 0h. The Admin Submission Queues priority is
+ * determined by the arbitration mechanism selected, refer to section 4.11.
  * The Admin Queues are required to be in physically contiguous memory.
  *
  * - 31:28 RO 0h Reserved
  *
  * - 27:16 RW 0h
  * Admin Completion Queue Size (ACQS): Defines the size of the Admin Completion
- * Queue in entries. The minimum size of the Admin Completion
- * Queue  is two entries. The maximum size of the Admin Completion Queue is
- * 4096 entries. This is a 0s based value.
+ * Queue in entries. Enabling a controller while this field is cleared to 00h
+ * produces undefined results. The minimum size of the Admin Completion Queue
+ * is two entries. The maximum size of the Admin Completion Queue is 4096
+ * entries. This is a 0's based value.
  *
  * - 15:12 RO 0h Reserved
  *
  * - 11:00 RW 0h
  * Admin Submission Queue Size (ASQS): Defines the size of the Admin Submission
- * Queue in entries. The minimum size of the Admin Submission
- * Queue is two entries. The maximum size of the Admin Submission Queue is 4096
- * entries. This is a 0s based value.
+ * Queue in entries. Enabling a controller while this field is cleared to 00h
+ * produces undefined results. The minimum size of the Admin Submission Queue
+ * is two entries. The maximum size of the Admin Submission Queue is 4096
+ * entries. This is a 0's based value.
  */
 /** @{ */
 /**
  * @brief AQA - Admin Queue Attributes Register Offset.
  */
-#define NVME_AQA                0x0024
+#define NVME_AQA                  0x0024
 
-#define NVME_AQA_SQS_LSB      0
-#define NVME_AQA_SQS_MSB      11
-#define NVME_AQA_SQS_MSK      0x00000FFF
+#define NVME_AQA_SQS_LSB          0
+#define NVME_AQA_SQS_MSB          11
+#define NVME_AQA_SQS_MSK          0x00000FFF
 
-#define NVME_AQA_CQS_LSB      16
-#define NVME_AQA_CQS_MSB      27
-#define NVME_AQA_CQS_MSK      0x0FFF0000
+#define NVME_AQA_CQS_LSB          16
+#define NVME_AQA_CQS_MSB          27
+#define NVME_AQA_CQS_MSK          0x0FFF0000
 
-#define NVME_AQA_DEFAULT_VALUE      0x00000000
+#define NVME_AQA_DEFAULT_VALUE    0x00000000
 
-#define NVME_AQA_RW_MSK       0x0FFF0FFF
+#define NVME_AQA_RW_MSK           0x0FFF0FFF
 /** @} */
 
 /**
  * @defgroup nvme_asq_fields NVM Express Admin Submission Queue Base Register
- * Fields. This register defines the base memory address of the Admin
- * Submission Queue.
+ * Fields.
+ *
+ * This register defines the base memory address of the Admin Submission Queue.
  *
  * - 63:12 RW Impl Spec
- * Admin Submission Queue Base (ASQB):   Indicates the 64-bit physical
- * address for the Admin Submission Queue.  This address shall be memory page
- * aligned (based on the value in CC.MPS).  All Admin commands, including
+ * Admin Submission Queue Base (ASQB): Indicates the 64-bit physical
+ * address for the Admin Submission Queue. This address shall be memory page
+ * aligned (based on the value in CC.MPS). All Admin commands, including
  * creation of additional Submission Queues and Completions Queues shall be
  * submitted to this queue.
  *
@@ -553,21 +659,21 @@
 /**
  * @brief ASQ - Admin Submission Queue Base Address Register Offset.
  */
-#define NVME_ASQ     0x0028
+#define NVME_ASQ                  0x0028
 
-#define NVME_ASQ_ASQB_LSB     12
-#define NVME_ASQ_ASQB_MSB     63
-#define NVME_ASQ_ASQB_MSK64      0xFFFFFFFFFFFFF000
-#define NVME_ASQ_ASQB_MSKL    0xFFFFF000
-#define NVME_ASQ_ASQB_MSKU    0xFFFFFFFF
+#define NVME_ASQ_ASQB_LSB         12
+#define NVME_ASQ_ASQB_MSB         63
+#define NVME_ASQ_ASQB_MSK64       0xFFFFFFFFFFFFF000
+#define NVME_ASQ_ASQB_MSKL        0xFFFFF000
+#define NVME_ASQ_ASQB_MSKU        0xFFFFFFFF
 
-#define NVME_ASQ_DEFAULT_VALUE64       0x0000000000000000
-#define NVME_ASQ_DEFAULT_VALUEL     0x00000000
-#define NVME_ASQ_DEFAULT_VALUEU     0x00000000
+#define NVME_ASQ_DEFAULT_VALUE64  0x0000000000000000
+#define NVME_ASQ_DEFAULT_VALUEL   0x00000000
+#define NVME_ASQ_DEFAULT_VALUEU   0x00000000
 
-#define NVME_ASQ_RW_MSK64     0xFFFFFFFFFFFFF000
-#define NVME_ASQ_RW_MSKL      0xFFFFF000
-#define NVME_ASQ_RW_MSKU      0xFFFFFFFF
+#define NVME_ASQ_RW_MSK64         0xFFFFFFFFFFFFF000
+#define NVME_ASQ_RW_MSKL          0xFFFFF000
+#define NVME_ASQ_RW_MSKU          0xFFFFFFFF
 /** @} */
 
 /**
@@ -577,11 +683,11 @@
  * This register defines the base memory address of the Admin Completion Queue.
  *
  * - 63:12 RW Impl Spec
- * Admin Completion Queue Base (ACQB):   Indicates the 64-bit physical address
- * for the Admin Completion Queue.  This address shall be memory page aligned
- * (based on the value in CC.MPS).  All completion entries for the commands
+ * Admin Completion Queue Base (ACQB): Indicates the 64-bit physical address
+ * for the Admin Completion Queue. This address shall be memory page aligned
+ * (based on the value in CC.MPS). All completion entries for the commands
  * submitted to the Admin Submission Queue shall be posted to this Completion
- * Queue.  This queue is always associated with interrupt vector 0.
+ * Queue. This queue is always associated with interrupt vector 0.
  *
  * - 11:00 RO 0h Reserved.
  */
@@ -589,38 +695,172 @@
 /**
  * @brief ASQ - Admin Cpmpletion Queue Base Address Register Offset.
  */
-#define NVME_ACQ                0x0030
+#define NVME_ACQ                  0x0030
 
-#define NVME_ACQ_ACQB_LSB     12
-#define NVME_ACQ_ACQB_MSB     63
-#define NVME_ACQ_ACQB_MSK64      0xFFFFFFFFFFFFF000
-#define NVME_ACQ_ACQB_MSKL    0xFFFFF000
-#define NVME_ACQ_ACQB_MSKU    0xFFFFFFFF
+#define NVME_ACQ_ACQB_LSB         12
+#define NVME_ACQ_ACQB_MSB         63
+#define NVME_ACQ_ACQB_MSK64       0xFFFFFFFFFFFFF000
+#define NVME_ACQ_ACQB_MSKL        0xFFFFF000
+#define NVME_ACQ_ACQB_MSKU        0xFFFFFFFF
 
-#define NVME_ACQ_DEFAULT_VALUE64 0x0000000000000000
-#define NVME_ACQ_DEFAULT_VALUEL     0x00000000
-#define NVME_ACQ_DEFAULT_VALUEU     0x00000000
+#define NVME_ACQ_DEFAULT_VALUE64  0x0000000000000000
+#define NVME_ACQ_DEFAULT_VALUEL   0x00000000
+#define NVME_ACQ_DEFAULT_VALUEU   0x00000000
 
-#define NVME_ACQ_RW_MSK64     0xFFFFFFFFFFFFF000
-#define NVME_ACQ_RW_MSKL      0xFFFFF000
-#define NVME_ACQ_RW_MSKU      0xFFFFFFFF
+#define NVME_ACQ_RW_MSK64         0xFFFFFFFFFFFFF000
+#define NVME_ACQ_RW_MSKL          0xFFFFF000
+#define NVME_ACQ_RW_MSKU          0xFFFFFFFF
 
+/** @} */
+
+/**
+ * @defgroup nvme_cmbloc_fields NVM Express Controller Memory Buffer Location
+ * Register Fields.
+ *
+ * This optional register defines the location of the Controller Memory Buffer
+ * (refer to section 4.7). If CMBSZ is 0, this register is reserved.
+ *
+ * - 31:12 RO Impl Spec
+ * Offset (OFST): Indicates the offset of the Controller Memory Buffer in
+ * multiples of the Size Unit specified in CMBSZ. This value shall be
+ * 4KB aligned.
+ *
+ * - 11:03 RO 0h Reserved
+ *
+ * - 02:00 RO Impl Spec
+ * Base Indicator Register (BIR): Indicates the Base Address Register (BAR)
+ * that contains the Controller Memory Buffer. For a 64-bit BAR, the BAR for
+ * the lower 32-bits of the address is specified. Values 0h, 2h, 3h, 4h, and
+ * 5h are valid.
+ */
+/** @{ */
+/**
+ * @brief CMBLOC - Controller Memory Buffer Location Register Offset.
+ */
+#define NVME_CMBLOC               0x0038
+
+#define NVME_CMBLOC_BIR_LSB       0
+#define NVME_CMBLOC_BIR_MSB       2
+#define NVME_CMBLOC_BIR_MSK       0x00000007
+
+#define NVME_CMBLOC_OFST_LSB      12
+#define NVME_CMBLOC_OFST_MSB      31
+#define NVME_CMBLOC_OFST_MSK      0xFFFFF000
+/** @} */
+
+/**
+ * @defgroup nvme_cmbsz_fields NVM Express Controller Memory Buffer Size
+ * Register Fields.
+ *
+ * This optional register defines the size of the Controller Memory Buffer
+ * (refer to section 4.7). If the controller does not support the Controller
+ * Memory Buffer feature then this register shall be cleared to 0h.
+ *
+ * - 31:12 RO Impl Spec
+ * Size (SZ): Indicates the size of the Controller Memory Buffer available for
+ * use by the host. The size is in multiples of the Size Unit. If the Offset +
+ * Size exceeds the length of the indicated BAR, the size available to the
+ * host is limited by the length of the BAR.
+ *
+ * - 11:08 RO Impl Spec
+ * Size Units (SZU): Indicates the granularity of the Size field.
+ *  - 0h      4 KB
+ *  - 1h      64 KB
+ *  - 2h      1 MB
+ *  - 3h      16 MB
+ *  - 4h      256 MB
+ *  - 5h      4 GB
+ *  - 6h      64 GB
+ *  - 7h - Fh Reserved
+ *
+ * - 07:05 RO 0h Reserved
+ *
+ * - 04 RO Impl Spec
+ * Write Data Support (WDS): If this bit is set to '1', then the controller
+ * supports data and metadata in the Controller Memory Buffer for commands
+ * that transfer data from the host to the controller (e.g., Write). If this
+ * bit is cleared to '0', then all data and metadata for commands that
+ * transfer data from the host to the controller shall be transferred from
+ * host memory.
+ *
+ * - 03 RO Impl Spec
+ * Read Data Support (RDS): If this bit is set to '1', then the controller
+ * supports data and metadata in the Controller Memory Buffer for commands
+ * that transfer data from the controller to the host (e.g., Read). If this
+ * bit is cleared to '0', then all data and metadata for commands that
+ * transfer data from the controller to the host shall be transferred to
+ * host memory.
+ *
+ * - 02 RO Impl Spec
+ * PRP SGL List Support (LISTS): If this bit is set to '1', then the
+ * controller supports PRP Lists in the Controller Memory Buffer. If
+ * this bit is set to '1' and SGLs are supported by the controller,
+ * then the controller supports Scatter Gather Lists in the Controller
+ * Memory Buffer. If this bit is set to '1', then the Submission Queue
+ * Support bit shall be set to '1'. If this bit is cleared to '0', then
+ * all PRP Lists and SGLs shall be placed in host memory.
+ *
+ * - 01 RO Impl Spec
+ * Completion Queue Support (CQS): If this bit is set to '1', then the
+ * controller supports Admin and I/O Completion Queues in the Controller
+ * Memory Buffer. If this bit is cleared to '0', then all Completion
+ * Queues shall be placed in host memory.
+ *
+ * - 00 RO Impl Spec
+ * Submission Queue Support (SQS): If this bit is set to '1', then the
+ * controller supports Admin and I/O Submission Queues in the Controller
+ * Memory Buffer. If this bit is cleared to '0', then all Submission
+ * Queues shall be placed in host memory.
+ */
+/** @{ */
+/**
+ * @brief CMBSZ - Controller Memory Buffer Size Register Offset.
+ */
+#define NVME_CMBSZ                0x003C
+
+#define NVME_CMBSZ_SQS_LSB        0
+#define NVME_CMBSZ_SQS_MSB        0
+#define NVME_CMBSZ_SQS_MSK        0x00000001
+
+#define NVME_CMBSZ_CQS_LSB        1
+#define NVME_CMBSZ_CQS_MSB        1
+#define NVME_CMBSZ_CQS_MSK        0x00000002
+
+#define NVME_CMBSZ_LISTS_LSB      2
+#define NVME_CMBSZ_LISTS_MSB      2
+#define NVME_CMBSZ_LISTS_MSK      0x00000004
+
+#define NVME_CMBSZ_RDS_LSB        3
+#define NVME_CMBSZ_RDS_MSB        3
+#define NVME_CMBSZ_RDS_MSK        0x00000008
+
+#define NVME_CMBSZ_WDS_LSB        4
+#define NVME_CMBSZ_WDS_MSB        4
+#define NVME_CMBSZ_WDS_MSK        0x00000010
+
+#define NVME_CMBSZ_SZU_LSB        8
+#define NVME_CMBSZ_SZU_MSB        11
+#define NVME_CMBSZ_SZU_MSK        0x00000F00
+
+#define NVME_CMBSZ_SZ_LSB         12
+#define NVME_CMBSZ_SZ_MSB         31
+#define NVME_CMBSZ_SZ_MSK         0xFFFFF000
 /** @} */
 
 /**
  * @defgroup nvme_sqtdbl_fields NVM Express Submission Queue Tail Doorbell
  * Register Fields.
  *
- * The host should not read the doorbell registers.  If a doorbell register
- * is read, the value returned is undefined.  Writing a non-existent or
+ * The host should not read the doorbell registers. If a doorbell register
+ * is read, the value returned is undefined. Writing a non-existent or
  * unallocated Submission Queue Tail Doorbell has undefined results.
  *
  * - 31:16 RO 0 Reserved
  *
  * - 15:00 RW 0h
  * Submission Queue Tail (SQT): Indicates the new value of the Submission
- * Queue Tail entry pointer.  This value shall overwrite any previous
- * Submission Queue Tail entry pointer value provided.  The difference
+ * Queue Tail entry pointer. This value shall overwrite any previous
+ * Submission Queue Tail entry pointer value provided. The difference
  * between the last SQT write and the current SQT write indicates the number
  * of commands added to the Submission Queue; note that queue rollover needs
  * to be accounted for.
@@ -629,11 +869,11 @@
 /**
  * @brief ASQTDBL - Admin Submission Queue Tail Doorbell Register Offset.
  */
-#define NVME_ASQTDBL            0x1000
+#define NVME_ASQTDBL              0x1000
 
-#define NVME_SQTDBL_SQT_LSB      0
-#define NVME_SQTDBL_SQT_MSB      15
-#define NVME_SQTDBL_SQT_MSK      0x0000FFFF
+#define NVME_SQTDBL_SQT_LSB       0
+#define NVME_SQTDBL_SQT_MSB       15
+#define NVME_SQTDBL_SQT_MSK       0x0000FFFF
 /** @} */
 
 
@@ -641,29 +881,29 @@
  * @defgroup nvme_cqhdbl_fields NVM Express Completion Queue Head Doorbell
  * Register Fields.
  *
- * The host should not read the doorbell registers.  If a doorbell register
- * is read, the value returned is undefined.  Writing a non-existent or
+ * The host should not read the doorbell registers. If a doorbell register
+ * is read, the value returned is undefined. Writing a non-existent or
  * unallocated  Completion Queue Head Doorbell has undefined results.
  *
  * - 31:16 RO 0 Reserved
  *
  * - 15:00 RW 0h
  * Completion Queue Head (CQH): Indicates the new value of the Completion
- * Queue Head entry pointer.  This value shall overwrite any previous
- * Completion Queue Head value provided.  The difference between the last CQH
+ * Queue Head entry pointer. This value shall overwrite any previous
+ * Completion Queue Head value provided. The difference between the last CQH
  * write and the current CQH entry pointer write indicates the number of
  * entries that are now available for re-use by the controller in the
- * Completion Queue; note  that queue rollover needs to be accounted for.
+ * Completion Queue; note that queue rollover needs to be accounted for.
  */
 /** @{ */
 /**
  * @brief ASQHDBL - Admin Completion Queue Head Doorbell Register Offset.
  */
-#define NVME_ACQHDBL 0x1004
+#define NVME_ACQHDBL              0x1004
 
-#define NVME_CQHDBL_CQH_LSB      0
-#define NVME_CQHDBL_CQH_MSB      15
-#define NVME_CQHDBL_CQH_MSK      0x0000FFFF
+#define NVME_CQHDBL_CQH_LSB       0
+#define NVME_CQHDBL_CQH_MSB       15
+#define NVME_CQHDBL_CQH_MSK       0x0000FFFF
 /** @} */
 
 /** @} */
@@ -3443,7 +3683,7 @@ struct iden_controller
      * @brief Vendor Specific
      * This range of bytes is allocated for vendor specific usage.
      */
-    vmk_uint8 resevedF[4095-3072+1];
+    vmk_uint8 reservedF[4095-3072+1];
 };
 
 /* IOCTL/Mgmt interface requirements*/
@@ -3490,6 +3730,8 @@ enum {
    NVME_IOCTL_UPDATE_NS,         /* Update namespace attributes */
    NVME_IOCTL_GET_NS_STATUS,     /* Get status of specific namespace */
    NVME_IOCTL_GET_INT_VECT_NUM,  /* Get number of interrupt vectors */
+   NVME_IOCTL_SET_TIMEOUT,       /* Set timeout value */
+   NVME_IOCTL_GET_TIMEOUT,       /* Get timeout value */
 };
 
 /* full name space for get log page query*/

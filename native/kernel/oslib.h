@@ -174,10 +174,12 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr);
 void OsLib_ShutdownExceptionHandler(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus OsLib_SetupExceptionHandler(struct NvmeCtrlr *ctrlr);
 
+#if USE_TIMER
 VMK_ReturnStatus OsLib_TimerQueueCreate(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus OsLib_TimerQueueDestroy(struct NvmeCtrlr *ctrlr);
 void OsLib_StartIoTimeoutCheckTimer(struct NvmeCtrlr *ctrlr);
 void OsLib_StopIoTimeoutCheckTimer(struct NvmeCtrlr *ctrlr);
+#endif
 
 #define SCSI_CMD_INVOKE_COMPLETION_CB(scsiCmd) vmk_ScsiSchedCommandCompletion((vmk_ScsiCommand *)scsiCmd)
 

@@ -107,6 +107,8 @@ int Nvme_Identify(struct nvme_handle *handle, int ns, void *id);
 int Nvme_Ioctl(struct nvme_handle *handle, int cmd, struct usr_io *uio);
 int Nvme_FormatNvm(struct nvme_handle *handle, int ses, int pil, int pi, int ms, int lbaf, int ns);
 int Nvme_SetLogLevel(int loglevel, int debuglevel);
+int Nvme_SetTimeout(struct nvme_handle *handle, int timeout);
+int Nvme_GetTimeout(struct nvme_handle *handle, int *timeout);
 
 /**
  * NVMe management interfaces, IDT specific

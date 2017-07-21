@@ -80,12 +80,6 @@ NVME_MOD_PARAM(max_scsi_unmap_requests,
    32,
    "Maximum number of scsi unmap requests supported")
 
-NVME_MOD_PARAM(io_timeout,
-   10,
-   1,
-   40,
-   "IO timeout second for internal checker")
-
 #if NVME_DEBUG
 NVME_MOD_PARAM(nvme_dbg,
    0,
@@ -98,11 +92,11 @@ NVME_MOD_PARAM(nvme_dbg,
  * Hide these parameters in this version.
  */
 int nvme_force_intx = 0;
-int max_prp_list = 32;
+int max_prp_list = 512;
 /** @todo - optimize */
 int max_io_request = 1023;
 int io_command_id_size = 1024;
-int transfer_size = 128;
+int transfer_size = 2048;
 
 /**
  * Validate if a certain module parameter is set within an acceptible range.
@@ -117,7 +111,6 @@ void Nvme_ValidateModuleParams()
    validate_io_cpl_queue_size();
    validate_max_namespaces();
    validate_max_scsi_unmap_requests();
-   validate_io_timeout();
 #if NVME_DEBUG
    validate_nvme_dbg();
 #endif

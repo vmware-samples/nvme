@@ -27,13 +27,13 @@
 /**
  * Driver name. This should be the name of the SC file.
  */
-#define NVME_DRIVER_NAME "nvme "
+#define NVME_DRIVER_NAME "nvme"
 
 
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_DRIVER_VERSION "1.2.0.32"
+#define NVME_DRIVER_VERSION "1.2.1.16"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -73,7 +73,6 @@ extern int  max_namespaces;
 extern int  nvme_compl_worlds_num;
 #endif
 extern int  max_scsi_unmap_requests;
-extern int  io_timeout;
 
 void Nvme_ValidateModuleParams();
 
@@ -125,7 +124,7 @@ void Nvme_ValidateModuleParams();
 /**
  * max number of PRP entries per cmd
  */
-#define NVME_DRIVER_PROPS_MAX_PRP_LIST_ENTRIES (32)
+#define NVME_DRIVER_PROPS_MAX_PRP_LIST_ENTRIES (512)
 /**
  * maximum length of SCSI CDB supported
  */
@@ -270,7 +269,9 @@ typedef enum {
 
 #define MAX_EVENTS       7
 
-#define LOG_PG_SIZE          (512)
+#define ERR_LOG_PG_SIZE  (64)
+#define SMART_LOG_PG_SIZE  (512)
+#define LOG_PAGE_MAX_RETRY (5)
 
 struct AsyncEventData {
    vmk_uint32  eventType;
@@ -291,9 +292,20 @@ typedef struct _NvmeIoCompletionQueue {
 } NvmeIoCompletionQueue;
 #endif
 
+typedef union NvmePendingCmdInfo {
+   struct
+   {
+      vmk_uint32 cmdOffset;
+      vmk_uint32 freeListLength;
+   };
+
+   vmk_atomic64 atomicComposite;
+
+} NvmePendingCmdInfo;
+
 struct NvmeCmdInfo {
    /** for list process */
-   vmk_ListLinks list;
+   vmk_ListLinks list; // Protected by the queue lock
    /** payload */
    union {
       void          *cmdPtr;
@@ -303,16 +315,20 @@ struct NvmeCmdInfo {
    struct nvme_cmd nvmeCmd;
    /** nvme completion entry struct */
    struct cq_entry cqEntry;
+   /** completion deferred free list  */
+   vmk_uint32 freeLink;
    /** type of command */
    vmk_uint32  type;
    /** indicating whether the command is active or not */
-   vmk_uint32  status;
+   vmk_atomic32 atomicStatus;
    /** cache for the command completion status */
    Nvme_Status cmdStatus;
    /** nvme command identifier */
    vmk_uint16  cmdId;
+#if USE_TIMER
    /** timeout indicator */
    vmk_uint16  timeoutId;
+#endif
    /** bytes carried in this request */
    vmk_uint64  count;
    /** number of sub-commands running */
@@ -357,15 +373,17 @@ struct NvmeCmdInfo {
    void *cleanupData;
    /** is core dump command */
    int isDumpCmd;
- 
-   /* whether using bounce buffer for protection data, for base request only */
-   int useProtBounceBuffer;
+
+#define PROT_BOUNCE_BUFFER (1 << 0)
+#define DATA_BOUNCE_BUFFER (1 << 1)
+   vmk_uint32 bounceBufferType;
    /* protection data bounce buffer, for base request only */
    struct NvmeDmaEntry protDmaEntry;
+   /* data bounce buffer, for base request only */
+   struct NvmeDmaEntry dataDmaEntry;
 };
 
 struct NvmeSubQueueInfo {
-   OsLib_Lock_t lock;
    struct NvmeCtrlr *ctrlr;
    vmk_uint32 flags;
    vmk_uint32 id;
@@ -378,6 +396,7 @@ struct NvmeSubQueueInfo {
    vmk_IOA subqPhy;
    struct NvmeQueueInfo *compq;
    vmk_IOA doorbell;
+   vmk_atomic32 pendingHead;
 
    struct NvmeDmaEntry dmaEntry;
 
@@ -386,15 +405,13 @@ struct NvmeSubQueueInfo {
 };
 
 struct NvmeQueueInfo {
-   OsLib_Lock_t lock;
+   /* Fields likely to stay constant during execution*/
    struct NvmeCtrlr *ctrlr;
-
-    /* Number of request */
-   int      nrReq;
-   /* Number of active cmds */
-   int      nrAct;
-   /* Max. Number of request */
-   int      maxReq;
+   struct NvmeSubQueueInfo *subQueue;
+   struct NvmeCmdInfo *cmdList;
+   struct cq_entry *compq;
+   void (*lockFunc)(void *);
+   void (*unlockFunc)(void *);
 
 #define  QUEUE_READY (1 << 0)
 #define  QUEUE_SUSPEND  (1 << 1)
@@ -405,30 +422,39 @@ struct NvmeQueueInfo {
    vmk_uint32 id;
    vmk_uint32 qsize;
    vmk_uint32 idCount;
-   vmk_uint32 prpCount;
-   vmk_uint32 node;
-   vmk_uint32 intrIndex;
+
+   /** Second cache line starts here*/
+   /* Fields accessed frequently during IO submission */
+   /* Number of active cmds */
+   OsLib_Lock_t lock;
+   int      nrAct;// VMK_ATTRIBUTE_ALIGN(VMK_L1_CACHELINE_SIZE);
+   vmk_uint32 freeCmdList;
+   vmk_IOA doorbell;
+   struct NvmeDmaEntry dmaEntry;
+   vmk_uint32 intrIndex; // rarely accessed field during submission / completion
+
+#if USE_TIMER
+      /** timeout list, max timeout value is 40, equal with cmd timeout value in PSA */
+#define NVME_IO_TIMEOUT (40)
+      /** Zeroed when queue is alocated */
+      vmk_uint32 timeoutCount[NVME_IO_TIMEOUT]; // Protected by queue lock
+#endif
+
+   /** 5th cache line starts here*/
+   /* lock for completion queue and fields accessed often during completion
+    * These are placed after the timeout buffer to isolate from frequent
+    * collisions with the fields frequently accessed during submission.
+    */
+   OsLib_Lock_t compqLock;// VMK_ATTRIBUTE_ALIGN(VMK_L1_CACHELINE_SIZE);
    vmk_uint32 phase;
-   vmk_uint32 timeoutId;
    vmk_uint16 tail;
    vmk_uint16 head;
-   struct NvmeCmdInfo *cmdList;
-   vmk_ListLinks cmdFree;
-   vmk_ListLinks cmdActive;
-   struct cq_entry *compq;
+   NvmePendingCmdInfo pendingCmdFree;
+#if USE_TIMER
+   /** Zeroed when queue is alocated */
+   vmk_atomic32 timeoutComplCount[NVME_IO_TIMEOUT];
+#endif
    vmk_IOA compqPhy;
-   vmk_IOA doorbell;
-
-   /** timeout list, max timeout value is 40, equal with cmd timeout value in PSA */
-   vmk_uint32 timeout[40];
-   struct NvmeSubQueueInfo *subQueue;
-
-   vmk_SlabID prpSlab;
-
-   struct NvmeDmaEntry dmaEntry;
-
-   void (*lockFunc)(void *);
-   void (*unlockFunc)(void *);
 };
 
 
@@ -534,8 +560,7 @@ struct NvmeCtrlr {
    vmk_VA regs;
 
    /** Device State */
-   Nvme_CtrlrState state;
-
+   vmk_atomic32 atomicState;
 
 #if 0
    /** Flags to stop thread */
@@ -597,14 +622,14 @@ struct NvmeCtrlr {
    /* Identity data */
    struct iden_controller identify;
 
-   /** Timeout Index */
-   int timeoutId;
    /* Max nr of Async request */
    vmk_uint16 curAen;
 
   /* Queue depth */
    vmk_uint32 qDepth;
 
+  /* Max tranfer Len */
+   vmk_uint32 maxXferLen;
 
    struct NvmeCtrlOsResources ctrlOsResources;
    /**
@@ -617,6 +642,12 @@ struct NvmeCtrlr {
    vmk_Bool exceptionThreadStarted;
    OsLib_Lock_t exceptionLock;
    struct TaskMgmtExcArgs taskMgmtExcArgs;
+
+#if USE_TIMER
+   /** Timeout Index */
+   int timeoutId;
+   /** Timeout value */
+   int ioTimeout;
    /**
     * Timer fields
     */
@@ -624,17 +655,15 @@ struct NvmeCtrlr {
    vmk_TimerCookie     TimerCookie;
    vmk_TimerAttributes TimerAttr;
    vmk_Timer           TimeoutTimerObj;
+#endif
 
-
-
-
-   #if NVME_DEBUG_INJECT_ERRORS
-      struct NvmeDebug_ErrorCounterInfo errCounters[NVME_DEBUG_NUM_ERRORS];
-   #endif
-   #if ASYNC_EVENTS_ENABLED
-      struct AsyncEventData asyncEventData;
-      vmk_atomic64 healthMask;
-   #endif
+#if NVME_DEBUG_INJECT_ERRORS
+   struct NvmeDebug_ErrorCounterInfo errCounters[NVME_DEBUG_NUM_ERRORS];
+#endif
+#if ASYNC_EVENTS_ENABLED
+   struct AsyncEventData asyncEventData;
+   vmk_atomic64 healthMask;
+#endif
 
 #if NVME_MUL_COMPL_WORLD
 #if VMKAPIDDK_VERSION < 650
@@ -655,14 +684,17 @@ struct NvmeCtrlr {
 #endif
 #endif
 
-   #if (NVME_ENABLE_STATISTICS == 1)
-      STATS_StatisticData  statsData;
-   #endif
+#if (NVME_ENABLE_STATISTICS == 1)
+   STATS_StatisticData  statsData;
+#endif
    /* Slab ID for scsi unmap command */
    vmk_SlabID scsiUnmapSlabId;
    /* concurrent scsi unmap commands counters */
    vmk_atomic64 activeUnmaps;
    vmk_atomic64 maxUnmaps;
+
+  /* Intel device specific*/
+   vmk_uint32 stripeSize;
 };
 
 /**
@@ -755,6 +787,26 @@ Nvme_GetCtrlrName(struct NvmeCtrlr *ctrlr)
 }
 
 /**
+ * Return true if this is an Intel device with stripe limitation.
+ *
+ * According to Intel, all devices of which VID = 8086 && DID = 0953/0a53/0a54,
+ * including P3500/P3520/P3600/P3700, have a vendor specific limitation on their
+ * firmware/hardware. With this limitation, all IOs across the stripe size
+ * (or boundary) delivered to NVMe device suffer from significant performance drop.
+ *
+ */
+static inline vmk_Bool
+NvmeCtrlr_IsIntelStripeLimit(struct NvmeCtrlr *ctrlr)
+{
+   vmk_PCIDeviceID *pciId = &ctrlr->ctrlOsResources.pciId;
+
+   return (pciId->vendorID == 0x8086 &&
+           (pciId->deviceID == 0x0953 ||
+            pciId->deviceID == 0x0a53 ||
+            pciId->deviceID == 0x0a54));
+}
+
+/**
  * @brief This function set memory blocks of 64bit aligned data.
  *     This routine assumes all blocke sizes 64bit aligned.
  *
@@ -784,13 +836,13 @@ Nvme_Memset64(void *dst, vmk_uint64 val, int cnt)
  *
  * @return void none.
  */
- static inline void
- Nvme_Memcpy64(void *dst, void *src, int cnt)
- {
-    vmk_uint64 *p1 = dst, *p2 = src;
-    while(cnt--) {
-     *p1++ = *p2++;
-  }
+static inline void
+Nvme_Memcpy64(void *dst, void *src, int cnt)
+{
+   vmk_uint64 *p1 = dst, *p2 = src;
+   while(cnt--) {
+    *p1++ = *p2++;
+   }
 }
 
 
@@ -801,6 +853,10 @@ Nvme_Memset64(void *dst, vmk_uint64 val, int cnt)
    result = VMK_OK;                                            \
    do {                                                        \
       result = vmk_WorldSleep(100 * 1000); /* sleep 100ms */   \
+      if (NvmeCore_IsCtrlrRemoved(ctrlr)) {                    \
+         result = VMK_PERM_DEV_LOSS;                           \
+         break;                                                \
+      }                                                        \
       if ((cond)) {                                            \
          break;                                                \
       }                                                        \
@@ -830,78 +886,263 @@ Nvme_GetTimeUS(void)
    return vmk_TimerUnsignedTCToMS(vmk_GetTimerCycles());
 }
 
-VMK_ReturnStatus NvmeDriver_Register();
-void NvmeDriver_Unregister();
+VMK_ReturnStatus
+NvmeDriver_Register();
 
-void NvmeDebug_DumpCmd(struct nvme_cmd *cmd);
-void NvmeDebug_DumpCpl(struct cq_entry *cqe);
-void NvmeDebug_DumpSgArray(vmk_SgArray *);
-void NvmeDebug_DumpCdb(vmk_uint8 cdb[16]);
-void NvmeDebug_DumpPrps(struct NvmeCmdInfo *cmdInfo);
-void NvmeDebug_DumpUio(struct usr_io *uio);
-void NvmeDebug_DumpNsInfo(struct NvmeNsInfo *ns);
-void NvmeDebug_DumpTimeoutInfo(struct NvmeQueueInfo *qinfo);
-void NvmeDebug_DumpSmart(struct smart_log *smartLog);
+void
+NvmeDriver_Unregister();
 
-VMK_ReturnStatus NvmeMgmt_GlobalInitialize();
-VMK_ReturnStatus NvmeMgmt_GlobalDestroy();
-VMK_ReturnStatus NvmeMgmt_CtrlrInitialize(struct NvmeCtrlr *ctrlr);
-void NvmeMgmt_CtrlrDestroy(struct NvmeCtrlr *ctrlr);
+void
+NvmeDebug_DumpCmd(struct nvme_cmd *cmd);
 
-VMK_ReturnStatus NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr);
-VMK_ReturnStatus NvmeCtrlr_Detach(struct NvmeCtrlr *ctrlr);
-VMK_ReturnStatus NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr);
-VMK_ReturnStatus NvmeCtrlr_Stop(struct NvmeCtrlr *ctrlr);
-VMK_ReturnStatus NvmeCtrlr_Quiesce(struct NvmeCtrlr *ctrlr);
-VMK_ReturnStatus NvmeCtrlr_Remove(struct NvmeCtrlr *ctrlr);	
+void
+NvmeDebug_DumpCpl(struct cq_entry *cqe);
 
-void NvmeCtrlr_SetMissing(struct NvmeCtrlr *ctrlr);
+void
+NvmeDebug_DumpSgArray(vmk_SgArray *);
 
-vmk_uint64 NvmeCtrlr_GetNs(struct NvmeNsInfo *ns);
-vmk_uint64 NvmeCtrlr_PutNs(struct NvmeNsInfo *ns);
-VMK_ReturnStatus NvmeCtrlr_DoTaskMgmtReset(struct NvmeCtrlr *ctrlr, Nvme_ResetType resetType, struct NvmeNsInfo* ns);
-VMK_ReturnStatus NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr, vmk_ScsiTaskMgmt *taskMgmt, struct NvmeNsInfo *ns);
-VMK_ReturnStatus NvmeCtrlr_IoctlCommon(struct NvmeCtrlr *ctrlr, vmk_uint32 cmd, struct usr_io *uio);
+void
+NvmeDebug_DumpCdb(vmk_uint8 cdb[16]);
 
-Nvme_CtrlrState NvmeState_SetCtrlrState(struct NvmeCtrlr *ctrlr, Nvme_CtrlrState state, vmk_Bool locked);
-const char * NvmeState_GetCtrlrStateString(Nvme_CtrlrState state);
-Nvme_CtrlrState NvmeState_GetCtrlrState(struct NvmeCtrlr *ctrlr, vmk_Bool locked);
+void
+NvmeDebug_DumpPrps(struct NvmeCmdInfo *cmdInfo);
+
+void
+NvmeDebug_DumpUio(struct usr_io *uio);
+
+void
+NvmeDebug_DumpNsInfo(struct NvmeNsInfo *ns);
+
+#if USE_TIMER
+void
+NvmeDebug_DumpTimeoutInfo(struct NvmeQueueInfo *qinfo);
+#endif
+
+void
+NvmeDebug_DumpSmart(struct smart_log *smartLog);
+
+VMK_ReturnStatus
+NvmeMgmt_GlobalInitialize();
+
+VMK_ReturnStatus
+NvmeMgmt_GlobalDestroy();
+
+VMK_ReturnStatus
+NvmeMgmt_CtrlrInitialize(struct NvmeCtrlr *ctrlr);
+
+void
+NvmeMgmt_CtrlrDestroy(struct NvmeCtrlr *ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_Detach(struct NvmeCtrlr *ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_Stop(struct NvmeCtrlr *ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_Quiesce(struct NvmeCtrlr *ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_Remove(struct NvmeCtrlr *ctrlr);
+
+void
+NvmeCtrlr_SetMissing(struct NvmeCtrlr *ctrlr);
+
+vmk_uint64
+NvmeCtrlr_GetNs(struct NvmeNsInfo *ns);
+
+vmk_uint64
+NvmeCtrlr_PutNs(struct NvmeNsInfo *ns);
+
+VMK_ReturnStatus
+NvmeCtrlr_DoTaskMgmtReset(struct NvmeCtrlr *ctrlr,
+                          Nvme_ResetType resetType,
+                          struct NvmeNsInfo* ns);
+
+VMK_ReturnStatus
+NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr,
+                          vmk_ScsiTaskMgmt *taskMgmt,
+                          struct NvmeNsInfo *ns);
+
+VMK_ReturnStatus
+NvmeCtrlr_IoctlCommon(struct NvmeCtrlr *ctrlr,
+                      vmk_uint32 cmd,
+                      struct usr_io *uio);
+
+Nvme_CtrlrState
+NvmeState_SetCtrlrState(struct NvmeCtrlr *ctrlr,
+                         Nvme_CtrlrState state,
+                         vmk_Bool locked);
+
+const char *
+NvmeState_GetCtrlrStateString(Nvme_CtrlrState state);
+
+Nvme_CtrlrState
+NvmeState_GetCtrlrState(struct NvmeCtrlr *ctrlr, vmk_Bool locked);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_SendAdmin(struct NvmeCtrlr *ctrlr,
+                       struct nvme_cmd *entry,
+                       vmk_uint8 *buf,
+                       vmk_uint32 length,
+                       struct cq_entry *cqEntry,
+                       int timeoutUs);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_SendAdminAsync(struct NvmeCtrlr *ctrlr,
+                            struct nvme_cmd *entry,
+                            vmk_uint8 *buf,
+                            vmk_uint32 length,
+                            NvmeCore_CompleteCommandCb done,
+                            void *doneData);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_Identify(struct NvmeCtrlr *ctrlr, int nsId, vmk_uint8 *identifyData);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_DeleteSq(struct NvmeCtrlr *ctrlr, vmk_uint16 id);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_DeleteCq(struct NvmeCtrlr *ctrlr, vmk_uint16 id);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_CreateCq(struct NvmeCtrlr *ctrlr,
+                      struct NvmeQueueInfo *qinfo,
+                      vmk_uint16 qid);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_CreateSq(struct NvmeCtrlr *ctrlr,
+                      struct NvmeQueueInfo *qinfo,
+                      vmk_uint16 qid);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_SetFeature(struct NvmeCtrlr *ctrlr,
+                        int nsId,
+                        vmk_uint16 featureId,
+                        vmk_uint32 option,
+                        vmk_uint8 *buf,
+                        vmk_uint32 length,
+                        struct cq_entry *cqEntry);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_SetFeatureAsync(struct NvmeCtrlr *ctrlr,
+                            int nsId,
+                            vmk_uint16 featureId,
+                            vmk_uint32 option,
+                            NvmeCore_CompleteCommandCb done,
+                            void *doneData);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_GetFeature(struct NvmeCtrlr *ctrlr,
+                        int nsId,
+                        vmk_uint16 featureId,
+                        vmk_uint32 option,
+                        vmk_uint8 *buf,
+                        vmk_uint32 length,
+                        struct cq_entry *cqEntry);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_GetFeatureAsync(struct NvmeCtrlr *ctrlr,
+                             int nsId,
+                             vmk_uint16 featureId,
+                             vmk_uint32 option,
+                             NvmeCore_CompleteCommandCb done,
+                             void *doneData);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_GetLogPage(struct NvmeCtrlr *ctrlr,
+                        vmk_uint32 nsID,
+                        vmk_uint16 logPageID,
+                        void* logPage,
+                        vmk_uint32 length);
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_GetLogPageAsync(struct NvmeCtrlr *ctrlr,
+                             vmk_uint32 nsID,
+                             vmk_uint16 logPageID,
+                             vmk_uint32 length,
+                             NvmeCore_CompleteCommandCb done,
+                             void *doneData);
 
 
-VMK_ReturnStatus NvmeCtrlrCmd_Identify(struct NvmeCtrlr *ctrlr, int nsId, vmk_IOA dmaAddr);
-VMK_ReturnStatus NvmeCtrlrCmd_DeleteSq(struct NvmeCtrlr *ctrlr, vmk_uint16 id);
-VMK_ReturnStatus NvmeCtrlrCmd_DeleteCq(struct NvmeCtrlr *ctrlr, vmk_uint16 id);
-VMK_ReturnStatus NvmeCtrlrCmd_CreateCq(struct NvmeCtrlr *ctrlr, struct NvmeQueueInfo *qinfo, vmk_uint16 qid);
-VMK_ReturnStatus NvmeCtrlrCmd_CreateSq(struct NvmeCtrlr *ctrlr, struct NvmeQueueInfo *qinfo, vmk_uint16 qid);
-VMK_ReturnStatus NvmeCtrlrCmd_SetFeature(struct NvmeCtrlr *ctrlr, vmk_uint16 feature, vmk_uint32 option, struct nvme_prp *prp, struct cq_entry *cqEntry);
-VMK_ReturnStatus NvmeCtrlrCmd_GetFeature(struct NvmeCtrlr *ctrlr, int ns_id, vmk_uint16 feature, vmk_uint32 option, struct nvme_prp *prp, struct cq_entry *cqEntry);
-VMK_ReturnStatus NvmeCtrlrCmd_GetLogPage(struct NvmeCtrlr *ctrlr, vmk_uint32 nsID, void* logPage, vmk_uint16 logPageID, struct NvmeCmdInfo* cmdInfo, vmk_Bool isSyncCmd);
-VMK_ReturnStatus NvmeCtrlrCmd_GetSmartLog(struct NvmeCtrlr *ctrlr, vmk_uint32 nsID, struct smart_log *smartLog, struct NvmeCmdInfo *cmdInfo, vmk_Bool isSyncCmd);
-VMK_ReturnStatus NvmeCtrlrCmd_GetErrorLog(struct NvmeCtrlr *ctrlr, vmk_uint32 nsID, struct error_log *smartLog, struct NvmeCmdInfo *cmdInfo, vmk_Bool isSyncCmd);
-VMK_ReturnStatus NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize, int qid, int shared, int intrIndex);
-VMK_ReturnStatus NvmeQueue_Destroy(struct NvmeQueueInfo *qinfo);
-VMK_ReturnStatus NvmeQueue_ResetAdminQueue(struct NvmeQueueInfo *qinfo);
-Nvme_Status NvmeQueue_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns, vmk_ScsiCommand *vmkCmd, int retries);
-void NvmeQueue_Flush(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns, int status);
+VMK_ReturnStatus
+NvmeQueue_Construct(struct NvmeQueueInfo *qinfo,
+                    int sqsize,
+                    int cqsize,
+                    int qid,
+                    int shared,
+                    int intrIndex);
 
-Nvme_Status NvmeIo_SubmitIo(struct NvmeNsInfo *ns, void *cmdPtr);
-Nvme_Status NvmeIo_SubmitDsm(struct NvmeNsInfo *ns, void *cmdPtr, struct nvme_dataset_mgmt_data *dsmData, int count);
-Nvme_Status NvmeIo_SubmitFlush(struct NvmeNsInfo *ns, void *cmdPtr, struct NvmeQueueInfo *qinfo);
-vmk_ByteCount NvmeIo_ProcessPrps(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo);
+VMK_ReturnStatus
+NvmeQueue_Destroy(struct NvmeQueueInfo *qinfo);
 
-VMK_ReturnStatus NvmeCtrlr_ValidateParams(struct NvmeCtrlr *ctrlr);
-VMK_ReturnStatus NvmeCtrlr_AdminQueueSetup(struct NvmeCtrlr *ctrlr);
-VMK_ReturnStatus NvmeCtrlr_AdminQueueDestroy(struct NvmeCtrlr *ctrlr);
-vmk_Bool NvmeCtrlr_Timeout (struct NvmeCtrlr *ctrlr, vmk_uint32 * sleepTime);
-VMK_ReturnStatus NvmeCtrlrCmd_AsyncEventRequest (struct NvmeCtrlr * ctrlr);
-VMK_ReturnStatus NvmeCtrlr_ConfigAsyncEvents(struct NvmeCtrlr *ctrlr, vmk_uint16 eventConfig);
-VMK_ReturnStatus NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns, Nvme_Status status, vmk_Bool doReissue);
+VMK_ReturnStatus
+NvmeQueue_ResetAdminQueue(struct NvmeQueueInfo *qinfo);
 
+Nvme_Status
+NvmeQueue_SubmitIoRequest(struct NvmeQueueInfo *qinfo,
+                          struct NvmeNsInfo *ns,
+                          vmk_ScsiCommand *vmkCmd,
+                          int retries);
+
+void
+NvmeQueue_Flush(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns, int status);
+
+Nvme_Status
+NvmeIo_SubmitIo(struct NvmeNsInfo *ns, void *cmdPtr);
+
+Nvme_Status
+NvmeIo_SubmitDsm(struct NvmeNsInfo *ns,
+                 void *cmdPtr,
+                 struct nvme_dataset_mgmt_data *dsmData,
+                 int count);
+
+Nvme_Status
+NvmeIo_SubmitFlush(struct NvmeNsInfo *ns, void *cmdPtr, struct NvmeQueueInfo *qinfo);
+
+vmk_ByteCount
+NvmeIo_ProcessPrps(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo);
+
+VMK_ReturnStatus
+NvmeCtrlr_ValidateParams(struct NvmeCtrlr *ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_AdminQueueSetup(struct NvmeCtrlr *ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_AdminQueueDestroy(struct NvmeCtrlr *ctrlr);
+
+#if USE_TIMER
+vmk_Bool
+NvmeCtrlr_Timeout (struct NvmeCtrlr *ctrlr, vmk_uint32 * sleepTime);
+#endif
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_AsyncEventRequest (struct NvmeCtrlr * ctrlr);
+
+VMK_ReturnStatus
+NvmeCtrlr_ConfigAsyncEvents(struct NvmeCtrlr *ctrlr, vmk_uint16 eventConfig);
+VMK_ReturnStatus
+NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr,
+                  struct NvmeNsInfo* ns,
+                  Nvme_Status status,
+                  vmk_Bool doReissue);
 
 /*TODO: funtions to support error handling in the future*/
 //VMK_ReturnStatus NvmeQueue_GetErrorLog(struct NvmeCtrlr *ctrlr, struct NvmeCmdInfo *cmdInfo);
 
-VMK_ReturnStatus NvmeMgmt_Convert(vmk_uint8 *src, vmk_uint32 srcLen, vmk_uint32 *dest);
-vmk_uint16 NvmeMgmt_GetTempThreshold(struct NvmeCtrlr *ctrlr);
+VMK_ReturnStatus
+NvmeMgmt_Convert(vmk_uint8 *src, vmk_uint32 srcLen, vmk_uint32 *dest);
 
+vmk_uint16
+NvmeMgmt_GetTempThreshold(struct NvmeCtrlr *ctrlr);
+
+void
+NvmeCore_QueryActiveCommands(struct NvmeQueueInfo *qinfo, vmk_ListLinks *list);
 #endif /* _NVME_PRIVATE_H_ */

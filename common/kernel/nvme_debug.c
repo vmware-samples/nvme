@@ -126,20 +126,24 @@ NvmeDebug_DumpNsInfo(struct NvmeNsInfo *ns)
 /**
  * Dump timeout info
  */
+#if USE_TIMER
 void
 NvmeDebug_DumpTimeoutInfo(struct NvmeQueueInfo *qinfo)
 {
    int i;
-   vmk_uint32 *ptr = (vmk_uint32 *) qinfo->timeout;
-   for (i = 0; i < io_timeout; i++)
+   vmk_uint32 *ptr = (vmk_uint32 *) qinfo->timeoutCount;
+   vmk_uint32 *ptrComp = (vmk_uint32 *) qinfo->timeoutComplCount;
+   int ioTimeout = qinfo->ctrlr->ioTimeout;
+   for (i = 0; i < ioTimeout; i++)
    {
-      if (ptr[i])
+      if (ptr[i] - (int)vmk_AtomicRead32(&ptrComp[i]))
       {
          DPRINT("non-zero qinfo %p [%d] timeout IDs: %02x: %08x\n", qinfo, qinfo->id,
-                i, ptr[i]);
+                i, ptr[i] - (int)vmk_AtomicRead32(&ptrComp[i]));
       }
    }
 }
+#endif
 
 #if NVME_DEBUG_INJECT_ERRORS
 static const struct NvmeDebug_ErrorCounterInfo errorCounters[] = {

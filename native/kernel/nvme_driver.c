@@ -507,6 +507,8 @@ MsixSetup(struct NvmeCtrlr *ctrlr)
 
       return VMK_OK;
    } else {
+      Nvme_Free(ctrlr->ctrlOsResources.intrArray);
+      ctrlr->ctrlOsResources.intrArray = NULL;
       ctrlr->ctrlOsResources.msixEnabled = 0;
       return vmkStatus;
    }
@@ -536,6 +538,10 @@ IntrInit(struct NvmeCtrlr *ctrlr)
          IPRINT("using msi-x with %d vectors.", ctrlr->ctrlOsResources.numVectors);
          return VMK_OK;
       }
+      /* The device is probably broken or unplugged. Return error directly. */
+      if (vmkStatus == VMK_IO_ERROR) {
+         goto out;
+      }
    }
 
    /* msi-x setup failed, fallback to intx */
@@ -545,7 +551,8 @@ IntrInit(struct NvmeCtrlr *ctrlr)
       return VMK_OK;
    }
 
-   EPRINT("unable to initialize interrupt, 0x%x.", vmkStatus);
+out:
+   EPRINT("Unable to initialize interrupt, 0x%x.", vmkStatus);
    return vmkStatus;
 }
 
@@ -676,17 +683,24 @@ NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr)
    if (vmkStatus != VMK_OK) {
       goto cleanup_lock;
    }
+
+#if USE_TIMER
    vmkStatus = OsLib_TimerQueueCreate(ctrlr);
    if (vmkStatus != VMK_OK) {
       goto cleanup_sema;
    }
+#endif
 
 
 #if EXC_HANDLER
   vmkStatus = OsLib_SetupExceptionHandler(ctrlr);
    if (vmkStatus != VMK_OK) {
       EPRINT("The device can not handle exceptions.");
-      goto cleanup_timer_queue;
+      #if USE_TIMER
+         goto cleanup_timer_queue;
+      #else
+         goto cleanup_sema;
+      #endif
    }
 #endif
 
@@ -704,8 +718,10 @@ NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr)
    if (vmkStatus != VMK_OK) {
       #if EXC_HANDLER
          goto cleanup_exc_handler;
-      #else
+      #elif USE_TIMER
          goto cleanup_timer_queue;
+      #else
+         goto cleanup_sema;
       #endif
    }
 
@@ -753,9 +769,10 @@ cleanup_exc_handler:
    OsLib_ShutdownExceptionHandler(ctrlr);
 #endif
 
+#if USE_TIMER
 cleanup_timer_queue:
    OsLib_TimerQueueDestroy(ctrlr);
-
+#endif
 
 cleanup_sema:
    OsLib_SemaphoreDestroy(&ctrlr->taskMgmtMutex);
@@ -804,7 +821,7 @@ IntxSetup(struct NvmeCtrlr *ctrlr)
       1, 1, NULL, ctrlr->ctrlOsResources.intrArray, &numAllocated);
    if (vmkStatus != VMK_OK) {
       EPRINT("unable to allocate intr cookie, 0x%x.", vmkStatus);
-      return vmkStatus;
+      goto free_intrArray;
    }
 
    /* should have just 1 intr cookie allocated for intx */
@@ -830,8 +847,12 @@ IntxSetup(struct NvmeCtrlr *ctrlr)
 
 free_intr:
    vmk_PCIFreeIntrCookie(vmk_ModuleCurrentID, ctrlr->ctrlOsResources.pciDevice);
-   ctrlr->numIoQueues = 0;
+
+free_intrArray:
+   Nvme_Free(ctrlr->ctrlOsResources.intrArray);
+   ctrlr->ctrlOsResources.intrArray = NULL;
    ctrlr->ctrlOsResources.numVectors = 0;
+   ctrlr->numIoQueues = 0;
 
    return vmkStatus;
 }
@@ -851,7 +872,9 @@ NvmeCtrlr_Detach(struct NvmeCtrlr *ctrlr)
    OsLib_ShutdownExceptionHandler(ctrlr);
 #endif
 
+#if USE_TIMER
    OsLib_TimerQueueDestroy(ctrlr);
+#endif
 
    vmkStatus = NvmeCtrlr_AdminQueueDestroy(ctrlr);
    DPRINT_INIT("cleaned admin queue, 0x%x.", vmkStatus);

@@ -17,13 +17,6 @@ This package includes 4 components suppporting NVM Express for VMware:
 VMware native nvme driver is named as "nvme", to avoid name conflict on vSphere, 3rd
 party drivers for vSphere must not use this name.
 
-== CONTRIBUTE ==
-
-We welcome contributions from the community. If you wish to contribute code and you
-have not signed our contributor license agreement (CLA), our bot will update the issue
-when you open a pull request. For any questions about the CLA process, please refer to
-our FAQ: https://cla.vmware.com/faq
-
 == Reference ==
 
 VMware Develop Center: http://developercenter.vmware.com

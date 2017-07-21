@@ -259,7 +259,7 @@ Nvme_Identify(struct nvme_handle *handle, int ns, void *id)
    uio.timeoutUs = ADMIN_TIMEOUT;
 #define PAGE_SIZE 4096
    uio.length = PAGE_SIZE;
-   uio.addr = (vmk_uint32)id;
+   uio.addr = (vmk_uintptr_t)id;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -417,7 +417,7 @@ int Nvme_FWDownload(struct nvme_handle *handle, int slot,  unsigned char *rom_bu
       uio.timeoutUs = ADMIN_TIMEOUT;
       uio.cmd.cmd.firmwareDownload.numDW = (size / sizeof(vmk_uint32)) - 1;
       uio.cmd.cmd.firmwareDownload.offset = offset / sizeof(vmk_uint32);
-      uio.addr = (vmk_uint32)chunk;
+      uio.addr = (vmk_uintptr_t)chunk;
       uio.length = size;
 
       rc = Nvme_AdminPassthru(handle, &uio);
@@ -456,7 +456,7 @@ int Nvme_FWFindSlot(struct nvme_handle *handle, int *slot)
    uio.cmd.cmd.getLogPage.LogPageID = GLP_ID_FIRMWARE_SLOT_INFO;
    uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
    uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
-   uio.addr = (vmk_uint32)&log.fwSlotLog;
+   uio.addr = (vmk_uintptr_t)&log.fwSlotLog;
    rc = Nvme_AdminPassthru(handle, &uio);
 
    if (rc) {
@@ -552,4 +552,59 @@ int Nvme_FormatNvm(struct nvme_handle *handle, int ses, int pil, int pi, int ms,
    } else {
       return (uio.comp.SCT << 8 | uio.comp.SC);
    }
+}
+
+/**
+ * Set IO timeout
+ *
+ * @param [in] handle handle to a device
+ * @param [in] timeout
+ *
+ * @return 0 if successful
+ */
+int
+Nvme_SetTimeout(struct nvme_handle *handle, int timeout)
+{
+   int rc = 0;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+
+   uio.length = timeout;
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_SET_TIMEOUT, &uio);
+
+   if (!rc) {
+      rc = uio.status;
+   }
+
+   return rc;
+}
+
+/**
+ * Get IO timeout
+ *
+ * @param [in] handle handle to a device
+ * @param [out] timeout
+ *
+ * @return 0 if successful
+ */
+int
+Nvme_GetTimeout(struct nvme_handle *handle, int *timeout)
+{
+   int rc = 0;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_TIMEOUT, &uio);
+
+   if (!rc) {
+      rc = uio.status;
+   }
+
+   if (!rc) {
+      *timeout = uio.length;
+   }
+
+   return rc;
 }

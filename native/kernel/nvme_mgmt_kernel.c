@@ -448,15 +448,16 @@ kernelCbSmartGet(vmk_uint64 cookie, vmk_uint64 instanceId,
    }
 
    /* Create buffer to store log page info */
-   smartLog = Nvme_Alloc(LOG_PG_SIZE, 0, NVME_ALLOC_ZEROED);
+   smartLog = Nvme_Alloc(SMART_LOG_PG_SIZE, 0, NVME_ALLOC_ZEROED);
    if (!smartLog){
       EPRINT("Failed to allocate buffer for smart log");
       return VMK_FAILURE;
    }
-   
+
    /* Issue GetLogPage command to acquire log page info, retry if needed */
    for (retryTimes = 0; retryTimes < SMART_MAX_RETRY_TIMES; retryTimes++) {
-      vmkStatus = NvmeCtrlrCmd_GetSmartLog(ctrlr, nameSpaceId, smartLog, NULL, VMK_TRUE);
+      vmkStatus = NvmeCtrlrCmd_GetLogPage(ctrlr, nameSpaceId, GLP_ID_SMART_HEALTH,
+                                          smartLog, SMART_LOG_PG_SIZE);
       if (vmkStatus == VMK_OK) {
          NvmeMgmt_ParseLogInfo(ctrlr, smartLog, bundle);
          DPRINT_MGMT("Succeed to get log page");
@@ -478,7 +479,6 @@ kernelCbSmartGet(vmk_uint64 cookie, vmk_uint64 instanceId,
 free_buffer:
    Nvme_Free(smartLog);
    return vmkStatus;
-
 }
 
 

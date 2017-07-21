@@ -212,7 +212,8 @@ PrintIdentifyNs(struct iden_namespace *idNs)
    PINT("Namespace Atomic Boundary Size Power Fail", idNs->nabspf);
    P128BIT("NVM Capacity", idNs->NVMCap);
    xml_field_begin("Namespace Globally Unique Identifier");
-   printf("<string>0x%.16llx%.16llx</string>\n", *(vmk_uint64 *)idNs->nguid.extId,
+   printf("<string>0x%.16" VMK_FMT64 "x%.16" VMK_FMT64 "x</string>\n",
+          *(vmk_uint64 *)idNs->nguid.extId,
           *(vmk_uint64 *)idNs->nguid.vendorSpecExtId);
    xml_field_end();
    PULL("IEEE Extended Unique Identifier", (unsigned long long int)idNs->eui64);
@@ -821,6 +822,11 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
       goto out_free;
    }
 
+   if((idCtrlr->adminCmdSup & 0x2) == 0) {
+      Error("NVM Format command is not supported.");
+      goto out_free;
+   }
+
    if(nsid > (int)idCtrlr->numNmspc) {
       Error("Invalid Namespace ID.");
       goto out_free;
@@ -1031,19 +1037,19 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       case GLP_ID_ERR_INFO:
          uio.cmd.cmd.getLogPage.numDW = GLP_LEN_ERR_INFO * elpe / 4 - 1;
          uio.length = GLP_LEN_ERR_INFO * elpe;
-         uio.addr = (vmk_uint32)&log.errLog;
+         uio.addr = (vmk_uintptr_t)&log.errLog;
          break;
       case GLP_ID_SMART_HEALTH:
          uio.cmd.header.namespaceID = nsid;
          uio.cmd.cmd.getLogPage.numDW = GLP_LEN_SMART_HEALTH / 4 - 1;
          uio.cmd.cmd.getLogPage.numDW = GLP_LEN_SMART_HEALTH / 4 - 1;
          uio.length = GLP_LEN_SMART_HEALTH;
-         uio.addr = (vmk_uint32)&log.smartLog;
+         uio.addr = (vmk_uintptr_t)&log.smartLog;
          break;
       case GLP_ID_FIRMWARE_SLOT_INFO:
          uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
          uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
-         uio.addr = (vmk_uint32)&log.fwSlotLog;
+         uio.addr = (vmk_uintptr_t)&log.fwSlotLog;
          break;
       default:
          Error("Invalid argument.");
@@ -1113,11 +1119,12 @@ LookupFtrId(const char *ftr)
    return 0;
 }
 
-static int 
+static void
 GetFeature(struct nvme_handle *handle, struct usr_io *uiop, int fid)
 {
    int value, rc, vectNum, i;
    struct usr_io uioVect;
+   struct iden_controller  *idCtrlr;
    memset(uiop, 0, sizeof(*uiop));
 
    uiop->cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
@@ -1129,7 +1136,7 @@ GetFeature(struct nvme_handle *handle, struct usr_io *uiop, int fid)
       rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_INT_VECT_NUM, &uioVect);
       if (rc) {
          Error("Failed to get controller interrupt vector number.");
-         return rc;
+         return;
       }
 
       vectNum = uioVect.length;
@@ -1151,13 +1158,35 @@ GetFeature(struct nvme_handle *handle, struct usr_io *uiop, int fid)
       }
       xml_list_end();
       esxcli_xml_end_output();
-      return rc;
+      return;
+   }
+
+   if (fid == FTR_ID_WRITE_CACHE) {
+      idCtrlr = malloc(sizeof(*idCtrlr));
+      if (idCtrlr == NULL) {
+         Error("Out of memory.");
+         return;
+      }
+
+      rc = Nvme_Identify(handle, -1, idCtrlr);
+      if (rc != 0) {
+         Error("Failed to get controller identify information, 0x%x.", rc);
+         free(idCtrlr);
+         return;
+      }
+
+      if ((idCtrlr->volWrCache & 0x1) == 0) {
+         Error("Failed to get this feature: controller has no write cache!");
+         free(idCtrlr);
+         return;
+      }
    }
 
    rc = Nvme_AdminPassthru(handle, uiop);
 
    if (rc) {
-      return rc;
+      Error("Failed to get feature, 0x%x.", rc);
+      return;
    }
 
    value = uiop->comp.param.cmdSpecific;
@@ -1233,7 +1262,7 @@ GetFeature(struct nvme_handle *handle, struct usr_io *uiop, int fid)
 
    xml_struct_end();
    esxcli_xml_end_output();
-   return rc;
+   return;
 }
 
 void
@@ -1287,12 +1316,7 @@ NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
       return;
    }
 
-   rc = GetFeature(handle, &uio, fid);
-   if (rc) {
-      Error("Failed to get feature info, %s.", strerror(rc));
-      Nvme_Close(handle);
-      return;
-   }
+   GetFeature(handle, &uio, fid);
 
    Nvme_Close(handle);
 }
@@ -1309,6 +1333,8 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
    struct iden_controller  *idCtrlr;
    struct usr_io            uioVect;
    int                      vectNum;
+   vmk_uint64               regs;
+   struct usr_io            uioReg;
    Bool                     setX = false;
    Bool                     setY = false;
    Bool                     setZ = false;
@@ -1413,11 +1439,30 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
          Error("Missing parameter.");
          goto out;
       }
-     
+
       if ((value >> 3 | value2 >> 8 | value3 >> 8 | value4 >> 8) != 0) {
          Error("Invalid parameter.");
          goto out;
       }
+
+      memset(&uioReg, 0, sizeof(uioReg));
+      uioReg.addr = (vmk_uintptr_t)&regs;
+      uioReg.length = sizeof(regs);
+
+      rc = Nvme_Ioctl(handle, NVME_IOCTL_DUMP_REGS, &uioReg);
+      if (rc) {
+         Error("Failed to get controller registers, 0x%x.", rc);
+         goto out;
+      }
+
+      if ((regs & NVME_CAP_AMS_MSK64) >> NVME_CAP_AMS_LSB == 0) {
+         if (value2 || value3 || value4) {
+            Error("Invalid parameter. Controller only support Round Robin arbitration"
+                  " mechanism, Low/Medium/High Priority Weight must be set to 0.");
+            goto out;
+         }
+      }
+
       uio.cmd.cmd.setFeatures.numSubQReq = value | value2 << 8;
       uio.cmd.cmd.setFeatures.numCplQReq = value3 | value4 << 8;
       break;
@@ -1458,7 +1503,7 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
       }
 
       if (fid == FTR_ID_WRITE_CACHE && (idCtrlr->volWrCache & 0x1) == 0) {
-         Error("Unable to set this feature: controller doesn't have a write cache!");
+         Error("Failed to set this feature: controller has no write cache!");
          free(idCtrlr);
          goto out;
       }
@@ -1498,8 +1543,8 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
          Error("Invalid parameter.");
          goto out;
       }
- 
-      if (value == 0 && value2 == 1) {
+
+      if (value == 0) {
          Error("Invalid parameter: interrupt coalescing is not supported for admin queue!");
          goto out;
       }
@@ -1580,12 +1625,7 @@ NvmePlugin_DeviceFeatureList(int argc, const char *argv[])
       if (i == 12) {
          i = FTR_ID_SW_PROGRESS_MARKER;
       }
-      rc = GetFeature(handle, &uio, i);
-      if (rc) {
-         PrintString("Failed to get feature info, %s.", strerror(rc));
-         Nvme_Close(handle);
-         return;
-      }
+      GetFeature(handle, &uio, i);
    }
 
    Nvme_Close(handle);
@@ -1848,6 +1888,237 @@ NvmePlugin_DriverLoglevelSet(int argc, const char *argv[])
    }
 }
 
+static void
+PrintCtrlrRegs(void *regs)
+{
+   vmk_uint64 reg64;
+   vmk_uint32 reg32;
+
+   esxcli_xml_begin_output();
+   xml_struct_begin("DeviceRegs");
+
+   reg64 = *(vmk_uint64 *)(regs + NVME_CAP);
+   PULL("CAP", reg64);
+   PULL("CAP.MPSMAX", (reg64 & NVME_CAP_MPSMAX_MSK64) >> NVME_CAP_MPSMAX_LSB);
+   PULL("CAP.MPSMIN", (reg64 & NVME_CAP_MPSMIN_MSK64) >> NVME_CAP_MPSMIN_LSB);
+   PULL("CAP.CSS", (reg64 & NVME_CAP_CSS_MSK64) >> NVME_CAP_CSS_LSB);
+   PULL("CAP.NSSRS", (reg64 & NVME_CAP_NSSRS_MSK64) >> NVME_CAP_NSSRS_LSB);
+   PULL("CAP.DSTRD", (reg64 & NVME_CAP_DSTRD_MSK64) >> NVME_CAP_DSTRD_LSB);
+   PULL("CAP.TO", (reg64 & NVME_CAP_TO_MSK64) >> NVME_CAP_TO_LSB);
+   PULL("CAP.AMS", (reg64 & NVME_CAP_AMS_MSK64) >> NVME_CAP_AMS_LSB);
+   PULL("CAP.CQR", (reg64 & NVME_CAP_CQR_MSK64) >> NVME_CAP_CQR_LSB);
+   PULL("CAP.MQES", reg64 & NVME_CAP_MQES_MSK64);
+
+   reg32 = *(vmk_uint32 *)(regs + NVME_VS);
+   PINTS("VS", reg32);
+   PINTS("VS.MJR", (reg32 & NVME_VS_MJR_MSK) >> NVME_VS_MJR_LSB);
+   PINTS("VS.MNR", (reg32 & NVME_VS_MNR_MSK) >> NVME_VS_MNR_LSB);
+
+   PINTS("INTMS", *(vmk_uint32 *)(regs + NVME_INTMS));
+
+   PINTS("INTMC", *(vmk_uint32 *)(regs + NVME_INTMC));
+
+   reg32 = *(vmk_uint32 *)(regs + NVME_CC);
+   PINTS("CC", reg32);
+   PINTS("CC.IOCQES", (reg32 & NVME_CC_IOCQES_MSK) >> NVME_CC_IOCQES_LSB);
+   PINTS("CC.IOSQES", (reg32 & NVME_CC_IOSQES_MSK) >> NVME_CC_IOSQES_LSB);
+   PINTS("CC.SHN", (reg32 & NVME_CC_SHN_MSK) >> NVME_CC_SHN_LSB);
+   PINTS("CC.AMS", (reg32 & NVME_CC_AMS_MSK) >> NVME_CC_AMS_LSB);
+   PINTS("CC.MPS", (reg32 & NVME_CC_MPS_MSK) >> NVME_CC_MPS_LSB);
+   PINTS("CC.CSS", (reg32 & NVME_CC_CSS_MSK) >> NVME_CC_CSS_LSB);
+   PINTS("CC.EN", reg32 & NVME_CC_EN_MSK);
+
+   reg32 = *(vmk_uint32 *)(regs + NVME_CSTS);
+   PINTS("CSTS", reg32);
+   PINTS("CSTS.PP", (reg32 & NVME_CSTS_PP_MSK) >> NVME_CSTS_PP_LSB);
+   PINTS("CSTS.NSSRO", (reg32 & NVME_CSTS_NSSRO_MSK) >> NVME_CSTS_NSSRO_LSB);
+   PINTS("CSTS.SHST", (reg32 & NVME_CSTS_SHST_MSK) >> NVME_CSTS_SHST_LSB);
+   PINTS("CSTS.CFS", (reg32 & NVME_CSTS_CFS_MSK) >> NVME_CSTS_CFS_LSB);
+   PINTS("CSTS.RDY", reg32 & NVME_CSTS_RDY_MSK);
+
+   PINTS("NSSR", *(vmk_uint32 *)(regs + NVME_NSSR));
+
+   reg32 = *(vmk_uint32 *)(regs + NVME_AQA);
+   PINTS("AQA", reg32);
+   PINTS("AQA.ACQS", (reg32 & NVME_AQA_CQS_MSK) >> NVME_AQA_CQS_LSB);
+   PINTS("AQA.ASQS", reg32 & NVME_AQA_SQS_MSK);
+
+   PULL("ASQ", *(vmk_uint64 *)(regs + NVME_ASQ));
+   PULL("ACQ", *(vmk_uint64 *)(regs + NVME_ACQ));
+   PINTS("CMBLOC", *(vmk_uint32 *)(regs + NVME_CMBLOC));
+   PINTS("CMBSZ", *(vmk_uint32 *)(regs + NVME_CMBSZ));
+   xml_struct_end();
+   esxcli_xml_end_output();
+}
+
+void
+NvmePlugin_DeviceRegisterGet(int argc, const char *argv[])
+{
+   int                      ch;
+   int                      rc;
+   const char              *vmhba = NULL;
+   struct nvme_adapter_list list;
+   struct nvme_handle      *handle;
+   struct usr_io            uio;
+   vmk_uint8                regs[8192];
+
+   while ((ch = getopt(argc, (char *const*)argv, "A:")) != -1) {
+      switch (ch) {
+         case 'A':
+            vmhba = optarg;
+            break;
+         default:
+            Error("Invalid argument.");
+            return;
+      }
+   }
+
+   if (vmhba == NULL) {
+      Error("Invalid argument.");
+      return;
+   }
+
+   rc = Nvme_GetAdapterList(&list);
+   if (rc != 0) {
+      Error("Adapter not found.");
+      return;
+   }
+
+   handle = Nvme_Open(&list, vmhba);
+   if (handle == NULL) {
+      Error("Adapter not found.");
+      return;
+   }
+
+   memset(&uio, 0, sizeof(uio));
+   uio.addr = (vmk_uintptr_t)&regs;
+   uio.length = sizeof(regs);
+
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_DUMP_REGS, &uio);
+   if (!rc) {
+      rc = uio.status;
+   }
+
+   if (rc) {
+      Error("Failed to get controller registers, 0x%x.", rc);
+   } else {
+      PrintCtrlrRegs(regs);
+   }
+
+   Nvme_Close(handle);
+}
+
+void
+NvmePlugin_DeviceTimeoutSet(int argc, const char *argv[])
+{
+   int ch;
+   int timeout = -1;
+   int rc;
+   const char *vmhba = NULL;
+   struct nvme_adapter_list list;
+   struct nvme_handle *handle;
+
+   while ((ch = getopt(argc, (char *const*)argv, "A:t:")) != -1) {
+      switch (ch) {
+         case 'A':
+            vmhba = optarg;
+            break;
+         case 't':
+            timeout = atoi(optarg);
+            break;
+         default:
+            Error("Invalid argument.");
+            return;
+      }
+   }
+
+   if (vmhba == NULL || timeout < 0 || timeout > 40) {
+      Error("Invalid argument.");
+      return;
+   }
+
+   rc = Nvme_GetAdapterList(&list);
+   if (rc != 0) {
+      Error("Adapter not found.");
+      return;
+   }
+
+   handle = Nvme_Open(&list, vmhba);
+   if (handle == NULL) {
+      Error("Adapter not found.");
+      return;
+   }
+
+   rc = Nvme_SetTimeout(handle, timeout);
+   if (rc) {
+      Error("Failed to set timeout, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      printf("<string>Timeout is set to %d.</string>", timeout);
+      xml_list_end();
+      esxcli_xml_end_output();
+   }
+
+   Nvme_Close(handle);
+}
+
+void
+NvmePlugin_DeviceTimeoutGet(int argc, const char *argv[])
+{
+   int timeout = 0;
+   int rc;
+   int ch;
+   const char *vmhba = NULL;
+   struct nvme_adapter_list list;
+   struct nvme_handle *handle;
+
+   while ((ch = getopt(argc, (char *const*)argv, "A:")) != -1) {
+      switch (ch) {
+         case 'A':
+            vmhba = optarg;
+            break;
+         default:
+            Error("Invalid argument.");
+            return;
+      }
+   }
+
+   if (vmhba == NULL) {
+      Error("Invalid argument.");
+      return;
+   }
+
+   rc = Nvme_GetAdapterList(&list);
+   if (rc != 0) {
+      Error("Adapter not found.");
+      return;
+   }
+
+   handle = Nvme_Open(&list, vmhba);
+   if (handle == NULL) {
+      Error("Adapter not found.");
+      return;
+   }
+
+   rc = Nvme_GetTimeout(handle, &timeout);
+   if (rc) {
+      Error("Failed to get timeout, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      if (timeout == 0) {
+         printf("<string>Current timeout is 0. Timeout checker is disabled.</string>");
+      } else {
+         printf("<string>Current timeout is %d s.</string>", timeout);
+      }
+      xml_list_end();
+      esxcli_xml_end_output();
+   }
+
+   Nvme_Close(handle);
+}
+
 typedef void (*CommandHandlerFunc)(int argc, const char *argv[]);
 
 struct Command {
@@ -1903,6 +2174,18 @@ static struct Command commands[] = {
    {
       "nvme.driver.loglevel.set",
       NvmePlugin_DriverLoglevelSet,
+   },
+   {
+      "nvme.device.register.get",
+      NvmePlugin_DeviceRegisterGet,
+   },
+   {
+      "nvme.device.timeout.set",
+      NvmePlugin_DeviceTimeoutSet,
+   },
+   {
+      "nvme.device.timeout.get",
+      NvmePlugin_DeviceTimeoutGet,
    },
 };
 

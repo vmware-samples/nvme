@@ -318,9 +318,9 @@ PrintIdentifyNs(struct iden_namespace *idNs)
 {
    int lbaIndex;
 
-   Output("Namespace Size: %llu\n"
-      "Namespace Capacity: %llu\n"
-      "Namespace Utilization: %llu\n"
+   Output("Namespace Size: %" VMK_FMT64 "u\n"
+      "Namespace Capacity: %" VMK_FMT64 "u\n"
+      "Namespace Utilization: %" VMK_FMT64 "u\n"
       "Namespace Features: 0x%02x\n"
       "Number of LBA Formats: 0x%02x\n"
       "Formatted LBA Size: 0x%02x\n"
@@ -702,12 +702,12 @@ LookupLogId(char *log)
 static void
 PrintErrLog(struct error_log * errLog)
 {
-   Output("Error Count: 0x%llx\n"
+   Output("Error Count: 0x%" VMK_FMT64 "x\n"
       "Submission Queue ID: 0x%x\n"
       "Command ID: 0x%x\n"
       "Status Field: 0x%x\n"
       "Parameter Error Location: 0x%x\n"
-      "LBA: 0x%llx\n"
+      "LBA: 0x%" VMK_FMT64 "x\n"
       "Namespace: 0x%x\n"
       "Vendor Specific info Available: 0x%x\n",
       errLog->errorCount, errLog->sqID,
@@ -724,16 +724,16 @@ PrintSmartLog(struct smart_log * smartLog)
       "Available Spare: 0x%x\n"
       "Available Spare Threshold: 0x%x\n"
       "Percentage Used: 0x%x\n"
-      "Data Units Read: 0x%llx%llx\n"
-      "Data Units Written: 0x%llx%llx\n"
-      "Host Read Commands: 0x%llx%llx\n"
-      "Host Write Commands: 0x%llx%llx\n"
-      "Controller Busy Time: 0x%llx%llx\n"
-      "Power Cycles: 0x%llx%llx\n"
-      "Power On Hours: 0x%llx%llx\n"
-      "Unsafe Shutdowns: 0x%llx%llx\n"
-      "Media Errors: 0x%llx%llx\n"
-      "Number of Error Info Log Entries: 0x%llx%llx\n",
+      "Data Units Read: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Data Units Written: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Host Read Commands: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Host Write Commands: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Controller Busy Time: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Power Cycles: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Power On Hours: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Unsafe Shutdowns: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Media Errors: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n"
+      "Number of Error Info Log Entries: 0x%" VMK_FMT64 "x%" VMK_FMT64 "x\n",
       smartLog->criticalError,
       *(vmk_uint16 *)smartLog->temperature, smartLog->availableSpace,
       smartLog->availableSpaceThreshold, smartLog->percentageUsed,
@@ -808,7 +808,7 @@ DeviceLogCli_Dispatch(struct cli_context *cli, int argc, char *argv[])
    case GLP_ID_ERR_INFO:
       uio.cmd.cmd.getLogPage.numDW = GLP_LEN_ERR_INFO / 4 - 1;
       uio.length = GLP_LEN_ERR_INFO;
-      uio.addr = (vmk_uint32)&log.errLog;
+      uio.addr = (vmk_uintptr_t)&log.errLog;
       break;
 
    case GLP_ID_SMART_HEALTH:
@@ -816,13 +816,13 @@ DeviceLogCli_Dispatch(struct cli_context *cli, int argc, char *argv[])
       uio.cmd.cmd.getLogPage.numDW = GLP_LEN_SMART_HEALTH / 4 - 1;
       uio.cmd.cmd.getLogPage.numDW = GLP_LEN_SMART_HEALTH / 4 - 1;
       uio.length = GLP_LEN_SMART_HEALTH;
-      uio.addr = (vmk_uint32)&log.smartLog;
+      uio.addr = (vmk_uintptr_t)&log.smartLog;
       break;
 
     case GLP_ID_FIRMWARE_SLOT_INFO:
       uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
       uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
-      uio.addr = (vmk_uint32)&log.fwSlotLog;
+      uio.addr = (vmk_uintptr_t)&log.fwSlotLog;
       break;
 
    default:
@@ -1220,7 +1220,7 @@ PrintRegs(void *regs, int length)
 
    Output("NVM Register Dumps");
    Output("--------------------------");
-   Output("CAP    : 0x%016llX", *(vmk_uint64 *)(regs + NVME_CAP));
+   Output("CAP    : 0x%016" VMK_FMT64 "X", *(vmk_uint64 *)(regs + NVME_CAP));
    Output("   CAP.MPSMAX   : 0x%X", cap->MPSMAX);
    Output("   CAP.MPSMIN   : 0x%X", cap->MPSMIN);
    Output("   CAP.CSS      : 0x%X", cap->CSS);
@@ -1263,10 +1263,10 @@ PrintRegs(void *regs, int length)
    Output("   AQA.ASQS     : 0x%X", aqa->ASQS);
    Output("");
 
-   Output("ASQ    : 0x%016llX", *(vmk_uint64 *)(regs + NVME_ASQ));
+   Output("ASQ    : 0x%016" VMK_FMT64 "X", *(vmk_uint64 *)(regs + NVME_ASQ));
    Output("");
 
-   Output("ACQ    : 0x%016llX", *(vmk_uint64 *)(regs + NVME_ACQ));
+   Output("ACQ    : 0x%016" VMK_FMT64 "X", *(vmk_uint64 *)(regs + NVME_ACQ));
 }
 
 
@@ -1520,7 +1520,7 @@ Construct_NvmeErr1(struct nvme_handle *handle)
        uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
        uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
        memset(&fwSlotLog,0,sizeof(fwSlotLog));
-       uio.addr = (vmk_uint32)&fwSlotLog;
+       uio.addr = (vmk_uintptr_t)&fwSlotLog;
 
        rc = Nvme_AdminPassthru_error(handle,i,&uio);
        //PrintFwSlotLog(&fwSlotLog);
@@ -1560,7 +1560,7 @@ Construct_NvmeErr2( struct nvme_handle *handle)
    uio.cmd.cmd.getLogPage.LogPageID = 3; //firmware cmd
    uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
    uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
-   uio.addr = (vmk_uint32)&fwSlotLog;
+   uio.addr = (vmk_uintptr_t)&fwSlotLog;
 
    rc = Nvme_AdminPassthru(handle,&uio);
    //PrintFwSlotLog(&fwSlotLog);
@@ -1577,7 +1577,7 @@ Construct_NvmeErr2( struct nvme_handle *handle)
    uio.cmd.cmd.getLogPage.LogPageID = 3; //firmware cmd
    uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
    uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
-   uio.addr = (vmk_uint32)&fwSlotLog;
+   uio.addr = (vmk_uintptr_t)&fwSlotLog;
 
    rc = Nvme_AdminPassthru(handle,&uio);
    //PrintFwSlotLog(&fwSlotLog);
@@ -1594,7 +1594,7 @@ Construct_NvmeErr2( struct nvme_handle *handle)
    uio.cmd.cmd.getLogPage.LogPageID = 0; //wrong value here
    uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
    uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
-   uio.addr = (vmk_uint32)&fwSlotLog;
+   uio.addr = (vmk_uintptr_t)&fwSlotLog;
 
    rc = Nvme_AdminPassthru(handle,&uio);
    //PrintFwSlotLog(&fwSlotLog);
@@ -1611,7 +1611,7 @@ Construct_NvmeErr2( struct nvme_handle *handle)
    uio.cmd.cmd.getLogPage.LogPageID = 3; //firmware cmd
    uio.cmd.cmd.getLogPage.numDW = GLP_LEN_ERR_INFO / 4 - 1;
    uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
-   uio.addr = (vmk_uint32)&fwSlotLog;
+   uio.addr = (vmk_uintptr_t)&fwSlotLog;
 
    rc = Nvme_AdminPassthru(handle,&uio);
    //PrintFwSlotLog(&fwSlotLog);
@@ -1628,7 +1628,7 @@ Construct_NvmeErr2( struct nvme_handle *handle)
    uio.cmd.cmd.getLogPage.LogPageID = 3; //firmware cmd
    uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
    uio.length = GLP_LEN_ERR_INFO;
-   uio.addr = (vmk_uint32)&fwSlotLog;
+   uio.addr = (vmk_uintptr_t)&fwSlotLog;
 
    rc = Nvme_AdminPassthru(handle,&uio);
    //PrintFwSlotLog(&fwSlotLog);

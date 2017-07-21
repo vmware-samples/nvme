@@ -100,6 +100,8 @@ typedef enum Nvme_Status {
    NVME_STATUS_APP_CHECK_ERROR,
    /* Error: reference tag check failure */
    NVME_STATUS_REF_CHECK_ERROR,
+   /* Error: parameter list length error */
+   NVME_STATUS_PARAM_LIST_LENGTH_ERROR,
    /** Guard */
    NVME_STATUS_LAST,
 } Nvme_Status;
@@ -126,8 +128,10 @@ NvmeCore_StatusToString(Nvme_Status nvmeStatus);
                                      ((nvmeStatus) == NVME_STATUS_ABORTED))
 
 typedef enum Nvme_CmdStatus {
-   NVME_CMD_STATUS_DONE,
+   NVME_CMD_STATUS_FREE,
    NVME_CMD_STATUS_ACTIVE,
+   NVME_CMD_STATUS_DONE,
+   NVME_CMD_STATUS_FREE_ON_COMPLETE,
 } Nvme_CmdStatus;
 
 
@@ -374,16 +378,15 @@ NvmeCore_IsQueueSuspended(struct NvmeQueueInfo *qinfo);
 
 
 /**
- * NvmeCore_SuspendQueue - suspend a queue, and assign a new timeout ID
+ * NvmeCore_SuspendQueue - suspend a queue
  *
  * @param [IN]  qinfo      pointer to the completion queue
- * @param [IN]  newId      new timeout id assigned to the queue
  *
  * @return  NVME_STATUS_SUCCESS    if successful
  * @return  NVME_STATUS_BAD_PARAM  if queue has already been suspended
  */
 Nvme_Status
-NvmeCore_SuspendQueue(struct NvmeQueueInfo *qinfo, vmk_uint32 newId);
+NvmeCore_SuspendQueue(struct NvmeQueueInfo *qinfo);
 
 
 /**

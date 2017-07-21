@@ -214,9 +214,20 @@ Nvme_Free(void *mem)
 
 typedef vmk_Lock OsLib_Lock_t;
 
+// General locking will consolidate around using the same subQueue lock
 #define LOCK_FUNC(qinfo)	(qinfo->lockFunc(qinfo->lock))
 #define UNLOCK_FUNC(qinfo)	(qinfo->unlockFunc(qinfo->lock))
 #define LOCK_INIT(qinfo)	(qinfo->lock = VMK_LOCK_INVALID)
+
+#define LOCK_ASSERT_QLOCK_HELD(qinfo)\
+      vmk_SpinlockAssertHeldByWorldInt(qinfo->lock)
+
+#define LOCK_COMPQ(qinfo)	(qinfo->lockFunc(qinfo->compqLock))
+#define UNLOCK_COMPQ(qinfo)	(qinfo->unlockFunc(qinfo->compqLock))
+
+#define LOCK_ASSERT_CLOCK_HELD(qinfo)\
+      vmk_SpinlockAssertHeldByWorldInt(qinfo->compqLock)
+
 
 
 VMK_ReturnStatus

@@ -137,7 +137,6 @@ NvmeCore_EnableQueueIntr(struct NvmeQueueInfo *qinfo)
    if (ctrlr->ctrlOsResources.msixEnabled) {
       vmk_IntrEnable(ctrlr->ctrlOsResources.intrArray[qinfo->intrIndex]);
    }
-
    return NVME_STATUS_SUCCESS;
 }
 
@@ -198,14 +197,16 @@ NvmeQueue_IntrHandler(void *handlerData, vmk_IntrCookie intrCookie)
 {
    struct NvmeQueueInfo *qinfo = (struct NvmeQueueInfo *)handlerData;
 
-   LOCK_FUNC(qinfo);
+   LOCK_COMPQ(qinfo);
 
    #if (NVME_ENABLE_IO_STATS == 1)
       STATS_Increment(qinfo->ctrlr->statsData.TotalInterrupts);
    #endif
 
+
    nvmeCoreProcessCq(qinfo, 0);
-   UNLOCK_FUNC(qinfo);
+
+   UNLOCK_COMPQ(qinfo);
 }
 
 /**
@@ -717,14 +718,19 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr)
 
    DPRINT_TEMP("enter");
 
-   /* TODO: Ideally the queue depth of a controller can hit as large
-    * as io_cpl_queue_size * ctrlr->numIoQueues.
+   /**
+    * According to spec, "One entry in each queue is not available for use
+    * due to Head and Tail entry pointer definition". So each queue should
+    * report a queue depth of (queue size -1) to PSA to avoid QFULL issue.
+    *
+    * TODO: Enhance the queue depth reporting considering command splitting
+    *       and queue imbalance.
     */
-   ctrlr->qDepth = io_cpl_queue_size * ctrlr->numIoQueues;
+   ctrlr->qDepth = (io_sub_queue_size - 1) * ctrlr->numIoQueues;
 
    /* Create a DMA engine for SCSI IO */
    scsiConstraints.addressMask = SCSI_ADDR_MASK;
-   scsiConstraints.maxTransfer = SCSI_MAX_XFER;
+   scsiConstraints.maxTransfer = ctrlr->maxXferLen;
    scsiConstraints.sgMaxEntries = SCSI_SG_MAX_ENTRIES;
    scsiConstraints.sgElemMaxSize = SCSI_SG_ELEM_MAX_SIZE;
    scsiConstraints.sgElemSizeMult = SCSI_SG_ELEM_SIZE_MULT;
@@ -757,13 +763,12 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr)
    vmk_NameInitialize(&adapter->driverName, NVME_DRIVER_NAME);
 
    adapter->device = ctrlr->ctrlOsResources.device;
-   adapter->hostMaxSectors = transfer_size * 1024 / VMK_SECTOR_SIZE;
+   adapter->hostMaxSectors = ctrlr->maxXferLen / VMK_SECTOR_SIZE;
    adapter->qDepthPtr = &ctrlr->qDepth;
 
    adapter->command = ScsiCommand;
    adapter->taskMgmt = ScsiTaskMgmt;
    adapter->dumpCommand = ScsiDumpCommand;
-   adapter->close = ScsiClose;
    adapter->procInfo = ScsiProcInfo;
    adapter->dumpQueue = ScsiDumpQueue;
    adapter->dumpPollHandler = ScsiDumpPollHandler;
@@ -1095,7 +1100,7 @@ OsLib_StartCompletionWorlds(struct NvmeCtrlr *ctrlr)
       vmk_StringFormat(propName, VMK_MISC_NAME_MAX, NULL,   \
             "nvmeComplQLock-%s-%d", Nvme_GetCtrlrName(ctrlr), lockNum);
 
-      status = OsLib_LockCreate(&ctrlr->ctrlOsResources, NVME_LOCK_RANK_HIGH,
+      status = OsLib_LockCreate(&ctrlr->ctrlOsResources, NVME_LOCK_RANK_ULTRA,
         propName, &IOCompletionQueue->lock);
       if (status != VMK_OK) {
          VMK_ASSERT(VMK_FALSE);
@@ -1463,6 +1468,7 @@ Oslib_GetPCPUNum(void) {
    return NumPCPUs;
 }
 
+#if USE_TIMER
 void OsLib_TimeoutHandler(vmk_TimerCookie cookie)
 {
    struct NvmeCtrlr* ctrlr = (struct NvmeCtrlr*) cookie.ptr;
@@ -1510,6 +1516,7 @@ void OsLib_StartIoTimeoutCheckTimer(struct NvmeCtrlr *ctrlr)
    ctrlr->TimerCookie.ptr  = ctrlr;
    ctrlr->TimerAttr        = VMK_TIMER_ATTR_PERIODIC;
 
+
    if (ctrlr->TimerQueue == VMK_INVALID_TIMER_QUEUE) {
       EPRINT("Timer Queue is invalid for %s", Nvme_GetCtrlrName(ctrlr));
       return;
@@ -1530,5 +1537,5 @@ void OsLib_StopIoTimeoutCheckTimer(struct NvmeCtrlr* ctrlr)
       }
    }
 }
-
+#endif
 

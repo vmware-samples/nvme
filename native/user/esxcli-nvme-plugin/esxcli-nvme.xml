@@ -60,6 +60,12 @@
       <namespace path="nvme.device.firmware">
          <description>NVMe firmware operations</description>
       </namespace>
+      <namespace path="nvme.device.register">
+         <description>NVMe registers operations</description>
+      </namespace>
+      <namespace path="nvme.device.timeout">
+         <description>NVMe IO timeout checker operations</description>
+      </namespace>
       <namespace path="nvme.driver">
          <description>NVMe driver operations</description>
       </namespace>
@@ -875,6 +881,61 @@
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.activate -A $val{adapter} -s $val{slot}</execute>
       </command>
+      <command path="nvme.device.register.get">
+         <description>Dump NVMe device registers</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="DeviceRegs">
+               <field name="CAP"> <string/> </field>
+               <field name="CAP.MPSMAX"> <string/> </field>
+               <field name="CAP.MPSMIN"> <string/> </field>
+               <field name="CAP.CSS"> <string/> </field>
+               <field name="CAP.NSSRS"> <string/> </field>
+               <field name="CAP.DSTRD"> <string/> </field>
+               <field name="CAP.TO"> <string/> </field>
+               <field name="CAP.AMS"> <string/> </field>
+               <field name="CAP.CQR"> <string/> </field>
+               <field name="CAP.MQES"> <string/> </field>
+               <field name="VS"> <string/> </field>
+               <field name="VS.MJR"> <string/> </field>
+               <field name="VS.MNR"> <string/> </field>
+               <field name="INTMS"> <string/> </field>
+               <field name="INTMC"> <string/> </field>
+               <field name="CC"> <string/> </field>
+               <field name="CC.IOCQES"> <string/> </field>
+               <field name="CC.IOSQES"> <string/> </field>
+               <field name="CC.SHN"> <string/> </field>
+               <field name="CC.AMS"> <string/> </field>
+               <field name="CC.MPS"> <string/> </field>
+               <field name="CC.CSS"> <string/> </field>
+               <field name="CC.EN"> <string/> </field>
+               <field name="CSTS"> <string/> </field>
+               <field name="CSTS.PP"> <string/> </field>
+               <field name="CSTS.NSSRO"> <string/> </field>
+               <field name="CSTS.SHST"> <string/> </field>
+               <field name="CSTS.CFS"> <string/> </field>
+               <field name="CSTS.RDY"> <string/> </field>
+               <field name="NSSR"> <string/> </field>
+               <field name="AQA"> <string/> </field>
+               <field name="AQA.ACQS"> <string/> </field>
+               <field name="AQA.ASQS"> <string/> </field>
+               <field name="ASQ"> <string/> </field>
+               <field name="ACQ"> <string/> </field>
+               <field name="CMBLOC"> <string/> </field>
+               <field name="CMBSZ"> <string/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:DeviceRegs">Controller registers:</format-parameter>
+            <format-parameter name="fields:DeviceRegs">CAP,CAP.MPSMAX,CAP.MPSMIN,CAP.CSS,CAP.NSSRS,CAP.DSTRD,CAP.TO,CAP.AMS,CAP.CQR,CAP.MQES,VS,VS.MJR,VS.MNR,INTMS,INTMC,CC,CC.IOCQES,CC.IOSQES,CC.SHN,CC.AMS,CC.MPS,CC.CSS,CC.EN,CSTS,CSTS.PP,CSTS.NSSRO,CSTS.SHST,CSTS.CFS,CSTS.RDY,NSSR,AQA,AQA.ACQS,AQA.ASQS,ASQ,ACQ,CMBLOC,CMBSZ</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.register.get -A $val{adapter}</execute>
+      </command>
       <command path="nvme.driver.loglevel.set">
          <description>Set NVMe driver log level and debug level</description>
          <input-spec>
@@ -919,6 +980,39 @@ Debug level(hex int format). When log level is 5, this value is used to manupula
             <formatter>simple</formatter>
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.driver.loglevel.set -l $val{loglevel} $if{debuglevel, -d $val{debuglevel}}</execute>
+      </command>
+      <command path="nvme.device.timeout.set">
+         <description>Set timeout value for IO timeout checker</description>
+         <input-spec>
+             <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="timeout" type="int" required="true" shortname="t">
+	       <description>IO timeout seconds for internal checker. Maximum timeout value is 40. 0: disable timeout checker.</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.timeout.set -A $val{adapter} -t $val{timeout}</execute>
+      </command>
+      <command path="nvme.device.timeout.get">
+         <description>Get timeout value of IO timeout checker</description>
+         <input-spec >
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.timeout.get -A $val{adapter}</execute>
       </command>
    </commands>
 </plugin>

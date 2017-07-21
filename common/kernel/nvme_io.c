@@ -38,11 +38,21 @@ NvmeIo_ProcessPrps(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
    vmk_SgArray        *sgArray = cmdInfo->sgPosition.sg;
    struct nvme_prp    *prps;
    struct NvmeCmdInfo *cmdBase = cmdInfo->cmdBase;
+   struct NvmeNsInfo  *ns = cmdInfo->ns;
+   struct NvmeCtrlr   *ctrlr = qinfo->ctrlr;
+   vmk_ScsiCommand    *vmkCmd;
+   vmk_uint64          lba;
+   int                 stripeSize;
+   int                 stripeRest;
 
    VMK_ASSERT(cmdInfo->sgPosition.type == VMK_SG_POSITION_TYPE_ELEMENT);
    VMK_ASSERT(cmdInfo->sgPosition.sg != NULL);
-   /* We should always split at offset 0 of an SG element */
-   VMK_ASSERT(cmdInfo->sgPosition.element.offset == 0);
+   /**
+    * We should always split at offset 0 of an SG element unless this is an Intel stripe
+    * limit device
+    */
+   VMK_ASSERT(NvmeCtrlr_IsIntelStripeLimit(ctrlr) ||
+              cmdInfo->sgPosition.element.offset == 0);
    VMK_ASSERT(cmdInfo->sgPosition.sg->numElems > cmdInfo->sgPosition.element.element);
 
    elemIndex = cmdInfo->sgPosition.element.element;
@@ -54,17 +64,58 @@ NvmeIo_ProcessPrps(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
     */
    length    = cmdBase->requiredLength - cmdBase->requestedLength;
 
-   dmaAddr   = sgArray->elem[elemIndex].ioAddr;
-   dmaLen    = sgArray->elem[elemIndex].length;
+   dmaAddr   = sgArray->elem[elemIndex].ioAddr + cmdInfo->sgPosition.element.offset;
+   dmaLen    = sgArray->elem[elemIndex].length - cmdInfo->sgPosition.element.offset;
    offset    = dmaAddr & VMK_PAGE_MASK;
 
    DPRINT_CMD("length %ld, dma_addr 0x%0lx, offset 0x%0lx, dma_len %ld",
-      length,  dmaAddr, offset, dmaLen);
+              length,  dmaAddr, offset, dmaLen);
 
    prps->addr = dmaAddr;
    prps ++;
 
    thisPrpLen  = min_t(vmk_uint32, dmaLen, (VMK_PAGE_SIZE - offset));
+
+   /**
+    * For Intel stripe limit device, we need to split IOs accross the stripe boundry
+    * in driver to avoid the significant performance overhead in firmware.
+    *
+    * e.g. if the stripe size is 128KB, the command whose lba = 127, lbc = 8 needs
+    * to be splited as two commands, see below.
+    *
+    *                               cmd1   cmd2
+    *                                .      .
+    *                               /|\    /|\
+    *                                |      |
+    *                               1K     3K
+    * +----------------------------------------------------------------+
+    * |                            |***|*********|                     |
+    * +----------------------------------------------------------------+
+    * 0                          127  128       131                   256KB
+    *
+    * We only do this check and split for regular read and write IO.
+    * For admin command, we don't split because data buffer is already page size and
+    * page aligned.
+    *
+    */
+   if (NvmeCtrlr_IsIntelStripeLimit(ctrlr) && cmdInfo->type == BIO_CONTEXT) {
+      GET_VMK_SCSI_CMD(cmdBase->cmdPtr, vmkCmd);
+      lba = vmkCmd->lba;
+      stripeSize = ctrlr->stripeSize;
+      stripeRest = stripeSize - (((lba << ns->lbaShift) + cmdBase->requestedLength)
+                                & (stripeSize-1));
+      /**
+       * Limit the xfered length of current command in one stripe.
+       */
+      length = min_t(vmk_uint32, stripeRest,
+                     (cmdBase->requiredLength - cmdBase->requestedLength));
+      dmaLen = min_t(vmk_uint32, dmaLen, length);
+      DPRINT_CMD("stripeRest: %d, requiredLength: %ld, requestedLength:%d", stripeRest,
+                 cmdBase->requiredLength, cmdBase->requestedLength);
+      thisPrpLen  = min_t(vmk_uint32, thisPrpLen, length);
+   }
+
+
    length     -= thisPrpLen;
    processed  += thisPrpLen;
    dmaAddr    += thisPrpLen;
@@ -119,13 +170,16 @@ NvmeIo_ProcessPrps(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
       }
    }
 
+   DPRINT_CMD("processed: %ld, length: %ld, elemIndex: %d, numElems: %d",
+              processed, length, elemIndex, sgArray->numElems);
    /*
     * When we completed processing the list, we should either have length > 0
     * with valid elemIndex, or length == 0 and elemIndex points to the last
-    * element in the array.
+    * element in the array unless this is an Intel stripe limit device
     */
-   VMK_ASSERT((length > 0 && elemIndex < sgArray->numElems) ||
-      (length == 0 && elemIndex == sgArray->numElems - 1));
+   VMK_ASSERT(NvmeCtrlr_IsIntelStripeLimit(ctrlr) ||
+              (length > 0 && elemIndex < sgArray->numElems) ||
+              (length == 0 && elemIndex == sgArray->numElems - 1));
 
    /*
     * If we break when prps points to the second entry in prp list, that
@@ -143,13 +197,14 @@ NvmeIo_ProcessPrps(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
          cmdInfo->nvmeCmd.header.prp[1].addr);
    }
 
-   /*
+   /**
     * Done processing
+    *
+    * Total number of processed bytes plus remaining length should match up with the
+    * total number of bytes left for the base request unless this is an Intel stripe
+    * limit device.
     */
-
-   /* Total number of processed bytes plus remaining length should match
-    * up with the total number of bytes left for the base request */
-   VMK_ASSERT((processed + length) ==
+   VMK_ASSERT(NvmeCtrlr_IsIntelStripeLimit(ctrlr) || (processed + length) ==
       (cmdBase->requiredLength - cmdBase->requestedLength));
 
    return (processed);
@@ -177,11 +232,18 @@ NvmeIo_ProcessSgArray(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo,
    int nsegs;
    vmk_ByteCount length;
    struct NvmeCmdInfo *cmdBase = cmdInfo->cmdBase;
+   vmk_SgArray *sgArray;
+
+   if (cmdInfo->bounceBufferType & DATA_BOUNCE_BUFFER) {
+      sgArray = cmdInfo->dataDmaEntry.sgOut;
+   } else {
+      sgArray = vmkCmd->sgIOArray;
+   }
 
    /*
     * TODO: this should never happen. Maybe just igore this check
     */
-   nsegs = vmkCmd->sgIOArray->numElems;
+   nsegs = sgArray->numElems;
    if (nsegs > max_prp_list) {
       EPRINT("nsegs %d max_prp_list %d out of range.", nsegs, max_prp_list);
       /*
@@ -195,7 +257,7 @@ NvmeIo_ProcessSgArray(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo,
    /*
     * Figure out where we should start processing the SG array.
     */
-   vmkStatus = vmk_SgFindPosition(vmkCmd->sgIOArray, cmdBase->requestedLength,
+   vmkStatus = vmk_SgFindPosition(sgArray, cmdBase->requestedLength,
       &cmdInfo->sgPosition);
    if (vmkStatus != VMK_OK) {
       /* out of range, should never happen. */
@@ -216,63 +278,28 @@ NvmeIo_ProcessSgArray(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo,
 }
 
 static VMK_ReturnStatus
-copyProtSgData(struct NvmeCmdInfo *cmdInfo, vmk_Bool toBounceBuffer)
+copySgData(vmk_SgArray *dst, vmk_SgArray *src, vmk_ByteCount length)
 {
-#if VMKAPIDDK_VERSION >= 600
-   vmk_SgPosition protPos, bufferPos;
-   vmk_uint64 length = 0;
-   vmk_uint64 copied = 0;
-   vmk_ScsiCommand *vmkCmd;
-   vmk_SgArray *protSgArray;
+   vmk_SgPosition srcPos, dstPos;
+   vmk_ByteCount copied = 0;
    VMK_ReturnStatus status;
 
-   GET_VMK_SCSI_CMD(cmdInfo->cmdPtr, vmkCmd);
-   protSgArray = vmk_ScsiCmdGetProtSgArray(vmkCmd);
-   VMK_ASSERT(protSgArray != NULL);
-   VMK_ASSERT(cmdInfo->protDmaEntry.sgOut != NULL);
+   VMK_ASSERT(src != NULL);
+   VMK_ASSERT(dst != NULL);
 
-   length = vmk_SgGetDataLen(protSgArray);
-   VMK_ASSERT(length == cmdInfo->protDmaEntry.size);
+   srcPos.type = VMK_SG_POSITION_TYPE_ELEMENT;
+   srcPos.sg = src;
+   srcPos.element.element = 0;
+   srcPos.element.offset = 0;
+   dstPos.type = VMK_SG_POSITION_TYPE_ELEMENT;
+   dstPos.sg = dst;
+   dstPos.element.element = 0;
+   dstPos.element.offset = 0;
 
-   protPos.type = VMK_SG_POSITION_TYPE_ELEMENT;
-   protPos.sg = protSgArray;
-   protPos.element.element = 0;
-   protPos.element.offset = 0;
-   bufferPos.type = VMK_SG_POSITION_TYPE_ELEMENT;
-   bufferPos.sg = cmdInfo->protDmaEntry.sgOut;
-   bufferPos.element.element = 0;
-   bufferPos.element.offset = 0;
-
-   if (toBounceBuffer) {
-      status = vmk_SgCopyData(&bufferPos, &protPos, length, &copied);
-   } else {
-      status = vmk_SgCopyData(&protPos, &bufferPos, length, &copied);
-   }
+   status = vmk_SgCopyData(&dstPos, &srcPos, length, &copied);
    VMK_ASSERT(length == copied);
    return status;
-#else
-   return VMK_OK;
-#endif
 }
-
-/**
- * scsiIoDummyCompleteCommand - dummy completion callback, completing active
- *                              base command that has already been processed
- *                              during NVM reset queue flush.
- */
-static void
-scsiIoDummyCompleteCommand(struct NvmeQueueInfo *qinfo,
-                           struct NvmeCmdInfo *cmdInfo)
-{
-   vmk_ScsiCommand *vmkCmd;
-
-   GET_VMK_SCSI_CMD(cmdInfo->cmdPtr, vmkCmd);
-
-   IPRINT("double completing io cmd %p [%d] base %p vmkCmd %p.",
-               cmdInfo, cmdInfo->cmdId, cmdInfo->cmdBase,
-               vmkCmd);
-}
-
 
 /**
  * scsiIoCompleteCommand - completion callback for I/O commands
@@ -289,26 +316,19 @@ scsiIoCompleteCommand(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
    DPRINT_CMD("compl q %p[%d] cmdInfo %p.", qinfo, qinfo->id, cmdInfo);
 #endif
 
-   cmdInfo->status = NVME_CMD_STATUS_DONE;
+   vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_CMD_STATUS_DONE);
 
    if (cmdInfo->cmdStatus) {
-      EPRINT("I/O Error: cmd %p status 0x%x, %s.", cmdInfo,
-             cmdInfo->cmdStatus,
-             NvmeCore_StatusToString(cmdInfo->cmdStatus));
       /**
        * TODO:
        *
        * 1. If this is a sub-command:
-       *    Propagate the error code to base command;
-       *    Return;
+       *    Propagate the error code to base command later while holding
+       *    the queue lock
        * 2. If this is a base command:
        *    1. set Scsi return code based on cmdInfo->cmdStatus;
        *    2. complete vmkCmd;
        */
-      if (cmdInfo->cmdBase &&
-          cmdInfo->cmdBase->cmdStatus == NVME_STATUS_SUCCESS) {
-         cmdInfo->cmdBase->cmdStatus = cmdInfo->cmdStatus;
-      }
       nvmeStatus = cmdInfo->cmdStatus;
    } else {
       nvmeStatus = NVME_STATUS_SUCCESS;
@@ -323,65 +343,71 @@ scsiIoCompleteCommand(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
     * controller has been hot removed.
     */
 
+
+   cmd = &cmdInfo->nvmeCmd;
+#if USE_TIMER
    /**
     * Only check Read/Write timeout
     */
-
-   cmd = &cmdInfo->nvmeCmd;
    if((cmd->header.opCode == NVM_CMD_READ) ||
       (cmd->header.opCode == NVM_CMD_WRITE)) {
-      qinfo->timeout[cmdInfo->timeoutId] --;
+      vmk_AtomicInc32(&qinfo->timeoutComplCount[cmdInfo->timeoutId]);
    }
+#endif
 
    /**
     * Proceed to I/O handling
     */
 
    if (cmdInfo->cmdBase) {
-      baseInfo = cmdInfo->cmdBase;
+      /**
+       * We either have a split command here, or an IO completed before
+       * the submission code actually returned. The submission path holds
+       * the queue lock, and we need to synchronize with that lock here.
+       */
 
-      if (baseInfo != cmdInfo) {
-         /**
-          * This is a splitted command
-          */
-         NvmeCore_PutCmdInfo(qinfo, cmdInfo);
-      } else {
-         /**
-          * The base cmd is being completed here. We cannot return the base
-          * command to the free list at this stage, because there might be
-          * split commands still outstanding that is depending on this base
-          * command. So the command will remain in the active cmd list. This is
-          * normally ok because when the last split command has been completed,
-          * we will proceed to process the base command again and eventually
-          * return it to the free list at the end of this function; however, if
-          * the queue is flushed for NVM reset, there could be problems because
-          * the base command might be picked up and completed again even if it
-          * has already been processed here.
-          *
-          * To handle this scenario, we set the base command's completion
-          * handler to a dummy one, so that when we flush the active cmd list
-          * during NVM reset, the dummy completion handler is used for a base
-          * command that has already been processed by scsiIoCompleteCommand.
-          */
-         baseInfo->done = scsiIoDummyCompleteCommand;
+      LOCK_FUNC(qinfo);
+
+      /**
+       * Test again, under the lock, that cmdBase is still not NULL
+       */
+      if (cmdInfo->cmdBase) {
+         baseInfo = cmdInfo->cmdBase;
+
+         if (cmdInfo->cmdStatus) {
+            /**
+             *  Propagate the error code, if any to the cmdBase, while
+             *  holding the lock
+             */
+            if ((cmdInfo->cmdStatus) &&
+                (cmdInfo->cmdBase->cmdStatus == NVME_STATUS_SUCCESS)) {
+               cmdInfo->cmdBase->cmdStatus = cmdInfo->cmdStatus;
+            }
+         }
+
+         if (baseInfo != cmdInfo) {
+            /**
+             * This is a splitted command
+             */
+            NvmeCore_PutCmdInfo(qinfo, cmdInfo);
+         }
+         
+         if (baseInfo->cmdCount -- > 1) {
+            /**
+             * This is not the last splitted command, continue processing.
+             */
+            UNLOCK_FUNC(qinfo);
+            return;
+         }
+         cmdInfo = baseInfo;
       }
-
-      if (baseInfo->cmdCount -- > 1) {
-         /**
-          * This is not the last splitted command, continue processing.
-          */
-         return;
-      }
-
-      cmdInfo = baseInfo;
+      UNLOCK_FUNC(qinfo);
    }
-
    GET_VMK_SCSI_CMD(cmdInfo->cmdPtr, vmkCmd);
 
    VMK_ASSERT(vmkCmd);
 
-   qinfo->nrReq --;
-
+   cmd = &cmdInfo->nvmeCmd;
    if((cmd->header.opCode == NVM_CMD_READ) ||
       (cmd->header.opCode == NVM_CMD_WRITE)) {
       /* Check OVERRUN/UNDERRUN for READ and WRITE commands.
@@ -406,13 +432,27 @@ scsiIoCompleteCommand(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
                 vmkCmd->bytesXferred,
                 (vmkCmd->lbc << cmdInfo->ns->lbaShift));
       }
-      /* Check whether using protection bounce buffer for READ and WRITE commands.*/
-      if (cmdInfo->useProtBounceBuffer) {
-         if (vmk_ScsiIsReadCdb(vmkCmd->cdb[0])) {
-            copyProtSgData(cmdInfo, VMK_FALSE);
+      /* Check whether using bounce buffer for READ and WRITE commands.*/
+      if (cmdInfo->bounceBufferType) {
+#if ((NVME_PROTECTION) && (VMKAPIDDK_VERSION >= 600))
+         if (cmdInfo->bounceBufferType & PROT_BOUNCE_BUFFER) {
+            if (cmd->header.opCode == NVM_CMD_READ) {
+               copySgData(vmk_ScsiCmdGetProtSgArray(vmkCmd),
+                          cmdInfo->protDmaEntry.sgOut,
+                          cmdInfo->protDmaEntry.size);
+            }
+            OsLib_DmaFree(&qinfo->ctrlr->ctrlOsResources, &cmdInfo->protDmaEntry);
          }
-         OsLib_DmaFree(&qinfo->ctrlr->ctrlOsResources, &cmdInfo->protDmaEntry);
-         cmdInfo->useProtBounceBuffer = 0;
+#endif
+         if (cmdInfo->bounceBufferType & DATA_BOUNCE_BUFFER) {
+            if (cmd->header.opCode == NVM_CMD_READ) {
+               copySgData(vmkCmd->sgIOArray,
+                          cmdInfo->dataDmaEntry.sgOut,
+                          cmdInfo->dataDmaEntry.size);
+            }
+            OsLib_DmaFree(&qinfo->ctrlr->ctrlOsResources, &cmdInfo->dataDmaEntry);
+         }
+         cmdInfo->bounceBufferType = 0;
       }
    }
 
@@ -451,7 +491,6 @@ scsiIoCompleteCommand(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
  *                                       the command needs to be terminated and
  *                                       returned to storage stack immediately.
  *
- * @note        It is assumed that queue lock is held by caller.
  */
 static Nvme_Status
 NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
@@ -466,7 +505,7 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
    vmk_ScsiCommand         *vmkCmd;
 
    vmk_Bool                 protPass = 0;
-   vmk_Bool                 useProtBounceBuffer = 0;
+   vmk_uint32               bounceBufferType = 0;
    vmk_uint8                prChk = 0;
    vmk_SgArray             *protSgArray = NULL;
    VMK_ReturnStatus         vmkStatus;
@@ -525,10 +564,10 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
          protSgArray = vmk_ScsiCmdGetProtSgArray(vmkCmd);
          protLen = vmk_SgGetDataLen(protSgArray);
          if (protSgArray->numElems > 1 || (protSgArray->elem[0].ioAddr & 0x3) != 0) {
-            useProtBounceBuffer = 1;
+            bounceBufferType |= PROT_BOUNCE_BUFFER;
          }
       }
-   
+
       switch((vmkCmd->cdb[1] >> 5) & 0x7) {
          case 0:
          case 1:
@@ -549,14 +588,27 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
             return NVME_STATUS_INVALID_FIELD_IN_CDB;
             break;
       }
-      /** 
+      /**
        * Filter the checked fields according to PI types.
        * This should be consistent with Extended INQUIRY Data VPD page.
        */
-      protType = END2END_DPS_TYPE(ns->dataProtSet); 
+      protType = END2END_DPS_TYPE(ns->dataProtSet);
       prChk = protType == 3 ? (prChk & 0x4) : (prChk & 0x5);
    }
 #endif
+
+   if (1 << ns->lbaShift != VMK_SECTOR_SIZE) {
+      int i;
+      for (i = 0; i < vmkCmd->sgIOArray->numElems; i++) {
+         if ((vmkCmd->sgIOArray->elem[i].length & ((1 << ns->lbaShift) - 1)) !=0) {
+            DPRINT_CMD("Illegal SG elem size. Cmd %p, sgELem: %d,"
+                       "length: %d, blocksize: %d", vmkCmd, i,
+                       vmkCmd->sgIOArray->elem[i].length, (1 << ns->lbaShift));
+            bounceBufferType |= DATA_BOUNCE_BUFFER;
+            break;
+         }
+      }
+   }
 
    /**
     * Initialize the status to WOULD_BLOCK
@@ -574,9 +626,9 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
                 qinfo, qinfo->id);
          nvmeStatus = NVME_STATUS_QFULL;
 
-         #if (NVME_ENABLE_IO_STATS == 1)
+      #if (NVME_ENABLE_IO_STATS == 1)
             STATS_Increment(ctrlr->statsData.QFULLNoFreeCmdSlots);
-         #endif
+      #endif
 
          break;
       }
@@ -590,18 +642,41 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
          baseInfo->cmdStatus        = 0;
          baseInfo->requestedLength  = 0;
          baseInfo->requiredLength   = vmk_SgGetDataLen(vmkCmd->sgIOArray);
-         baseInfo->useProtBounceBuffer  = useProtBounceBuffer;
-         if (baseInfo->useProtBounceBuffer) {
-            vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, protLen, &baseInfo->protDmaEntry, VMK_TIMEOUT_NONBLOCKING);
+         baseInfo->bounceBufferType = bounceBufferType;
+         if (baseInfo->bounceBufferType & PROT_BOUNCE_BUFFER) {
+            vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, protLen,
+                                       &baseInfo->protDmaEntry,
+                                       VMK_TIMEOUT_NONBLOCKING);
             if (vmkStatus != VMK_OK) {
-               baseInfo->useProtBounceBuffer = 0;
+               baseInfo->bounceBufferType = 0;
                NvmeCore_PutCmdInfo(qinfo, baseInfo);
-               nvmeStatus = NVME_STATUS_FAILURE;   /* Temporarily use FAILURE status in such case*/
+               nvmeStatus = NVME_STATUS_FAILURE;
                baseInfo = NULL;
                break;
             }
             if (vmk_ScsiIsWriteCdb(vmkCmd->cdb[0])) {
-               copyProtSgData(baseInfo, VMK_TRUE);
+               copySgData(baseInfo->protDmaEntry.sgOut, protSgArray, protLen);
+            }
+         }
+        if (baseInfo->bounceBufferType & DATA_BOUNCE_BUFFER) {
+            vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources,
+                                       baseInfo->requiredLength,
+                                       &baseInfo->dataDmaEntry,
+                                       VMK_TIMEOUT_NONBLOCKING);
+            if (vmkStatus != VMK_OK) {
+               if (baseInfo->bounceBufferType & PROT_BOUNCE_BUFFER) {
+                  OsLib_DmaFree(&qinfo->ctrlr->ctrlOsResources, &cmdInfo->protDmaEntry);
+               }
+               baseInfo->bounceBufferType = 0;
+               NvmeCore_PutCmdInfo(qinfo, baseInfo);
+               nvmeStatus = NVME_STATUS_FAILURE;
+               baseInfo = NULL;
+               break;
+            }
+            if (vmk_ScsiIsWriteCdb(vmkCmd->cdb[0])) {
+               copySgData(baseInfo->dataDmaEntry.sgOut,
+                          vmkCmd->sgIOArray,
+                          baseInfo->requiredLength);
             }
          }
       } else {
@@ -610,6 +685,10 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
 
       cmdInfo->cmdCount = 0;
       cmdInfo->cmdRetries = retries;
+      /**
+       * The cmdBase assignment is done before publishing the cmdInfo to global
+       * visibility.
+       */
       cmdInfo->cmdBase  = baseInfo;
       cmdInfo->ns       = ns;
 
@@ -641,18 +720,20 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
                                (baseInfo->requestedLength >> ns->lbaShift);
 
       cmd->header.cmdID      = cmdInfo->cmdId;
+#if USE_TIMER
       cmdInfo->timeoutId     = ctrlr->timeoutId;
-      qinfo->timeout[cmdInfo->timeoutId] ++;
-      
+      qinfo->timeoutCount[cmdInfo->timeoutId] ++;
+#endif
+
       if (END2END_DPS_TYPE(ns->dataProtSet) != 0) {
-         cmd->cmd.read.protInfo = prChk & 0x7; 
+         cmd->cmd.read.protInfo = prChk & 0x7;
          cmd->cmd.read.expInitLogBlkRefTag = cmd->cmd.read.startLBA & 0xffffffff;
          if (protPass) {
-            if (baseInfo->useProtBounceBuffer) {
-               cmd->header.metadataPtr = baseInfo->protDmaEntry.ioa + 
+            if (baseInfo->bounceBufferType & PROT_BOUNCE_BUFFER) {
+               cmd->header.metadataPtr = baseInfo->protDmaEntry.ioa +
                                          ((baseInfo->requestedLength >> ns->lbaShift) << 3);
             } else {
-               cmd->header.metadataPtr = protSgArray->elem[0].ioAddr + 
+               cmd->header.metadataPtr = protSgArray->elem[0].ioAddr +
                                          ((baseInfo->requestedLength >> ns->lbaShift) << 3);
             }
          } else {
@@ -664,31 +745,30 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
          cmd->cmd.read.forceUnitAccess = vmkCmd->cdb[1] & 0x8;
       }
 
-      #if (NVME_ENABLE_IO_STATS == 1)
+   #if (NVME_ENABLE_IO_STATS == 1)
          STATS_Increment(ctrlr->statsData.TotalRequests);
          if (cmd->header.opCode == NVM_CMD_READ) {
             STATS_Increment(ctrlr->statsData.TotalReads);
-            #if (NVME_ENABLE_IO_STATS_ADDITIONAL == 1)
+         #if (NVME_ENABLE_IO_STATS_ADDITIONAL == 1)
                if ((cmd->cmd.read.numLBA & 0x07) || cmd->cmd.read.startLBA & 0x07) {
                   STATS_Increment(ctrlr->statsData.UnalignedReads);
                }
-            #endif
+         #endif
          } else {
             STATS_Increment(ctrlr->statsData.TotalWrites);
-            #if (NVME_ENABLE_IO_STATS_ADDITIONAL == 1)
+         #if (NVME_ENABLE_IO_STATS_ADDITIONAL == 1)
                if ((cmd->cmd.read.numLBA & 0x07) || cmd->cmd.read.startLBA & 0x07) {
                   STATS_Increment(ctrlr->statsData.UnalignedWrites);
                }
-            #endif
+         #endif
          }
-      #endif
+   #endif
 
 #if DO_IO_STAT
       cmdInfo->startTime = OsLib_GetTimerUs();
 #endif
 
       cmdInfo->type   = BIO_CONTEXT;
-      cmdInfo->status = NVME_CMD_STATUS_ACTIVE;
 
       nvmeStatus = NvmeCore_SubmitCommandAsync(qinfo, cmdInfo,
                                                scsiIoCompleteCommand);
@@ -699,12 +779,18 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
          VPRINT("qinfo %p[%d] failed to submit command, 0x%x, %s.",
                 qinfo, qinfo->id, nvmeStatus,
                 NvmeCore_StatusToString(nvmeStatus));
-         if (cmdInfo->useProtBounceBuffer) {
-            cmdInfo->useProtBounceBuffer = 0;
+         if (cmdInfo->bounceBufferType & PROT_BOUNCE_BUFFER) {
             OsLib_DmaFree(&qinfo->ctrlr->ctrlOsResources, &cmdInfo->protDmaEntry);
+            cmdInfo->bounceBufferType &= ~PROT_BOUNCE_BUFFER;
+         }
+         if (cmdInfo->bounceBufferType & DATA_BOUNCE_BUFFER) {
+            OsLib_DmaFree(&qinfo->ctrlr->ctrlOsResources, &cmdInfo->dataDmaEntry);
+            cmdInfo->bounceBufferType &= ~DATA_BOUNCE_BUFFER;
          }
          NvmeCore_PutCmdInfo(qinfo, cmdInfo);
-         qinfo->timeout[cmdInfo->timeoutId] --;
+#if USE_TIMER
+         qinfo->timeoutCount[cmdInfo->timeoutId] --;
+#endif
          if (baseInfo == cmdInfo) {
             baseInfo = NULL;
          }
@@ -713,6 +799,11 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
 
       /*
        * Update commands sent for request.
+       * after the async submission above, completion can happen at any moment
+       * however the cmdBase field will contain a valid pointer to baseInfo
+       * which will require the complete path to acquire the queue lock
+       * before acccessing the fields. This will wait for this function to
+       * complete before releaseing the command.
        */
       baseInfo->cmdCount ++;
       baseInfo->requestedLength += cmdInfo->count;
@@ -768,6 +859,14 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
 
    if (baseInfo) {
       if (baseInfo->cmdCount == 1) {
+         /**
+          *  If this is not really a split command, while still holding the
+          * queue lock, clear the field cmdBase. If by any chance the completion
+          * happened meanwhile it will acquire the lock and check under the lock
+          * if this is still not a split command. Otherwise clearing this field
+          * will eliminate the need of acquiring locks for most common case
+          * of non-split commands.
+          */
          baseInfo->cmdBase = NULL;
       }
    }
@@ -782,7 +881,6 @@ NvmeIo_SubmitIoRequest(struct NvmeQueueInfo *qinfo, struct NvmeNsInfo *ns,
 
    return nvmeStatus;
 }
-
 
 /**
  * NvmeIo_SubmitIo - submit a SCSI command to a namespace
@@ -832,16 +930,6 @@ NvmeIo_SubmitIo(struct NvmeNsInfo *ns, void *cmdPtr)
 
    LOCK_FUNC(qinfo);
    nvmeStatus = NvmeIo_SubmitIoRequest(qinfo, ns, cmdPtr, MAX_RETRY);
-
-   /**
-    * Accounting for the number of IO requests to the queue
-    */
-   if (nvmeStatus == NVME_STATUS_WOULD_BLOCK) {
-      qinfo->nrReq ++;
-      if (qinfo->maxReq < qinfo->nrReq) {
-         qinfo->maxReq = qinfo->nrReq;
-      }
-   }
 
    UNLOCK_FUNC(qinfo);
 
@@ -915,7 +1003,6 @@ NvmeIo_SubmitDsm(struct NvmeNsInfo *ns, void *cmdPtr,
    cmd->header.cmdID = cmdInfo->cmdId;
 
    cmdInfo->type = BIO_CONTEXT;
-   cmdInfo->status = NVME_CMD_STATUS_ACTIVE;
 
    LOCK_FUNC(qinfo);
    nvmeStatus = NvmeCore_SubmitCommandAsync(qinfo, cmdInfo,
@@ -935,18 +1022,7 @@ NvmeIo_SubmitDsm(struct NvmeNsInfo *ns, void *cmdPtr,
       nvmeStatus = NVME_STATUS_WOULD_BLOCK;
    }
 
-   /**
-    * Accounting for the number of IO requests to the queue
-    */
-   if (nvmeStatus == NVME_STATUS_WOULD_BLOCK) {
-      qinfo->nrReq ++;
-      if (qinfo->maxReq < qinfo->nrReq) {
-         qinfo->maxReq = qinfo->nrReq;
-      }
-   }
-
    UNLOCK_FUNC(qinfo);
-
    return nvmeStatus;
 }
 
@@ -1009,15 +1085,15 @@ NvmeIo_SubmitFlush(struct NvmeNsInfo *ns, void *cmdPtr,
    cmd->header.namespaceID = ns->id;
    cmd->header.cmdID = cmdInfo->cmdId;
 
+   LOCK_FUNC(qinfo);
    nvmeStatus = NvmeCore_SubmitCommandAsync(qinfo, cmdInfo, scsiIoCompleteCommand);
+   UNLOCK_FUNC(qinfo);
 
    if(nvmeStatus != NVME_STATUS_SUCCESS) {
       /*Fail to submit FLUSH command to firmware*/
       EPRINT("failed to submit FLUSH command, 0x%x, %s.",
              nvmeStatus, NvmeCore_StatusToString(nvmeStatus));
-      LOCK_FUNC(qinfo);
       NvmeCore_PutCmdInfo(qinfo, cmdInfo);
-      UNLOCK_FUNC(qinfo);
       nvmeStatus = NVME_STATUS_FAILURE;
    }
    else {

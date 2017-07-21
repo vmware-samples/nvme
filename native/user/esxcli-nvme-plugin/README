@@ -6,6 +6,44 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2017/4/20 1.2.0.16-1vmw
+
+   Backout the functionalities implemented in 1.2.0.13-1vmw.
+
+2017/4/17 1.2.0.15-1vmw
+
+   Fix PR #1850319: Check write cache exist before sending get vwc feature admin command
+
+   If controller doesn't have a write cache, return error message directly and don't
+   send get vwc feature admin command.
+
+2017/4/14 1.2.0.14-1vmw
+
+   Fix PR #1799210: remove check of "Arbitration Burst" value when setting this feature.
+
+2017/4/6 1.2.0.13-1vmw
+
+   Implement the following functionalities:
+      * nvme.device.listall
+      * nvme.device.listattach
+      * nvme.device.namespace.listall
+      * nvme.device.namespace.listattach
+      * nvme.device.namespace.create
+      * nvme.device.namespace.delete
+      * nvme.device.namespace.attach
+      * nvme.device.namespace.detach
+      * nvme.device.namespace.online
+      * nvme.device.namespace.offline
+
+2016/11/25 1.2.0.12-1vmw
+
+   1. Implement nvme.device.timeout.get functionality.
+   2. Implement nvme.device.timeout.set functionality.
+
+2016/11/6 1.2.0.11-1vmw
+
+   Implement nvme.device.register.get functionality.
+
 2016/2/1 1.2.0.10-1vmw
 
    1. Put the field names into one line in xml to make localcli work.
