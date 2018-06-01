@@ -25,8 +25,18 @@ BULL_VENDOR_CODE=VMW
 
 # Calculate VMKAPIDDK_ROOT, BUILD_NUMBER
 
-VMKAPIDDK_ROOT = $(shell rpm -q --qf '%{INSTPREFIXES}\n' vmware-esx-vmkapiddk-devtools)
+HAS_NATIVEDDK := $(shell rpm -qa | grep vmware-esx-nativeddk-devtools)
+ifdef HAS_NATIVEDDK
+DDK=vmware-esx-nativeddk-devtools
+HEXDK=vmware-esx-hexdk-devtools
+else
+DDK=vmware-esx-vmkapiddk-devtools
+HEXDK=vmware-esx-esxcli-devtools
+endif
+
+VMKAPIDDK_ROOT = $(shell rpm -q --qf '%{INSTPREFIXES}\n' $(DDK))
 BUILD_NUMBER=$(shell echo $(VMKAPIDDK_ROOT) | cut -d '-' -f3)
+DESC_ESX_VERSION=$(shell echo $(VMKAPIDDK_ROOT) | cut -d '-' -f2)
 
 # include $(VMKAPIDDK_ROOT)/src/partners/samples/common-mgmt-infrastructure/Makefile.user
 
@@ -51,13 +61,6 @@ BUILD_NUMBER=$(shell echo $(VMKAPIDDK_ROOT) | cut -d '-' -f3)
 DEV_VIB_BASENAME = vmware-esx-$(UWTOOL)
 
 DESC_NAME=$(DEV_VIB_BASENAME)
-
-HAS_VMKAPIDDK_6 := $(shell rpm -qa | grep vmware-esx-vmkapiddk-devtools-6)
-#ifdef HAS_VMKAPIDDK_6
-DESC_ESX_VERSION=6.0.0
-#else
-DESC_ESX_VERSION=5.5.0
-#endif
 
 ################################################################
 # Set build configuration options here.
@@ -157,14 +160,18 @@ GREP := /build/toolchain/lin32/grep-2.5.1a/bin/grep
 
 IMPORT_DEVKIT = $(shell rpm -q --qf '%{INSTPREFIXES}\n' $(1) | $(GREP) $(BUILD_NUMBER))
 
-HEXDK_BASE := $(call IMPORT_DEVKIT,vmware-esx-esxcli-devtools)
-VMKAPIDDK_BASE := $(call IMPORT_DEVKIT,vmware-esx-vmkapiddk-devtools)
+HEXDK_BASE := $(call IMPORT_DEVKIT,$(HEXDK))
+VMKAPIDDK_BASE := $(call IMPORT_DEVKIT,$(DDK))
 
-#ifdef HAS_VMKAPIDDK_6
+ifeq ($(DESC_ESX_VERSION),6.5.0)
+VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_4_0_0
+else
+ifeq ($(DESC_ESX_VERSION),6.0.0)
 VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_3_0_0
-#else
+else
 VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_2_0_0
-#endif
+endif
+endif
 
 VMKAPI_LOCATION = $(dir $(shell find $(VMKAPIDDK_ROOT)/src/bora -name vmkapi.h))
 

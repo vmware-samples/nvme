@@ -6,6 +6,27 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2016/2/1 1.2.0.10-1vmw
+
+   1. Put the field names into one line in xml to make localcli work.
+   2. Fix several typos.
+   3. Unify the capitalization styles.
+
+2015/12/8 1.2.0.9-1vmw
+
+   1. Use string type as PCIVID & PCISSVID instead of int type.
+   2. Enhance the prompt of feature aec, ivc, vwc and wa.
+   3. Move nvme_lib.c and nvme_lib.h from nvme-cli to esxcli-nvme-plugin.
+   4. Unify log messages in function Nvme_FWLoadImage to align with the esxcli
+      output standard.
+   5. Fix the missing close file descriptor in function Nvme_FWLoadImage.
+
+2015/11/13 1.2.0.8-1vmw
+
+   1. Format the output of esxcli plugin.
+   2. Output fields in identify and smart log page defined in NVMe 1.2 SPEC which is
+      compatiable with 1.0e.
+
 2015/9/7 1.2.0.7-1vmw
 
    1. Set format timeout value as 30mins, some devices really need a long time to format.

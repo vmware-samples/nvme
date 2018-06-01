@@ -92,7 +92,7 @@ OsLib_SemaphoreDestroy(vmk_Semaphore *sema);
 
 VMK_ReturnStatus
 OsLib_DmaAlloc(struct NvmeCtrlOsResources *ctrlr, vmk_ByteCount size,
-               struct NvmeDmaEntry *dmaEntry);
+               struct NvmeDmaEntry *dmaEntry, vmk_uint32 timeout);
 
 VMK_ReturnStatus
 OsLib_DmaFree(struct NvmeCtrlOsResources *ctrlr, struct NvmeDmaEntry *dmaEntry);
@@ -159,7 +159,7 @@ ScsiNotifyIOAllowed(vmk_Device logicalDevice, vmk_Bool ioAllowed);
 #if NVME_MUL_COMPL_WORLD
 VMK_ReturnStatus OsLib_StartCompletionWorlds(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus OsLib_EndCompletionWorlds(struct NvmeCtrlr *ctrlr);
-void OsLib_IOCOmpletionEnQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd);
+void OsLib_IOCompletionEnQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd);
 #endif
 
 VMK_ReturnStatus

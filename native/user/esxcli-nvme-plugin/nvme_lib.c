@@ -332,33 +332,50 @@ int Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size)
    /* get fw binary */
    fd = open (fw_path, O_RDONLY);
    if (fd == -1) {
-      printf ("cannot open fw file");
+      fprintf (stderr, "ERROR: Failed to open firmware image.\n");
       return -ENOENT;
    }
 
    if (fstat (fd, &sb) == -1) {
-      printf ("fail to call fstat");
+      fprintf (stderr, "ERROR: Failed to call fstat.\n");
+      if (close (fd) == -1) {
+         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         return -EBADF;
+      }
       return -EPERM;
    }
 
    if (!S_ISREG (sb.st_mode)) {
-      fprintf (stderr, "%s is not a file\n", fw_path);
+      fprintf (stderr, "ERROR: %s is not a file.\n", fw_path);
+      if (close (fd) == -1) {
+         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         return -EBADF;
+      }
       return -EPERM;
    }
+
    fw_file_size = (int)sb.st_size;
    if ((*fw_buf = malloc(fw_file_size)) == NULL) {//need to free!!!!
-      printf("unable to malloc %d bytes\n", fw_file_size);
+      fprintf (stderr, "ERROR: Failed to malloc %d bytes.\n", fw_file_size);
+      if (close (fd) == -1) {
+         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         return -EBADF;
+      }
       return -ENOMEM;
    }
 
    //read fw image from file
-   if ((*fw_size = read(fd, *fw_buf, fw_file_size)) < 0)
-      printf("error reading fw file: %s\n", fw_path);
-
-   printf ("Load firmware success. fw_size = %d Byte\n", *fw_size);
+   if ((*fw_size = read(fd, *fw_buf, fw_file_size)) < 0) {
+      fprintf(stderr, "ERROR: Failed to read firmware image: %s.\n", fw_path);
+      if (close (fd) == -1) {
+         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         return -EBADF;
+      }
+      return -EIO;
+   }
 
 #ifdef FIRMWARE_DUMP
-   printf ("dump whole fw image: \n", *fw_size);
+   printf ("Dump whole fw image: \n");
    int i, j;
    for(i=0; i<(*fw_size); i+=16) {
       for(j=0; j<16 && (i+j<(*fw_size)); j++)
@@ -369,7 +386,7 @@ int Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size)
 #endif
 
    if (close (fd) == -1) {
-      printf ("close");
+      fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
       return -EBADF;
    }
 
@@ -384,7 +401,7 @@ int Nvme_FWDownload(struct nvme_handle *handle, int slot,  unsigned char *rom_bu
    void *chunk;
 
    if ((chunk = malloc(NVME_MAX_XFER_SIZE)) == NULL) {
-      printf("unable to malloc %d bytes", NVME_MAX_XFER_SIZE);
+      fprintf(stderr, "ERROR: Failed to malloc %d bytes.\n", NVME_MAX_XFER_SIZE);
       return -ENOMEM;
    }
 

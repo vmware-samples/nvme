@@ -507,6 +507,8 @@ MsixSetup(struct NvmeCtrlr *ctrlr)
 
       return VMK_OK;
    } else {
+      Nvme_Free(ctrlr->ctrlOsResources.intrArray);
+      ctrlr->ctrlOsResources.intrArray = NULL;
       ctrlr->ctrlOsResources.msixEnabled = 0;
       return vmkStatus;
    }
@@ -804,7 +806,7 @@ IntxSetup(struct NvmeCtrlr *ctrlr)
       1, 1, NULL, ctrlr->ctrlOsResources.intrArray, &numAllocated);
    if (vmkStatus != VMK_OK) {
       EPRINT("unable to allocate intr cookie, 0x%x.", vmkStatus);
-      return vmkStatus;
+      goto free_intrArray;
    }
 
    /* should have just 1 intr cookie allocated for intx */
@@ -830,8 +832,12 @@ IntxSetup(struct NvmeCtrlr *ctrlr)
 
 free_intr:
    vmk_PCIFreeIntrCookie(vmk_ModuleCurrentID, ctrlr->ctrlOsResources.pciDevice);
-   ctrlr->numIoQueues = 0;
+
+free_intrArray:
+   Nvme_Free(ctrlr->ctrlOsResources.intrArray);
+   ctrlr->ctrlOsResources.intrArray = NULL;
    ctrlr->ctrlOsResources.numVectors = 0;
+   ctrlr->numIoQueues = 0;
 
    return vmkStatus;
 }
