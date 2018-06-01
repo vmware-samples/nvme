@@ -313,7 +313,7 @@ NvmeMgmt_GetTempThreshold(struct NvmeCtrlr *ctrlr)
    struct nvme_prp *prp;
 
    vmk_uint16 feature = 0x04;
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry);
+   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
       EPRINT("failed to allocate memory!");
       return 0;

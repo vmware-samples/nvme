@@ -115,7 +115,7 @@ NvmeQueue_CmdInfoConstruct(struct NvmeQueueInfo *qinfo)
       cmdInfo->cmdId = i + 1;
 
       vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, (sizeof (struct nvme_prp)) * max_prp_list,
-         &cmdInfo->dmaEntry);
+         &cmdInfo->dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
       if (vmkStatus != VMK_OK) {
          EPRINT("Failed to allocate dma buffer.");
          goto cleanup;
@@ -223,7 +223,7 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
    }
 
    /* Allocate completion queue DMA buffer */
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, cqsize * sizeof(struct cq_entry), &qinfo->dmaEntry);
+   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, cqsize * sizeof(struct cq_entry), &qinfo->dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
       EPRINT("Could not allocate CQ DMA buffer");       
       goto free_sq_lock;
@@ -239,7 +239,7 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
    qinfo->timeoutId = -1;  /* TODO: what is this? */
 
    /* Allocate submission queue DMA buffer */
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, sqsize * sizeof(struct nvme_cmd), &sqInfo->dmaEntry);
+   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, sqsize * sizeof(struct nvme_cmd), &sqInfo->dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
       EPRINT("Could not start allocate SQ DMA buffer");       
       goto free_cq_dma;

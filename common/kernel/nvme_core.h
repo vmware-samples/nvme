@@ -94,6 +94,12 @@ typedef enum Nvme_Status {
    NVME_STATUS_WRITE_PROTECT,
    /* Error: over temp. */
    NVME_STATUS_OVERTEMP,
+   /* Error: guard check failure */
+   NVME_STATUS_GUARD_CHECK_ERROR,
+   /* Error: application tag check failure */
+   NVME_STATUS_APP_CHECK_ERROR,
+   /* Error: reference tag check failure */
+   NVME_STATUS_REF_CHECK_ERROR,
    /** Guard */
    NVME_STATUS_LAST,
 } Nvme_Status;
