@@ -65,9 +65,6 @@ ScsiIoctl(void *clientData, void *deviceData, vmk_uint32 fileFlags,
 int
 ScsiQueryDeviceQueueDepth(void *clientData, void *deviceData);
 
-void
-ScsiClose(void *clientData);
-
 VMK_ReturnStatus
 ScsiProcInfo(void *clientData, char *buf, vmk_ByteCountSmall offset,
    vmk_ByteCountSmall count, vmk_ByteCountSmall *nbytes, int isWrite);

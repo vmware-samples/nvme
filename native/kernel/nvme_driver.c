@@ -32,7 +32,7 @@ AttachDevice(vmk_Device device)
    VMK_ReturnStatus vmkStatus = VMK_OK;
    struct NvmeCtrlr *ctrlr;
 
-   DPRINT_TEMP("enter.");
+   DPRINT_INIT("Called with %p.", device);
 
 #if NVME_DEBUG_INJECT_STATE_DELAYS
    IPRINT("--ATTACH STARTED--");
@@ -98,7 +98,7 @@ AttachDevice(vmk_Device device)
    vmk_ListInsert(&ctrlr->list, vmk_ListAtRear(&NVME_DRIVER_RES_ADAPTERLIST));
    vmk_SpinlockUnlock(NVME_DRIVER_RES_LOCK);
 
-   DPRINT_CTRLR("attached driver data %p.", ctrlr);
+   DPRINT_INIT("attached driver data %p, %s", ctrlr, Nvme_GetCtrlrName(ctrlr));
 
 
 #if NVME_DEBUG_INJECT_STATE_DELAYS
@@ -130,8 +130,6 @@ DriverRemoveDevice(vmk_Device device)
    vmk_ScsiAdapter *adapter;
    struct NvmeCtrlr *ctrlr;
 
-   DPRINT_TEMP("enter");
-
    vmkStatus = vmk_DeviceGetRegistrationData(device, (vmk_AddrCookie *)&adapter);
    if (vmkStatus != VMK_OK || adapter == NULL) {
       EPRINT("failed to get logical device data, 0x%x.", vmkStatus);
@@ -140,11 +138,13 @@ DriverRemoveDevice(vmk_Device device)
 
    ctrlr = (struct NvmeCtrlr *)adapter->clientData;
 
+   DPRINT_INIT("Called with %p, ctrlr: %s.", device, Nvme_GetCtrlrName(ctrlr));
+
    vmkStatus = vmk_DeviceUnregister(device);
-   IPRINT("removed logical device, 0x%x.", vmkStatus);
+   DPRINT_INIT("removed logical device, 0x%x.", vmkStatus);
 
    vmkStatus = NvmeScsi_Destroy(ctrlr);
-   IPRINT("cleaned up scsi layer, 0x%x.", vmkStatus);
+   DPRINT_INIT("cleaned up scsi layer, 0x%x.", vmkStatus);
 
    ctrlr->ctrlOsResources.logicalDevice = NULL;
 
@@ -173,8 +173,6 @@ ScanDevice(vmk_Device device)
    vmk_Name busName;
    vmk_BusType busType;
 
-   DPRINT_TEMP("enter.");
-
 #if NVME_DEBUG_INJECT_STATE_DELAYS
    IPRINT("--SCAN STARTED--");
    vmk_WorldSleep(NVME_DEBUG_STATE_DELAY_US);
@@ -185,6 +183,8 @@ ScanDevice(vmk_Device device)
       EPRINT("failed to get controller instance, 0x%x.", vmkStatus);
       return vmkStatus;
    }
+
+   DPRINT_INIT("Called with %p, ctrlr: %s.", device, Nvme_GetCtrlrName(ctrlr));
 
    vmkStatus = NvmeScsi_Init(ctrlr);
    if (vmkStatus != VMK_OK) {
@@ -242,8 +242,6 @@ DetachDevice(vmk_Device device)
    VMK_ReturnStatus vmkStatus;
    struct NvmeCtrlr *ctrlr;
 
-   DPRINT_TEMP("enter.");
-
 #if NVME_DEBUG_INJECT_STATE_DELAYS
    IPRINT("--DETACH STARTED--");
    vmk_WorldSleep(NVME_DEBUG_STATE_DELAY_US);
@@ -254,6 +252,8 @@ DetachDevice(vmk_Device device)
       EPRINT("failed to get controller instance, 0x%x.", vmkStatus);
       return vmkStatus;
    }
+
+   DPRINT_INIT("Called with %p, ctrlr: %s.", device, Nvme_GetCtrlrName(ctrlr));
 
    /** Remote the adapter from the global list */
    vmk_SpinlockLock(NVME_DRIVER_RES_LOCK);
@@ -269,6 +269,7 @@ DetachDevice(vmk_Device device)
  * device driver is dettached.
  */
    vmkStatus = NvmeCtrlr_Stop(ctrlr);
+   DPRINT_INIT("nvme controller %p stopped, 0x%x.", ctrlr, vmkStatus);
 #endif
 
    /* Controller should have been quiesced before destruction.
@@ -276,7 +277,7 @@ DetachDevice(vmk_Device device)
     * from NvmeCtrlr_Attach.
     */
    vmkStatus = NvmeCtrlr_Detach(ctrlr);
-   DPRINT_CTRLR("nvme controller %p destructed, 0x%x.", ctrlr, vmkStatus);
+   DPRINT_INIT("nvme controller %p detached, 0x%x.", ctrlr, vmkStatus);
 
    /* Should never reference ctrlr after detach. */
    Nvme_Free(ctrlr);
@@ -299,8 +300,6 @@ QuiesceDevice(vmk_Device device)
    VMK_ReturnStatus vmkStatus;
    struct NvmeCtrlr *ctrlr;
 
-   DPRINT_TEMP("enter.");
-
 #if NVME_DEBUG_INJECT_STATE_DELAYS
    IPRINT("--QUIESCE STARTED--");
    vmk_WorldSleep(NVME_DEBUG_STATE_DELAY_US);
@@ -312,13 +311,18 @@ QuiesceDevice(vmk_Device device)
       return vmkStatus;
    }
 
+   DPRINT_INIT("Called with %p, ctrlr: %s.", device, Nvme_GetCtrlrName(ctrlr));
+
 #if EXC_HANDLER
    vmkStatus = NvmeExc_SignalExceptionAndWait(ctrlr,  NVME_EXCEPTION_QUIESCE,  TASKMGMT_TIMEOUT);
+   DPRINT_INIT("signal exception handler to quiesce ctrlr %p, 0x%x.", ctrlr, vmkStatus);
 #else
 #if ALLOW_IOS_IN_QUIESCED_STATE
    vmkStatus = NvmeCtrlr_Quiesce(ctrlr);
+   DPRINT_INIT("nvme controller %p quiesced, 0x%x.", ctrlr, vmkStatus);
 #else
    vmkStatus = NvmeCtrlr_Stop(ctrlr);
+   DPRINT_INIT("nvme controller %p stopped, 0x%x.", ctrlr, vmkStatus);
 #endif
 #endif
 
@@ -340,8 +344,6 @@ StartDevice(vmk_Device device)
    VMK_ReturnStatus vmkStatus;
    struct NvmeCtrlr *ctrlr;
 
-   DPRINT_TEMP("enter.");
-
 #if NVME_DEBUG_INJECT_STATE_DELAYS
    IPRINT("--START STARTED--");
    vmk_WorldSleep(NVME_DEBUG_STATE_DELAY_US);
@@ -353,15 +355,19 @@ StartDevice(vmk_Device device)
       return vmkStatus;
    }
 
+   DPRINT_INIT("Called with %p, ctrlr: %s.", device, Nvme_GetCtrlrName(ctrlr));
+
 #if ALLOW_IOS_IN_QUIESCED_STATE == 0
 #if EXC_HANDLER
    vmkStatus = NvmeExc_SignalExceptionAndWait(ctrlr,  NVME_EXCEPTION_TASK_START,  TASKMGMT_TIMEOUT);
+   DPRINT_INIT("signal exception handler to start ctrlr %p, 0x%x.", ctrlr, vmkStatus);
 #else
 /*
  * When this workaround switch is active,  we would be enabling the controller early.
  * in AttachDevice instead of StartDevice.
  */
    vmkStatus = NvmeCtrlr_Start(ctrlr);
+   DPRINT_INIT("nvme controller %p started, 0x%x.", ctrlr, vmkStatus);
 #endif
 #endif
 
@@ -383,8 +389,6 @@ ForgetDevice(vmk_Device device)
    VMK_ReturnStatus vmkStatus;
    struct NvmeCtrlr *ctrlr;
 
-   DPRINT_TEMP("enter.");
-
 #if NVME_DEBUG_INJECT_STATE_DELAYS
    IPRINT("--FORGET STARTED--");
    vmk_WorldSleep(NVME_DEBUG_STATE_DELAY_US);
@@ -394,8 +398,12 @@ ForgetDevice(vmk_Device device)
    if (vmkStatus != VMK_OK) {
       EPRINT("failed to get controller instance, 0x%x.", vmkStatus);
    }
+
+   DPRINT_INIT("Called with %p, ctrlr: %s.", device, Nvme_GetCtrlrName(ctrlr));
+
 #if EXC_HANDLER
    vmkStatus = NvmeExc_SignalExceptionAndWait(ctrlr,  NVME_EXCEPTION_DEVICE_REMOVED,  TASKMGMT_TIMEOUT);
+   DPRINT_INIT("signal exception handler to forget ctrlr %p, 0x%x.", ctrlr, vmkStatus);
 #else
    NvmeCtrlr_SetMissing(ctrlr);
 #endif
@@ -435,8 +443,6 @@ NvmeDriver_Register()
    VMK_ReturnStatus vmkStatus;
    vmk_DriverProps props;
 
-   DPRINT_TEMP("enter.");
-
    VMK_ASSERT(NVME_DRIVER_RES_DRIVER_HANDLE == VMK_DRIVER_NONE);
    if (NVME_DRIVER_RES_DRIVER_HANDLE != VMK_DRIVER_NONE) {
       return VMK_EXISTS;
@@ -461,8 +467,6 @@ NvmeDriver_Register()
 void
 NvmeDriver_Unregister()
 {
-   DPRINT_TEMP("enter.");
-
    VMK_ASSERT(NVME_DRIVER_RES_DRIVER_HANDLE != VMK_DRIVER_NONE);
 
    vmk_DriverUnregister(NVME_DRIVER_RES_DRIVER_HANDLE);
@@ -500,13 +504,14 @@ MsixSetup(struct NvmeCtrlr *ctrlr)
       &numAllocated);
 
    if (vmkStatus == VMK_OK) {
-      VPRINT("Allocated %d msi-x vectors.", numAllocated);
+      DPRINT_INIT("Allocated %d msi-x vectors.", numAllocated);
       ctrlr->numIoQueues = numAllocated - 1; /* minus 1 admin q */
       ctrlr->ctrlOsResources.numVectors = numAllocated;
       ctrlr->ctrlOsResources.msixEnabled = 1;
 
       return VMK_OK;
    } else {
+      EPRINT("Failed to allocate msi-x vectors, 0x%x", vmkStatus);
       Nvme_Free(ctrlr->ctrlOsResources.intrArray);
       ctrlr->ctrlOsResources.intrArray = NULL;
       ctrlr->ctrlOsResources.msixEnabled = 0;
@@ -535,19 +540,23 @@ IntrInit(struct NvmeCtrlr *ctrlr)
    if (!nvme_force_intx) {
       vmkStatus = MsixSetup(ctrlr);
       if (vmkStatus == VMK_OK) {
-         IPRINT("using msi-x with %d vectors.", ctrlr->ctrlOsResources.numVectors);
          return VMK_OK;
+      }
+      /* The device is probably broken or unplugged. Return error directly. */
+      if (vmkStatus == VMK_IO_ERROR) {
+         goto out;
       }
    }
 
    /* msi-x setup failed, fallback to intx */
+   WPRINT("msi-x setup fails, fallback to intx.");
    vmkStatus = IntxSetup(ctrlr);
    if (vmkStatus == VMK_OK) {
-      IPRINT("using intx.");
       return VMK_OK;
    }
 
-   EPRINT("unable to initialize interrupt, 0x%x.", vmkStatus);
+out:
+   EPRINT("Unable to initialize interrupt, 0x%x.", vmkStatus);
    return vmkStatus;
 }
 
@@ -625,7 +634,7 @@ NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr)
     *
     * Note: lock is not initialized by here, so do not use locking.
     */
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_INIT, VMK_FALSE);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_INIT);
 
    /**
     * Initialize PCI resources first to access controller bars.
@@ -678,17 +687,24 @@ NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr)
    if (vmkStatus != VMK_OK) {
       goto cleanup_lock;
    }
+
+#if USE_TIMER
    vmkStatus = OsLib_TimerQueueCreate(ctrlr);
    if (vmkStatus != VMK_OK) {
       goto cleanup_sema;
    }
+#endif
 
 
 #if EXC_HANDLER
   vmkStatus = OsLib_SetupExceptionHandler(ctrlr);
    if (vmkStatus != VMK_OK) {
       EPRINT("The device can not handle exceptions.");
-      goto cleanup_timer_queue;
+      #if USE_TIMER
+         goto cleanup_timer_queue;
+      #else
+         goto cleanup_sema;
+      #endif
    }
 #endif
 
@@ -706,28 +722,16 @@ NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr)
    if (vmkStatus != VMK_OK) {
       #if EXC_HANDLER
          goto cleanup_exc_handler;
-      #else
+      #elif USE_TIMER
          goto cleanup_timer_queue;
+      #else
+         goto cleanup_sema;
       #endif
    }
 
-#if NVME_MUL_COMPL_WORLD
-   vmkStatus = OsLib_StartCompletionWorlds(ctrlr);
-   if (vmkStatus != VMK_OK) {
-      EPRINT("Failed to create completion worlds. vmkStatus: 0x%x.",  \
-            vmkStatus);
-      goto cleanup_unmap_slab;
-
-   }
-#endif
-
    vmkStatus = NvmeCtrlr_AdminQueueSetup(ctrlr);
    if (vmkStatus != VMK_OK) {
-#if NVME_MUL_COMPL_WORLD
-      goto cleanup_compl_worlds;
-#else
       goto cleanup_unmap_slab;
-#endif
    }
 
    #if NVME_DEBUG_INJECT_ERRORS
@@ -741,23 +745,18 @@ NvmeCtrlr_Attach(struct NvmeCtrlr *ctrlr)
 
    return VMK_OK;
 
-#if NVME_MUL_COMPL_WORLD
-cleanup_compl_worlds:
-   OsLib_EndCompletionWorlds(ctrlr);
-#endif
-
 cleanup_unmap_slab:
    vmk_SlabDestroy(ctrlr->scsiUnmapSlabId);
-
 
 #if EXC_HANDLER
 cleanup_exc_handler:
    OsLib_ShutdownExceptionHandler(ctrlr);
 #endif
 
+#if USE_TIMER
 cleanup_timer_queue:
    OsLib_TimerQueueDestroy(ctrlr);
-
+#endif
 
 cleanup_sema:
    OsLib_SemaphoreDestroy(&ctrlr->taskMgmtMutex);
@@ -777,9 +776,9 @@ cleanup_dma:
 cleanup_pci:
    PciCleanup(ctrlr);
 
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_FAILED, VMK_FALSE);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_FAILED);
 
-   DPRINT_CTRLR("failed to attach controller, 0x%x.", vmkStatus);
+   EPRINT("failed to attach controller, 0x%x.", vmkStatus);
 
    return vmkStatus;
 }
@@ -852,20 +851,17 @@ NvmeCtrlr_Detach(struct NvmeCtrlr *ctrlr)
 {
    VMK_ReturnStatus vmkStatus;
 
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_DETACHED, VMK_TRUE);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_DETACHED);
 #if EXC_HANDLER
    OsLib_ShutdownExceptionHandler(ctrlr);
 #endif
 
+#if USE_TIMER
    OsLib_TimerQueueDestroy(ctrlr);
+#endif
 
    vmkStatus = NvmeCtrlr_AdminQueueDestroy(ctrlr);
    DPRINT_INIT("cleaned admin queue, 0x%x.", vmkStatus);
-
-#if NVME_MUL_COMPL_WORLD
-   OsLib_EndCompletionWorlds(ctrlr);
-   DPRINT_INIT("cleaned IO completion worlds, 0x%x.", vmkStatus);
-#endif
 
    vmkStatus = vmk_SlabDestroy(ctrlr->scsiUnmapSlabId);
    DPRINT_INIT("cleaned scsi unmap slab, 0x%x.", vmkStatus);
@@ -947,7 +943,6 @@ PciSetMaster(vmk_PCIDevice dev)
       return vmkStatus;
    }
 
-   IPRINT("Enabled bus-mastering on device.");
    return vmkStatus;
 }
 
@@ -994,7 +989,7 @@ PciInit(struct NvmeCtrlr *ctrlr)
    for (bar = 0; bar < VMK_PCI_NUM_BARS; bar++) {
       if (((pciRes[bar].flags & VMK_PCI_BAR_FLAGS_IO) == 0) &&
          (pciRes[bar].size > 4096)) {
-         IPRINT("selected bar %d.", bar);
+         DPRINT_INIT("selected bar %d.", bar);
          ctrlr->bar = bar;
          ctrlr->barSize = pciRes[bar].size;
          break;

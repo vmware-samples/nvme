@@ -44,54 +44,24 @@ NvmeState_GetCtrlrStateString(Nvme_CtrlrState state)
 
 
 Nvme_CtrlrState
-NvmeState_GetCtrlrState(struct NvmeCtrlr *ctrlr, vmk_Bool locked)
+NvmeState_GetCtrlrState(struct NvmeCtrlr *ctrlr)
 {
-   Nvme_CtrlrState rc;
-
-   if (locked) {
-      vmk_SpinlockLock(ctrlr->lock);
-   }
-
-   rc = ctrlr->state;
-
-   if (locked) {
-      vmk_SpinlockUnlock(ctrlr->lock);
-   }
-
-   return rc;
+   return (Nvme_CtrlrState)vmk_AtomicRead32(&ctrlr->atomicState);
 }
 
 
 Nvme_CtrlrState
-NvmeState_SetCtrlrState(struct NvmeCtrlr *ctrlr, Nvme_CtrlrState state, vmk_Bool locked)
+NvmeState_SetCtrlrState(struct NvmeCtrlr *ctrlr, Nvme_CtrlrState state)
 {
    Nvme_CtrlrState rc;
-
-   if (locked) {
-      vmk_SpinlockLock(ctrlr->lock);
-   }
-
-   rc = ctrlr->state;
-
-   /*
-    * Do not move to other state when
-    * 1. current state is missing, or
-    * 2. current state is failed but target state is not missing,
-    *    i.e. if target state is missing, we should change state to missing.
-    */
-
-   if (!((rc == NVME_CTRLR_STATE_MISSING) ||
-       (rc == NVME_CTRLR_STATE_FAILED && state != NVME_CTRLR_STATE_MISSING))) {
-      ctrlr->state = state;
-   }
-
-   VPRINT("State transitioned from %s to %s.",
-          NvmeState_GetCtrlrStateString(rc),
-          NvmeState_GetCtrlrStateString(ctrlr->state));
-
-   if (locked) {
-      vmk_SpinlockUnlock(ctrlr->lock);
-   }
-
+   do {
+       rc = (Nvme_CtrlrState)vmk_AtomicRead32(&ctrlr->atomicState);
+       if (((rc == NVME_CTRLR_STATE_MISSING) ||
+           (rc == NVME_CTRLR_STATE_FAILED && state != NVME_CTRLR_STATE_MISSING))) {
+          return rc;
+       }
+   } while (vmk_AtomicReadIfEqualWrite32(&ctrlr->atomicState,
+               (vmk_uint32)rc, (vmk_uint32)state) != (vmk_uint32)rc);
+   /** Return the previous state of the controller */
    return rc;
 }

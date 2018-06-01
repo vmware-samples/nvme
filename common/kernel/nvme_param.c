@@ -80,12 +80,6 @@ NVME_MOD_PARAM(max_scsi_unmap_requests,
    32,
    "Maximum number of scsi unmap requests supported")
 
-NVME_MOD_PARAM(io_timeout,
-   10,
-   1,
-   40,
-   "IO timeout second for internal checker")
-
 #if NVME_DEBUG
 NVME_MOD_PARAM(nvme_dbg,
    0,
@@ -98,11 +92,61 @@ NVME_MOD_PARAM(nvme_dbg,
  * Hide these parameters in this version.
  */
 int nvme_force_intx = 0;
-int max_prp_list = 32;
+int max_prp_list = 512;
 /** @todo - optimize */
 int max_io_request = 1023;
 int io_command_id_size = 1024;
-int transfer_size = 128;
+int transfer_size = 2048;
+
+#if NVME_MUL_COMPL_WORLD
+int nvme_compl_worlds_num = -1;
+VMK_MODPARAM(nvme_compl_worlds_num, int,   \
+   "Total number of NVMe completion worlds/queues.");
+
+static void validate_nvme_compl_worlds_num()
+{
+   /* equal to PCPU number of server */
+   vmk_uint32 compl_worlds_upper_limit = Oslib_GetPCPUNum();
+   vmk_uint32 compl_worlds_lower_limit = 1;
+
+   if (compl_worlds_upper_limit > NVME_MAX_COMPL_WORLDS) {
+      compl_worlds_upper_limit = NVME_MAX_COMPL_WORLDS;
+   }
+
+   if (compl_worlds_upper_limit < compl_worlds_lower_limit) {
+      Nvme_LogNoHandle("Warning: compl_worlds_upper_limit %d is less than "
+         "compl_worlds_lower_limit %d. Adjusting nvme_compl_worlds_num to %d",
+         compl_worlds_upper_limit, compl_worlds_lower_limit,
+         compl_worlds_lower_limit);
+      nvme_compl_worlds_num = compl_worlds_lower_limit;
+      return;
+   }
+
+   if (nvme_compl_worlds_num <= 0) {
+      /**
+       * No user input or user input is an invalid value.
+       * Set nvme_compl_worlds_num to the default value.
+       */
+      nvme_compl_worlds_num = vmk_ScsiGetMaxNumCompletionQueues();
+   }
+
+   /* verify user configration of completion worlds number */
+   if (nvme_compl_worlds_num < compl_worlds_lower_limit) {
+      nvme_compl_worlds_num = compl_worlds_lower_limit;
+      Nvme_LogNoHandle("The range of nvme_compl_worlds_num is [%d, %d]. "
+         "Adjusting nvme_compl_worlds_num to %d.", compl_worlds_lower_limit,
+         compl_worlds_upper_limit, nvme_compl_worlds_num);
+   } else if (nvme_compl_worlds_num > compl_worlds_upper_limit) {
+      nvme_compl_worlds_num = compl_worlds_upper_limit;
+      Nvme_LogNoHandle("The range of nvme_compl_worlds_num is [%d, %d]. "
+         "Adjusting nvme_compl_worlds_num to %d.", compl_worlds_lower_limit,
+         compl_worlds_upper_limit, nvme_compl_worlds_num);
+   } else {
+      Nvme_LogNoHandle("nvme_compl_worlds_num set to %d.", nvme_compl_worlds_num);
+   }
+
+}
+#endif
 
 /**
  * Validate if a certain module parameter is set within an acceptible range.
@@ -117,8 +161,12 @@ void Nvme_ValidateModuleParams()
    validate_io_cpl_queue_size();
    validate_max_namespaces();
    validate_max_scsi_unmap_requests();
-   validate_io_timeout();
 #if NVME_DEBUG
    validate_nvme_dbg();
 #endif
+
+#if NVME_MUL_COMPL_WORLD
+   validate_nvme_compl_worlds_num();
+#endif
+
 }

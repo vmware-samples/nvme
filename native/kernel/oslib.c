@@ -137,7 +137,6 @@ NvmeCore_EnableQueueIntr(struct NvmeQueueInfo *qinfo)
    if (ctrlr->ctrlOsResources.msixEnabled) {
       vmk_IntrEnable(ctrlr->ctrlOsResources.intrArray[qinfo->intrIndex]);
    }
-
    return NVME_STATUS_SUCCESS;
 }
 
@@ -198,14 +197,16 @@ NvmeQueue_IntrHandler(void *handlerData, vmk_IntrCookie intrCookie)
 {
    struct NvmeQueueInfo *qinfo = (struct NvmeQueueInfo *)handlerData;
 
-   LOCK_FUNC(qinfo);
+   LOCK_COMPQ(qinfo);
 
    #if (NVME_ENABLE_IO_STATS == 1)
       STATS_Increment(qinfo->ctrlr->statsData.TotalInterrupts);
    #endif
 
+
    nvmeCoreProcessCq(qinfo, 0);
-   UNLOCK_FUNC(qinfo);
+
+   UNLOCK_COMPQ(qinfo);
 }
 
 /**
@@ -717,14 +718,19 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr)
 
    DPRINT_TEMP("enter");
 
-   /* TODO: Ideally the queue depth of a controller can hit as large
-    * as io_cpl_queue_size * ctrlr->numIoQueues.
+   /**
+    * According to spec, "One entry in each queue is not available for use
+    * due to Head and Tail entry pointer definition". So each queue should
+    * report a queue depth of (queue size -1) to PSA to avoid QFULL issue.
+    *
+    * TODO: Enhance the queue depth reporting considering command splitting
+    *       and queue imbalance.
     */
-   ctrlr->qDepth = io_cpl_queue_size * ctrlr->numIoQueues;
+   ctrlr->qDepth = (ctrlr->ioSubQueueSize - 1) * ctrlr->numIoQueues;
 
    /* Create a DMA engine for SCSI IO */
    scsiConstraints.addressMask = SCSI_ADDR_MASK;
-   scsiConstraints.maxTransfer = SCSI_MAX_XFER;
+   scsiConstraints.maxTransfer = ctrlr->maxXferLen;
    scsiConstraints.sgMaxEntries = SCSI_SG_MAX_ENTRIES;
    scsiConstraints.sgElemMaxSize = SCSI_SG_ELEM_MAX_SIZE;
    scsiConstraints.sgElemSizeMult = SCSI_SG_ELEM_SIZE_MULT;
@@ -757,13 +763,12 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr)
    vmk_NameInitialize(&adapter->driverName, NVME_DRIVER_NAME);
 
    adapter->device = ctrlr->ctrlOsResources.device;
-   adapter->hostMaxSectors = transfer_size * 1024 / VMK_SECTOR_SIZE;
+   adapter->hostMaxSectors = ctrlr->maxXferLen / VMK_SECTOR_SIZE;
    adapter->qDepthPtr = &ctrlr->qDepth;
 
    adapter->command = ScsiCommand;
    adapter->taskMgmt = ScsiTaskMgmt;
    adapter->dumpCommand = ScsiDumpCommand;
-   adapter->close = ScsiClose;
    adapter->procInfo = ScsiProcInfo;
    adapter->dumpQueue = ScsiDumpQueue;
    adapter->dumpPollHandler = ScsiDumpPollHandler;
@@ -779,7 +784,7 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr)
    adapter->channels = 1;
    adapter->maxTargets = 1;
    adapter->targetId = -1;
-   adapter->maxLUNs = max_namespaces;
+   adapter->maxLUNs = ctrlr->nn;
    adapter->paeCapable = VMK_TRUE;
    adapter->maxCmdLen = NVME_DRIVER_PROPS_MAX_CMD_LEN;
 
@@ -836,6 +841,9 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr)
    adapter->engine = ctrlr->ctrlOsResources.scsiDmaEngine;
 
    ctrlr->ctrlOsResources.scsiAdapter = adapter;
+   /* adapterName is "Invalid" since the adapter has not been registered by PSA. */
+   vmk_NameCopy(&ctrlr->adapterName, &adapter->name);
+   DPRINT_CTRLR("adpterName: %s", vmk_NameToString(&ctrlr->adapterName));
 
    vmk_ScsiRegisterIRQ(adapter,
          ctrlr->ctrlOsResources.intrArray[0],
@@ -1019,8 +1027,8 @@ CreateIoCompletionSlab(struct NvmeCtrlr *ctrlr)
    compl_worlds_slab_props.alignment = VMK_L1_CACHELINE_SIZE;
    /* TODO: double check this value */
    compl_worlds_slab_props.ctrlOffset = 0;
-   compl_worlds_slab_props.minObj = io_cpl_queue_size * nvme_compl_worlds_num / 2;
-   compl_worlds_slab_props.maxObj = io_cpl_queue_size * nvme_compl_worlds_num;
+   compl_worlds_slab_props.minObj = ctrlr->ioCompQueueSize * nvme_compl_worlds_num / 2;
+   compl_worlds_slab_props.maxObj = ctrlr->ioCompQueueSize * nvme_compl_worlds_num;
 
    vmkStatus = vmk_SlabCreate(&compl_worlds_slab_props,    \
          &ctrlr->complWorldsSlabID);
@@ -1095,7 +1103,7 @@ OsLib_StartCompletionWorlds(struct NvmeCtrlr *ctrlr)
       vmk_StringFormat(propName, VMK_MISC_NAME_MAX, NULL,   \
             "nvmeComplQLock-%s-%d", Nvme_GetCtrlrName(ctrlr), lockNum);
 
-      status = OsLib_LockCreate(&ctrlr->ctrlOsResources, NVME_LOCK_RANK_HIGH,
+      status = OsLib_LockCreate(&ctrlr->ctrlOsResources, NVME_LOCK_RANK_ULTRA,
         propName, &IOCompletionQueue->lock);
       if (status != VMK_OK) {
          VMK_ASSERT(VMK_FALSE);
@@ -1236,6 +1244,62 @@ void OsLib_IOCompletionEnQueue(struct NvmeCtrlr *ctrlr,
       vmk_WorldWakeup((vmk_WorldEventID) IOCompletionQueue);
    }
 }
+
+/**
+ * Bind interrupt to compeltion world corresponding to a given queue to make sure
+ * the interrupt delivered to the same PCPU with the completion world running
+ *
+ * @param [in] qinfo queue instance
+ */
+VMK_ReturnStatus
+NvmeQueue_BindCompletionWorld(struct NvmeQueueInfo *qinfo)
+{
+   vmk_WorldID worldID;
+   vmk_IntrCookie intrCookie;
+   struct NvmeCtrlr *ctrlr = qinfo->ctrlr;
+
+   if (!ctrlr->ctrlOsResources.msixEnabled) {
+      /* Per-queue interrupt is only available for MSIx mode */
+      return VMK_BAD_PARAM;
+   }
+   if (qinfo->intrIndex >= ctrlr->ctrlOsResources.numVectors) {
+      /* Invalid interrupt index. */
+      return VMK_BAD_PARAM;
+   }
+
+   worldID = ctrlr->IOCompletionQueue[qinfo->id-1].worldID;
+   intrCookie = ctrlr->ctrlOsResources.intrArray[qinfo->intrIndex];
+
+   return vmk_WorldInterruptSet(worldID, intrCookie);
+}
+
+/**
+ * Unbind interrupt to compeltion world corresponding to a given queue.
+ *
+ * @param [in] qinfo queue instance
+ */
+VMK_ReturnStatus
+NvmeQueue_UnbindCompletionWorld(struct NvmeQueueInfo *qinfo)
+{
+   vmk_WorldID worldID;
+   vmk_IntrCookie intrCookie;
+   struct NvmeCtrlr *ctrlr = qinfo->ctrlr;
+
+   if (!ctrlr->ctrlOsResources.msixEnabled) {
+      /* Per-queue interrupt is only available for MSIx mode */
+      return VMK_BAD_PARAM;
+   }
+   if (qinfo->intrIndex >= ctrlr->ctrlOsResources.numVectors) {
+      /* Invalid interrupt index. */
+      return VMK_BAD_PARAM;
+   }
+
+   worldID = ctrlr->IOCompletionQueue[qinfo->id-1].worldID;
+   intrCookie = ctrlr->ctrlOsResources.intrArray[qinfo->intrIndex];
+
+   return vmk_WorldInterruptUnset(worldID, intrCookie);
+}
+
 #endif // end of NVME_MUL_COMPL_WORLD
 
 /**
@@ -1272,7 +1336,9 @@ ScsiNotifyIOAllowed(vmk_Device logicalDevice, vmk_Bool ioAllowed)
       }
 #endif
 
-      NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_OPERATIONAL, VMK_TRUE);
+      NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_OPERATIONAL);
+      vmk_NameCopy(&ctrlr->adapterName, &adapter->name);
+      DPRINT_CTRLR("adpterName: %s", vmk_NameToString(&ctrlr->adapterName));
 
 #if NVME_DEBUG_INJECT_STATE_DELAYS
       IPRINT("--STARTED to OPERATIONAL--");
@@ -1285,7 +1351,7 @@ ScsiNotifyIOAllowed(vmk_Device logicalDevice, vmk_Bool ioAllowed)
  * When this workaround switch is active, do not disallow IOs prior to
  * QuiesceDevice being invoked.
  */
-      NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_STARTED, VMK_TRUE);
+      NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_STARTED);
 #endif
 
 #if NVME_DEBUG_INJECT_STATE_DELAYS
@@ -1298,12 +1364,10 @@ ScsiNotifyIOAllowed(vmk_Device logicalDevice, vmk_Bool ioAllowed)
    return;
 }
 
-inline VMK_ReturnStatus OsLib_SetPathLostByDevice(struct NvmeCtrlOsResources *ctrlOsResources)
+inline VMK_ReturnStatus
+OsLib_SetPathLostByDevice(struct NvmeCtrlr *ctrlr)
 {
-    return vmk_ScsiSetPathLostByDevice(&ctrlOsResources->scsiAdapter->name,
-                                       0,    /* channel */
-                                       0,    /* target */
-                                       -1);  /* all luns */
+    return vmk_ScsiSetPathLostByDevice(&ctrlr->adapterName, 0, 0, -1);
 }
 
 VMK_ReturnStatus
@@ -1382,13 +1446,6 @@ OsLib_ShutdownExceptionHandler (struct NvmeCtrlr *ctrlr)
    vmkStatus = OsLib_LockDestroy (&ctrlr->exceptionLock);
 }
 
-
-#if NVME_MUL_COMPL_WORLD
-int nvme_compl_worlds_num = -1;
-VMK_MODPARAM(nvme_compl_worlds_num, int,   \
-      "Total number of NVMe completion worlds/queues.");
-#endif
-
 /* round robin for all of completion worlds */
 vmk_uint32
 OsLib_GetQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd)
@@ -1422,7 +1479,8 @@ OsLib_GetMaxNumQueues(void)
 #if NVME_MUL_COMPL_WORLD
    return nvme_compl_worlds_num;
 #else
-   return vmk_ScsiGetMaxNumCompletionQueues();
+   vmk_uint32 maxQ = vmk_ScsiGetMaxNumCompletionQueues();
+   return (maxQ > NVME_MAX_COMPL_WORLDS) ? NVME_MAX_COMPL_WORLDS : maxQ;
 #endif
 }
 
@@ -1463,6 +1521,7 @@ Oslib_GetPCPUNum(void) {
    return NumPCPUs;
 }
 
+#if USE_TIMER
 void OsLib_TimeoutHandler(vmk_TimerCookie cookie)
 {
    struct NvmeCtrlr* ctrlr = (struct NvmeCtrlr*) cookie.ptr;
@@ -1510,6 +1569,7 @@ void OsLib_StartIoTimeoutCheckTimer(struct NvmeCtrlr *ctrlr)
    ctrlr->TimerCookie.ptr  = ctrlr;
    ctrlr->TimerAttr        = VMK_TIMER_ATTR_PERIODIC;
 
+
    if (ctrlr->TimerQueue == VMK_INVALID_TIMER_QUEUE) {
       EPRINT("Timer Queue is invalid for %s", Nvme_GetCtrlrName(ctrlr));
       return;
@@ -1530,5 +1590,5 @@ void OsLib_StopIoTimeoutCheckTimer(struct NvmeCtrlr* ctrlr)
       }
    }
 }
-
+#endif
 

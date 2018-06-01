@@ -6,6 +6,118 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2017/11/30 1.2.0.32-1vmw
+
+   Fix PR #2010390: Disable Namespace Multi-path I/O and Namespace Sharing Capabilities.
+
+2017/11/3 1.2.0.31-1vmw
+
+   Fix PR #1991128: Modify firmware download and activate functions to follow NVMe spec.
+
+2017/9/5 1.2.0.30-1vmw
+
+   Fix PR #1949338: Enhance the error message of feature get/set.
+
+2017/7/12 1.2.0.29-1vmw
+
+   Fix PR #1912914: Correct the namespace mapping in namespace format and detach functions.
+
+2017/6/8 1.2.0.28-1vmw
+
+   Fix PR #1893469：Failure when get feature er for nvme controller.
+
+2017/6/8 1.2.0.27-1vmw
+
+   Fix PR #1888583: Some issues in 'esxcli nvme device feature'.
+   1. Fix a bug that the behavior of gettting/setting feature tt(Temperature Threshold)
+      is not proper for some controllers.
+   2. Checking if Keep Alive is supported before issuing associated Admin commands.
+   3. Fix a bug that 'esxcli nvme device feature hi get' gets the wrong data.
+
+2017/6/5 1.2.0.26-1vmw
+
+   Unify the namespace status displayed in nvme.device.namespace.list
+
+2017/5/26 1.2.0.25-1vmw
+
+   1. Output 1.2.1 SPEC Added fields in controller identify.
+   2. Hide nvme.device.namespace.{online,offline} which is for internal use.
+   3. Unify the output for "Invalid parameter".
+   4. Output nothing instead of error message when no controller attached to namespace.
+
+2017/5/26 1.2.0.24-1vmw
+
+   Enhance feature get and set admin commands implementation based on NVMe 1.2
+
+2017/5/24 1.2.0.23-1vmw
+
+   Disable Namespace Multi-path I/O and Namespace Sharing Capabilities (NMIC).
+
+2017/5/23 1.2.0.22-1vmw
+
+   Fix PR #1864018: List detail failure reasons if namespace management/attachment fails.
+
+2017/5/22 1.2.0.21-1vmw
+
+   Implement unified commands for listing namespace and controller.
+
+   * Replace nvme.device.namespace.{listall, listattach} with nvme.device.namespace.list
+   * Replace nvme.device.{listall, listattach} with nvme.device.controller.list
+
+2017/5/18 1.2.0.20-1vmw
+
+   Fix PR #1853896: Enhance parameter check for namespace format command.
+
+2017/5/14 1.2.0.19-1vmw
+
+   Implement feature switch for namespace management commands.
+
+2017/5/4 1.2.0.18-1vmw
+
+   Re-checkin the functionalities implemented in 1.2.0.13-1vmw.
+
+2017/4/27 1.2.0.17-1vmw
+
+   Fix PR #1840297: Not print error message in nvme.device.list if nvme driver is not loaded.
+
+2017/4/20 1.2.0.16-1vmw
+
+   Backout the functionalities implemented in 1.2.0.13-1vmw.
+
+2017/4/17 1.2.0.15-1vmw
+
+   Fix PR #1850319: Check write cache exist before sending get vwc feature admin command
+
+   If controller doesn't have a write cache, return error message directly and don't
+   send get vwc feature admin command.
+
+2017/4/14 1.2.0.14-1vmw
+
+   Fix PR #1799210: remove check of "Arbitration Burst" value when setting this feature.
+
+2017/4/6 1.2.0.13-1vmw
+
+   Implement the following functionalities:
+      * nvme.device.listall
+      * nvme.device.listattach
+      * nvme.device.namespace.listall
+      * nvme.device.namespace.listattach
+      * nvme.device.namespace.create
+      * nvme.device.namespace.delete
+      * nvme.device.namespace.attach
+      * nvme.device.namespace.detach
+      * nvme.device.namespace.online
+      * nvme.device.namespace.offline
+
+2016/11/25 1.2.0.12-1vmw
+
+   1. Implement nvme.device.timeout.get functionality.
+   2. Implement nvme.device.timeout.set functionality.
+
+2016/11/6 1.2.0.11-1vmw
+
+   Implement nvme.device.register.get functionality.
+
 2016/2/1 1.2.0.10-1vmw
 
    1. Put the field names into one line in xml to make localcli work.

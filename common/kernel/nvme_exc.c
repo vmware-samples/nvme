@@ -70,11 +70,11 @@ VMK_ReturnStatus NvmeExc_SignalException (struct NvmeCtrlr * ctrlr, vmk_uint64 e
    if (!NvmeExc_CheckExceptionPending (ctrlr, exceptionCode)) {
       NvmeExc_AtomicSetExceptionState (ctrlr, exceptionCode);
 
-      DPRINT_EXC ("Signal exception = %lx es=%lx", exceptionCode, NvmeExc_AtomicGetExceptionState(ctrlr));
+      DPRINT_EXC ("Signal exception = %lx, es = %lx", exceptionCode, NvmeExc_AtomicGetExceptionState(ctrlr));
       vmkStatus = vmk_WorldForceWakeup (ctrlr->exceptionHandlerTask);
 
       if (vmkStatus != VMK_OK) {
-         EPRINT("ERROR: failed to wake exception handling context, status = %x", vmkStatus);
+         EPRINT("Failed to signal %lx to exception handler task, 0x%x", exceptionCode, vmkStatus);
       }
    }
    return vmkStatus;
@@ -116,7 +116,7 @@ static VMK_ReturnStatus WaitForException (struct NvmeCtrlr *ctrlr, vmk_uint64 ex
    }
 
    if (exceptionCleared == VMK_FALSE) {
-      IPRINT ("Exception timeout waiting for %lx to be processed :%s\n",
+      EPRINT ("Exception timeout waiting for %lx to be processed: %s",
             exceptionCode, callerMsg);
       return VMK_TIMEOUT;
    }
@@ -165,31 +165,27 @@ void NvmeExc_ExceptionHandlerTask (struct NvmeCtrlr *ctrlr)
    vmk_uint32 sleepTime = VMK_TIMEOUT_UNLIMITED_MS;
 
    struct smart_log *smartLog = NULL;
-   struct error_log* errorLog = NULL;
+   struct error_log *errorLog = NULL;
+   int    retry = 0;
 
-   VPRINT("Exception task starting. The sleepTime is =[%d]\n", sleepTime);
-
-   /* Create buffer to store log page info */
-   smartLog = Nvme_Alloc (LOG_PG_SIZE, 0, NVME_ALLOC_ZEROED);
-   if (!smartLog) {
-      EPRINT("Failed to allocate buffer for smart log");
-   }
-   /* Create buffer to store log page info */
-   errorLog = Nvme_Alloc (LOG_PG_SIZE, 0, NVME_ALLOC_ZEROED);
-   if (!smartLog) {
-      EPRINT("Failed to allocate buffer for error log");
-   }
+   DPRINT("Exception task starting. The sleepTime is %d.", sleepTime);
 
    do
    {
-      OsLib_StartIoTimeoutCheckTimer(ctrlr);
+#if USE_TIMER
+      if (ctrlr->ioTimeout) {
+         OsLib_StartIoTimeoutCheckTimer(ctrlr);
+      }
+#endif
       vmk_SpinlockLock (ctrlr->exceptionLock);
       wake = vmk_WorldWait (VMK_EVENT_NONE,
             ctrlr->exceptionLock,
             sleepTime, "Waiting for exceptions");
 
-      DPRINT_EXC ("Exception task woke up wake = %x, exception=%ld", wake, NvmeExc_AtomicGetExceptionState (ctrlr));
+      DPRINT_EXC ("Exception task woke up wake = %x, exception = %lx", wake, NvmeExc_AtomicGetExceptionState (ctrlr));
+#if USE_TIMER
       OsLib_StopIoTimeoutCheckTimer(ctrlr);
+#endif
 
       if (VMK_OK == wake) {
          while (NvmeExc_AtomicGetExceptionState (ctrlr)) {
@@ -220,18 +216,27 @@ void NvmeExc_ExceptionHandlerTask (struct NvmeCtrlr *ctrlr)
             if (exceptionEvent & NVME_EXCEPTION_TASK_SHUTDOWN) {
                wake = VMK_DEATH_PENDING;
             }
+#if USE_TIMER
             if  (exceptionEvent & NVME_EXCEPTION_TASK_TIMER) {
                if (VMK_TRUE == NvmeCtrlr_Timeout (ctrlr, &sleepTime)) {
                   #if (NVME_ENABLE_EXCEPTION_STATS == 1)
                      STATS_Increment(ctrlr->statsData.CMDTimeouts);
                   #endif
+                  WPRINT("Detect IO timeout on %s, resetting controller.",
+                         Nvme_GetCtrlrName(ctrlr));
                   NvmeCtrlr_HwReset (ctrlr, NULL, NVME_STATUS_TIMEOUT, VMK_TRUE);
                }
             }
-            if (exceptionEvent & (NVME_EXCEPTION_TM_ABORT | NVME_EXCEPTION_TM_VIRT_RESET)) {
-               vmkStatus = NvmeCtrlr_DoTaskMgmtAbort(ctrlr, &(ctrlr->taskMgmtExcArgs.taskMgmt), ctrlr->taskMgmtExcArgs.ns);
+#endif
+            if (exceptionEvent &
+                (NVME_EXCEPTION_TM_ABORT | NVME_EXCEPTION_TM_VIRT_RESET)) {
+               vmkStatus = NvmeCtrlr_DoTaskMgmtAbort(ctrlr,
+                                                     &(ctrlr->taskMgmtExcArgs.taskMgmt),
+                                                     ctrlr->taskMgmtExcArgs.ns);
             }
-            if (exceptionEvent & (NVME_EXCEPTION_TM_BUS_RESET | NVME_EXCEPTION_TM_LUN_RESET | NVME_EXCEPTION_TM_DEVICE_RESET)) {
+            if (exceptionEvent & (NVME_EXCEPTION_TM_BUS_RESET |
+                                  NVME_EXCEPTION_TM_LUN_RESET |
+                                  NVME_EXCEPTION_TM_DEVICE_RESET)) {
                if (exceptionEvent & NVME_EXCEPTION_TM_BUS_RESET)
                   resetType = NVME_TASK_MGMT_BUS_RESET;
                else if (exceptionEvent & NVME_EXCEPTION_TM_LUN_RESET)
@@ -239,29 +244,84 @@ void NvmeExc_ExceptionHandlerTask (struct NvmeCtrlr *ctrlr)
                else
                   resetType = NVME_TASK_MGMT_DEVICE_RESET;
 
-               vmkStatus = NvmeCtrlr_DoTaskMgmtReset(ctrlr, resetType, ctrlr->taskMgmtExcArgs. ns);
+               vmkStatus = NvmeCtrlr_DoTaskMgmtReset(ctrlr, resetType,
+                                                     ctrlr->taskMgmtExcArgs.ns);
             }
 #if ASYNC_EVENTS_ENABLED
             if (exceptionEvent & NVME_EXCEPTION_ERROR_CHECK) {
-               VPRINT ("Read error Log\n");
-               ctrlrState = NvmeState_GetCtrlrState(ctrlr, VMK_TRUE);
+               VPRINT ("Read error Log");
+               ctrlrState = NvmeState_GetCtrlrState(ctrlr);
                if (ctrlrState < NVME_CTRLR_STATE_INRESET) {
-                  vmkStatus = NvmeCtrlrCmd_GetErrorLog(ctrlr, NVME_FULL_NAMESPACE, errorLog, NULL, VMK_TRUE);
-                  NvmeExc_RegisterForEvents (ctrlr);
+                  errorLog = Nvme_Alloc (ERR_LOG_PG_SIZE, 0, NVME_ALLOC_ZEROED);
+                  if (!errorLog) {
+                     EPRINT("Failed to allocate error log.");
+                     if (ctrlrState == NVME_CTRLR_STATE_OPERATIONAL) {
+                        // Clear the async event by controller reset.
+                        EPRINT("Resetting controller.");
+                        NvmeCtrlr_HwReset (ctrlr, NULL, NVME_STATUS_RESET, VMK_TRUE);
+                     } else {
+                        NvmeExc_RegisterForEvents(ctrlr);
+                     }
+                  } else {
+                     retry = 0;
+                     do {
+                        vmkStatus = NvmeCtrlrCmd_GetLogPage(ctrlr, NVME_FULL_NAMESPACE,
+                                                            GLP_ID_ERR_INFO, errorLog,
+                                                            ERR_LOG_PG_SIZE);
+                        if (vmkStatus != VMK_OK) {
+                           EPRINT("Failed to get error log page, retry: %d.", retry++);
+                        }
+                     } while (vmkStatus != VMK_OK && retry < LOG_PAGE_MAX_RETRY);
+                     if (vmkStatus != VMK_OK && NvmeState_GetCtrlrState(ctrlr) == NVME_CTRLR_STATE_OPERATIONAL) {
+                        EPRINT("Resetting controller.");
+                        NvmeCtrlr_HwReset (ctrlr, NULL, NVME_STATUS_RESET, VMK_TRUE);
+                     } else {
+                        NvmeExc_RegisterForEvents (ctrlr);
+                     }
+                     Nvme_Free (errorLog);
+                  }
                }
             }
             if (exceptionEvent & NVME_EXCEPTION_HEALTH_CHECK) {
-               VPRINT ("Read smart Log\n");
-               ctrlrState = NvmeState_GetCtrlrState(ctrlr, VMK_TRUE);
+               VPRINT ("Read smart Log");
+               ctrlrState = NvmeState_GetCtrlrState(ctrlr);
                if (ctrlrState < NVME_CTRLR_STATE_INRESET) {
-                  vmkStatus = NvmeCtrlrCmd_GetSmartLog(ctrlr, NVME_FULL_NAMESPACE, smartLog, NULL, VMK_TRUE);
+                  smartLog = Nvme_Alloc (SMART_LOG_PG_SIZE, 0, NVME_ALLOC_ZEROED);
+                  if (!smartLog) {
+                     EPRINT("Failed to allocate smart log.");
+                     if (ctrlrState == NVME_CTRLR_STATE_OPERATIONAL) {
+                        // Clear the async event by controller reset.
+                        EPRINT("Resetting controller.");
+                        NvmeCtrlr_HwReset (ctrlr, NULL, NVME_STATUS_RESET, VMK_TRUE);
+                     } else {
+                        NvmeExc_RegisterForEvents (ctrlr);
+                     }
+                  } else {
+                     retry = 0;
+                     do {
+                        vmkStatus = NvmeCtrlrCmd_GetLogPage(ctrlr, NVME_FULL_NAMESPACE,
+                                                            GLP_ID_SMART_HEALTH,
+                                                            smartLog,
+                                                            SMART_LOG_PG_SIZE);
+                        if (vmkStatus != VMK_OK) {
+                           EPRINT("Failed to get smart log page, retry: %d.", retry++);
+                        }
+                     } while (vmkStatus != VMK_OK && retry < LOG_PAGE_MAX_RETRY);
+                     if (vmkStatus != VMK_OK && NvmeState_GetCtrlrState(ctrlr) == NVME_CTRLR_STATE_OPERATIONAL) {
+                        EPRINT("Resetting controller.");
+                        NvmeCtrlr_HwReset (ctrlr, NULL, NVME_STATUS_RESET, VMK_TRUE);
+                     } else {
+                        if (vmkStatus == VMK_OK && NvmeExc_CheckCriticalError (smartLog->criticalError)) {
+                           vmk_AtomicOr64(&ctrlr->healthMask, smartLog->criticalError);
+                           EPRINT("Critical warnings detected in smart log [%x], "
+                                  "failing controller", smartLog->criticalError);
+                           NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_HEALTH_DEGRADED);
+                        }
+                        NvmeExc_RegisterForEvents (ctrlr);
+                     }
+                     Nvme_Free (smartLog);
+                  }
                }
-               if (NvmeExc_CheckCriticalError (smartLog->criticalError)) {
-                  vmk_AtomicOr64(&ctrlr->healthMask, smartLog->criticalError);
-                  EPRINT("Critical warnings detected in smart log [%x], failing controller\n", smartLog->criticalError);
-                  NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_HEALTH_DEGRADED, VMK_TRUE);
-               }
-               NvmeExc_RegisterForEvents (ctrlr);
             }
 #endif
             if (exceptionEvent & NVME_EXCEPTION_TASK_START) {
@@ -274,7 +334,7 @@ void NvmeExc_ExceptionHandlerTask (struct NvmeCtrlr *ctrlr)
                 * Defer putting the controller in an idle state until
                 * device driver is dettached.
                 */
-               ctrlrState = NvmeState_GetCtrlrState(ctrlr, VMK_TRUE);
+               ctrlrState = NvmeState_GetCtrlrState(ctrlr);
                if (ctrlrState == NVME_CTRLR_STATE_MISSING) {
                   DPRINT_EXC("Quiesce exception received in SRSI scenario");
                }
@@ -290,13 +350,7 @@ void NvmeExc_ExceptionHandlerTask (struct NvmeCtrlr *ctrlr)
       }
    } while (wake != VMK_DEATH_PENDING);
 
-   if (smartLog) {
-      Nvme_Free (smartLog);
-   }
-   if (errorLog) {
-      Nvme_Free (errorLog);
-   }
-   VPRINT ("Exception handler exiting");
+   DPRINT("Exception handler exiting");
 }
 
 
@@ -310,9 +364,9 @@ void NvmeExc_RegisterForEvents (struct NvmeCtrlr *ctrlr)
    Nvme_CtrlrState       ctrlrState;
 
 
-   ctrlrState = NvmeState_GetCtrlrState(ctrlr, VMK_TRUE);
+   ctrlrState = NvmeState_GetCtrlrState(ctrlr);
    if (ctrlrState > NVME_CTRLR_STATE_INRESET) {
-      Nvme_LogWarning("Event registration requested while controller is in"
+      EPRINT("Async event registration requested while controller is in"
             " %s state.", NvmeState_GetCtrlrStateString(ctrlrState));
       return;
    }
@@ -326,7 +380,7 @@ void NvmeExc_RegisterForEvents (struct NvmeCtrlr *ctrlr)
     */
    vmkStatus = NvmeCtrlrCmd_AsyncEventRequest (ctrlr);
    if (vmkStatus != VMK_OK) {
-      EPRINT("Failed to send Async Event Request command\n");
+      EPRINT("Failed to send Async Event Request command, 0x%x.", vmkStatus);
    }
 }
 #endif

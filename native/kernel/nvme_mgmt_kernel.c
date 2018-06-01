@@ -102,8 +102,6 @@ VMK_ReturnStatus NvmeMgmt_ListAdapters(vmk_uint64 cookie,
    struct NvmeCtrlr *ctrlr;
    const char *vmhbaName;
 
-   DPRINT_TEMP("enter.");
-
    count = 0;
    vmk_SpinlockLock(NVME_DRIVER_RES_LOCK);
 
@@ -131,8 +129,8 @@ VMK_ReturnStatus NvmeMgmt_ListAdapters(vmk_uint64 cookie,
       adapterInfo[count].status = OFFLINE;
 
       vmk_SpinlockLock(ctrlr->lock);
-      if (NvmeState_GetCtrlrState(ctrlr, VMK_FALSE) == NVME_CTRLR_STATE_STARTED ||
-          NvmeState_GetCtrlrState(ctrlr, VMK_FALSE) == NVME_CTRLR_STATE_OPERATIONAL) {
+      if (NvmeState_GetCtrlrState(ctrlr) == NVME_CTRLR_STATE_STARTED ||
+          NvmeState_GetCtrlrState(ctrlr) == NVME_CTRLR_STATE_OPERATIONAL) {
          VMK_LIST_FORALL(&ctrlr->nsList, item) {
             ns = VMK_LIST_ENTRY(item, struct NvmeNsInfo, list);
             if (NvmeCore_IsNsOnline(ns)) {
@@ -143,7 +141,7 @@ VMK_ReturnStatus NvmeMgmt_ListAdapters(vmk_uint64 cookie,
       }
       vmk_SpinlockUnlock(ctrlr->lock);
 
-      VPRINT("Adapter %d: %s is %s.", count, vmhbaName,
+      DPRINT_MGMT("Adapter %d: %s is %s.", count, vmhbaName,
              adapterInfo[count].status == ONLINE ? "online" : "offline");
 
       /**
@@ -213,7 +211,7 @@ NvmeMgmt_CtrlrInitialize(struct NvmeCtrlr *ctrlr)
     * should be like "nvmeMgmt-nvme00030000"
     * */
    vmk_NameFormat(&ctrlr->ctrlOsResources.nvmeSignature.name, "%s-%s", NVME_MGMT_NAME, Nvme_GetCtrlrName(ctrlr));
-   IPRINT("signature.name %s", ctrlr->ctrlOsResources.nvmeSignature.name.string);
+   IPRINT("Initializing controller management handle, signature: %s", ctrlr->ctrlOsResources.nvmeSignature.name.string);
 
 #if VMKAPIDDK_VERSION >= 600
    /* Initialize smart management handle */
@@ -236,7 +234,7 @@ NvmeMgmt_CtrlrInitialize(struct NvmeCtrlr *ctrlr)
                           &ctrlr->ctrlOsResources.mgmtHandle);
 #endif
    if(status != VMK_OK) {
-      EPRINT("Failed to init smart management handle.");
+      EPRINT("Failed to init controller management handle, 0x%x.", status);
       return status;
    }
 
@@ -261,77 +259,27 @@ NvmeMgmt_CtrlrDestroy(struct NvmeCtrlr *ctrlr)
 
 
 /**
- * @brief This function converts an array of vmk_uint8 to a numeric int value
- * @param[in]	src: the source array to be converted
- * @param[in]	srcLen: length of src in bytes
- * @param[out]	dest: the numberic value converted to
- *
- * @return VMK_OK if successfully converted, return VMK_FAILURE if src's length
- *  exceeds the vaule that dest could represent.
- * */
-VMK_ReturnStatus
-NvmeMgmt_Convert(vmk_uint8 *src, vmk_uint32 srcLen, vmk_uint32 *dest)
-{
-   vmk_uint32 i = 0;
-   /*Since the value type in SMART framework is hard coded as int,destLen should be 4*/
-   vmk_uint32 destLen = sizeof(*dest);
-   *dest = 0;
-
-   for(i=0; i<srcLen; i++) {
-      /*not exceed dest's length*/
-      if (i < destLen) {
-         *dest += (src[i] << (8*i));
-      }
-      else {
-         /*if the higher bits of src are all zero, covert succeeds, otherwise fails*/
-         if (src[i] != 0x00){
-            EPRINT("failed at src[%d] is 0x%x, dest is 0x%4x", i, src[i], (*dest));
-            *dest = 0;
-            return VMK_FAILURE;
-         }
-      }
-   }
-   return VMK_OK;
-}
-
-/**
  * @brief This fucntion collects the temperature threshold by getting feature of
  * Temperature Threshold.
  * @param[in]	ctrlr, pointer to controller data structure
  * return value: temperature threshold, return 0 if fails.
  */
-vmk_uint16
-NvmeMgmt_GetTempThreshold(struct NvmeCtrlr *ctrlr)
+VMK_ReturnStatus
+NvmeMgmt_GetTempThreshold(struct NvmeCtrlr *ctrlr, vmk_int16 *threshold)
 {
-   /*PR#1074274: hard coded here, per SMART framework's requirement*/
-   return SMART_TEMPERATURE_DEFAULT_THRESHOLD;
-#if 0
-   struct NvmeDmaEntry dmaEntry;
    struct cq_entry cqEntry;
    VMK_ReturnStatus vmkStatus;
-   vmk_uint16 threshold = 0;
-   struct nvme_prp *prp;
 
-   vmk_uint16 feature = 0x04;
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
-   if (vmkStatus != VMK_OK) {
-      EPRINT("failed to allocate memory!");
-      return 0;
-   }
-   prp = ( struct nvme_prp *)&dmaEntry.ioa;
-   vmkStatus = NvmeCtrlrCmd_GetFeature(ctrlr, nsID, feature, 0, prp, &cqEntry);
+   vmkStatus = NvmeCtrlrCmd_GetFeature(ctrlr, 0, FTR_ID_TEMP_THRESHOLD, 0, NULL, 0,
+                                       &cqEntry);
    if (vmkStatus != VMK_OK) {
       EPRINT("failed to get feature of temperature threshold!");
-      goto free_dma;
+      return vmkStatus;
    }
-   threshold = cqEntry.param.cmdSpecific & 0xffff;
-   threshold -= 273;//from kelvin to celsius
-   IPRINT("threshold is %4x, %8x", threshold, cqEntry.param.cmdSpecific);
+   *threshold = (cqEntry.param.cmdSpecific & 0xffff) - 273;
+   DPRINT_MGMT("threshold is %4x", *threshold);
 
-free_dma:
-   OsLib_DmaFree(&ctrlr->ctrlOsResources, &dmaEntry);
-   return threshold;
-#endif
+   return VMK_OK;
 }
 
 /**
@@ -343,61 +291,78 @@ free_dma:
  *
  */
 void
-NvmeMgmt_ParseLogInfo(struct NvmeCtrlr *ctrlr, struct smart_log *smartLog, struct nvmeSmartParamBundle* bundle)
+NvmeMgmt_ParseLogInfo(struct NvmeCtrlr *ctrlr,
+                      struct smart_log *smartLog,
+                      struct nvmeSmartParamBundle* bundle)
 {
+   vmk_int16 threshold = 0;
    if (!smartLog->criticalError) {
       bundle->params[NVME_SMART_HEALTH_STATUS].valid.value = 1;
       bundle->params[NVME_SMART_HEALTH_STATUS].value = NVME_SMART_HEALTH_OK;
-   }
-   else {
+   } else {
       bundle->params[NVME_SMART_HEALTH_STATUS].valid.value = 1;
       bundle->params[NVME_SMART_HEALTH_STATUS].value = NVME_SMART_HEALTH_WARNING;
    }
 
-   /* if bit 01 set to '1', exceed a critical threshold, set to unvalid value
-    * an asyn cmd may needed in this case
-    */
-   if((smartLog->criticalError & 0x02) == 1)
-      bundle->params[NVME_SMART_DRIVE_TEMPERATURE].valid.value = 0;//not valid
-   else {
-      if (NvmeMgmt_Convert(smartLog->temperature, 2, &bundle->params[NVME_SMART_DRIVE_TEMPERATURE].value) == VMK_OK){
-         bundle->params[NVME_SMART_DRIVE_TEMPERATURE].value -= 273;//from Kelvin to Celsius
-         bundle->params[NVME_SMART_DRIVE_TEMPERATURE].valid.value = 1;//valid value
-      }
+   bundle->params[NVME_SMART_DRIVE_TEMPERATURE].value =
+      *(vmk_uint16 *)(smartLog->temperature) - 273;
+   bundle->params[NVME_SMART_DRIVE_TEMPERATURE].valid.value = 1;
+   if (NvmeMgmt_GetTempThreshold(ctrlr, &threshold) != VMK_OK) {
+      bundle->params[NVME_SMART_DRIVE_TEMPERATURE].valid.threshold = 0;
+   } else {
+      bundle->params[NVME_SMART_DRIVE_TEMPERATURE].threshold = threshold;
+      bundle->params[NVME_SMART_DRIVE_TEMPERATURE].valid.threshold = 1;
    }
-   bundle->params[NVME_SMART_DRIVE_TEMPERATURE].threshold = NvmeMgmt_GetTempThreshold(ctrlr);
-   bundle->params[NVME_SMART_DRIVE_TEMPERATURE].valid.threshold = 1;
 
-   /*These fileds are not able to be paresed due to the limitation of SMART framework */
-#if 0
-   if (NvmeMgmt_Convert(smartLog->powerOnHours, 16, &bundle->params[NVME_SMART_POWER_ON_HOURS].value) == VMK_OK)
-      bundle->params[NVME_SMART_POWER_ON_HOURS].valid.value = 1;
-   else
+   if (*(vmk_uint64 *)(smartLog->powerOnHours + 8) ||
+       *(vmk_uint32 *)(smartLog->powerOnHours + 4) ||
+       *(vmk_int32 *)(smartLog->powerOnHours) < 0) {
       bundle->params[NVME_SMART_POWER_ON_HOURS].valid.value = 0;
+   } else {
+      bundle->params[NVME_SMART_POWER_ON_HOURS].value =
+         *(vmk_int32 *)(smartLog->powerOnHours);
+      bundle->params[NVME_SMART_POWER_ON_HOURS].valid.value = 1;
+   }
 
-   if(NvmeMgmt_Convert(smartLog->dataUnitsRead, 16, &bundle->params[NVME_SMART_READ_SECTORS_TOT_CT].value) == VMK_OK) {
-      bundle->params[NVME_SMART_READ_SECTORS_TOT_CT].value *= 1000;
+   if (*(vmk_uint64 *)(smartLog->powerCycles + 8) ||
+       *(vmk_uint32 *)(smartLog->powerCycles + 4) ||
+       *(vmk_int32 *)(smartLog->powerCycles) < 0) {
+      bundle->params[NVME_SMART_POWER_CYCLE_COUNT].valid.value = 0;
+   } else {
+      bundle->params[NVME_SMART_POWER_CYCLE_COUNT].value =
+         *(vmk_int32 *)(smartLog->powerCycles);
+      bundle->params[NVME_SMART_POWER_CYCLE_COUNT].valid.value = 1;
+   }
+
+   if (*(vmk_uint64 *)(smartLog->dataUnitsRead + 8) ||
+       *(vmk_uint32 *)(smartLog->dataUnitsRead + 4) ||
+       *(vmk_uint64 *)(smartLog->dataUnitsRead) * 1000 > VMK_INT32_MAX ) {
+      bundle->params[NVME_SMART_READ_SECTORS_TOT_CT].valid.value = 0;
+   } else {
+      bundle->params[NVME_SMART_READ_SECTORS_TOT_CT].value =
+         *(vmk_int32 *)(smartLog->dataUnitsRead) * 1000;
       bundle->params[NVME_SMART_READ_SECTORS_TOT_CT].valid.value = 1;
    }
-   else
-      bundle->params[NVME_SMART_READ_SECTORS_TOT_CT].valid.value = 0;
 
-   if(NvmeMgmt_Convert(smartLog->dataUnitsWritten, 16, &bundle->params[NVME_SMART_WRITE_SECTORS_TOT_CT].value) == VMK_OK) {
-      bundle->params[NVME_SMART_WRITE_SECTORS_TOT_CT].value *= 1000;
+   if (*(vmk_uint64 *)(smartLog->dataUnitsWritten + 8) ||
+       *(vmk_uint32 *)(smartLog->dataUnitsWritten + 4) ||
+       *(vmk_uint64 *)(smartLog->dataUnitsWritten) * 1000 > VMK_INT32_MAX ) {
+      bundle->params[NVME_SMART_WRITE_SECTORS_TOT_CT].valid.value = 0;
+   } else {
+      bundle->params[NVME_SMART_WRITE_SECTORS_TOT_CT].value =
+         *(vmk_int32 *)(smartLog->dataUnitsWritten) * 1000;
       bundle->params[NVME_SMART_WRITE_SECTORS_TOT_CT].valid.value = 1;
    }
-   else
-      bundle->params[NVME_SMART_WRITE_SECTORS_TOT_CT].valid.value = 0;
 
-   if(NvmeMgmt_Convert(smartLog->powerCycles, 16, &bundle->params[NVME_SMART_POWER_CYCLE_COUNT].value) == VMK_OK)
-      bundle->params[NVME_SMART_POWER_CYCLE_COUNT].valid.value = 1;
-   else
-      bundle->params[NVME_SMART_POWER_CYCLE_COUNT].valid.value = 0;
-   /*Print the logs out, for debugging*/
-#endif
+   bundle->params[NVME_SMART_REALLOCATED_SECTOR_CT].value =
+      100 - smartLog->availableSpace;
+   bundle->params[NVME_SMART_REALLOCATED_SECTOR_CT].valid.value = 1;
+   bundle->params[NVME_SMART_REALLOCATED_SECTOR_CT].threshold =
+      100 - smartLog->availableSpaceThreshold;
+   bundle->params[NVME_SMART_REALLOCATED_SECTOR_CT].valid.threshold = 1;
+
 #if NVME_DEBUG
    if (nvme_dbg & NVME_DEBUG_DUMP_SMART) {
-      IPRINT("dump smartLog");
       NvmeDebug_DumpSmart(smartLog);
    }
 #endif
@@ -436,7 +401,7 @@ kernelCbSmartGet(vmk_uint64 cookie, vmk_uint64 instanceId,
 #endif
 
    vmk_Memset(bundle, 0, sizeof(struct nvmeSmartParamBundle));
-   DPRINT_MGMT("nameSpaceId  %x, LPA %x \n", nameSpaceId, ctrlr->logPageAttr);
+   DPRINT_MGMT("nameSpaceId 0x%x, LPA 0x%x.", nameSpaceId, ctrlr->logPageAttr);
 
    /* Bit 0 if set to 1 then the controller supports the SMART/Health
     * information log page on a per namespace basis. Otherwise the log
@@ -448,15 +413,16 @@ kernelCbSmartGet(vmk_uint64 cookie, vmk_uint64 instanceId,
    }
 
    /* Create buffer to store log page info */
-   smartLog = Nvme_Alloc(LOG_PG_SIZE, 0, NVME_ALLOC_ZEROED);
+   smartLog = Nvme_Alloc(SMART_LOG_PG_SIZE, 0, NVME_ALLOC_ZEROED);
    if (!smartLog){
-      EPRINT("Failed to allocate buffer for smart log");
+      EPRINT("Failed to allocate buffer for smart log.");
       return VMK_FAILURE;
    }
-   
+
    /* Issue GetLogPage command to acquire log page info, retry if needed */
    for (retryTimes = 0; retryTimes < SMART_MAX_RETRY_TIMES; retryTimes++) {
-      vmkStatus = NvmeCtrlrCmd_GetSmartLog(ctrlr, nameSpaceId, smartLog, NULL, VMK_TRUE);
+      vmkStatus = NvmeCtrlrCmd_GetLogPage(ctrlr, nameSpaceId, GLP_ID_SMART_HEALTH,
+                                          smartLog, SMART_LOG_PG_SIZE);
       if (vmkStatus == VMK_OK) {
          NvmeMgmt_ParseLogInfo(ctrlr, smartLog, bundle);
          DPRINT_MGMT("Succeed to get log page");
@@ -478,7 +444,6 @@ kernelCbSmartGet(vmk_uint64 cookie, vmk_uint64 instanceId,
 free_buffer:
    Nvme_Free(smartLog);
    return vmkStatus;
-
 }
 
 
@@ -523,7 +488,7 @@ kernelCbIoctl(vmk_uint64 cookie,
 #else
    ctrlr = (struct NvmeCtrlr *)cookie;
 #endif
-   VPRINT("Ioctl cmd %d to ctrlr %s ns %d.", *cmd,
+   DPRINT_MGMT("Ioctl cmd %d to ctrlr %s ns %d.", *cmd,
           Nvme_GetCtrlrName(ctrlr), uio->namespaceID);
 
    vmkStatus = NvmeCtrlr_IoctlCommon(ctrlr, *cmd, uio);
@@ -544,7 +509,7 @@ VMK_ReturnStatus kernelCbErrInject(vmk_uint64 cookie, vmk_uint64 instanceId,
    vmk_ListLinks    *itemPtr;
 
    if (*errType <= NVME_DEBUG_ERROR_NONE || *errType >= NVME_DEBUG_ERROR_LAST) {
-      IPRINT("Invalid Error Type");
+      VPRINT("Invalid Error Type %d", *errType);
       return VMK_FAILURE;
    }
 
@@ -566,7 +531,7 @@ VMK_ReturnStatus kernelCbErrInject(vmk_uint64 cookie, vmk_uint64 instanceId,
       ctrlr->errCounters[*errType].count      = *count;
    }
 
-   VPRINT("Error injection is now enabled: errType = %d, count =%d, likelyhood =%d", *errType, *count, *likelyhood);
+   DPRINT_MGMT("Error injection is now enabled: errType = %d, count =%d, likelyhood =%d", *errType, *count, *likelyhood);
 
 
    return VMK_OK;

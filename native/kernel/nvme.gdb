@@ -12,14 +12,16 @@ end
 define nvme-get-queues
 	set $_ctrlr = $arg0
 	set $_adminq = &$_ctrlr->adminq
+        set $_act = $_adminq->nrAct-$_adminq->pendingCmdFree.freeListLength
 	print $_adminq
-	printf "\tAdmin Queue REQ %d ACT %d QS %d SQE %d SQS %d\n", $_adminq->nrReq, $_adminq->nrAct, $_adminq->qsize, $_adminq->subQueue->entries, $_adminq->subQueue->qsize
+        printf "\tAdmin Queue REQ %d ACT %d QS %d SQE %d SQS %d\n", $_act - $_adminq->nrSplit, $_act, $_adminq->qsize, $_adminq->subQueue->entries, $_adminq->subQueue->qsize
 
 	set $_idx = 0
 	while $_idx < $_ctrlr->numIoQueues
 		set $_q = &$_ctrlr->ioq[$_idx]
+                set $_act = $_q->nrAct-$_q->pendingCmdFree.freeListLength
 		print $_q
-		printf "\tIO Queue %d/%d REQ %d ACT %d QS %d SQE %d SQS %d\n", $_idx + 1, $_ctrlr->numIoQueues, $_q->nrReq, $_q->nrAct, $_q->qsize, $_q->subQueue->entries, $_q->subQueue->qsize
+                printf "\tIO Queue %d/%d REQ %d ACT %d QS %d SQE %d SQS %d\n", $_idx + 1, $_ctrlr->numIoQueues, $_act - $_q->nrSplit, $_act, $_q->qsize, $_q->subQueue->entries, $_q->subQueue->qsize
 		set $_idx = $_idx + 1
 	end
 end
@@ -31,7 +33,7 @@ end
 
 define nvme-get-active-cmds
 	set $_q = $arg0
-	set $_act = $_q->nrAct
+        set $_act = $_q->nrAct-$_q->pendingCmdFree.freeListLength
 	set $_idx = 0
 	set $_head = &$_q->cmdActive
 	set $_itr = $_head->nextPtr

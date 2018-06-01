@@ -134,9 +134,20 @@ extern int  nvme_dbg;
 #define NVME_DEBUG_IOCTL   (BIT_4|BIT_5)
 
 /**
+ * BIT_4: Admin command
+ */
+#define NVME_DEBUG_ADMIN   (BIT_4)
+
+/**
  * BIT_6: Exception handler
  */
 #define NVME_DEBUG_EXC    (BIT_6)
+
+/**
+ * BIT_3: IO command
+ * BIT_7: Split command
+ */
+#define NVME_DEBUG_SPLIT    (BIT_7 | BIT_3)
 
 /**
  * BIT_14: Init/cleanup routine
@@ -200,6 +211,14 @@ extern int  nvme_dbg;
    if (nvme_dbg & BIT_6) \
       Nvme_LogDebug(fmt, ##arg)
 
+#define  DPRINT_SPLIT(fmt, arg...)   \
+   if (nvme_dbg & NVME_DEBUG_SPLIT) \
+      Nvme_LogDebug(fmt, ##arg)
+
+#define  DPRINT_TIMEOUT(fmt, arg...)   \
+   if (nvme_dbg & BIT_13) \
+      Nvme_LogDebug(fmt, ##arg)
+
 #define  DPRINT_INIT(fmt, arg...)   \
    if (nvme_dbg & BIT_14) \
       Nvme_LogDebug(fmt, ##arg)
@@ -217,6 +236,8 @@ extern int  nvme_dbg;
 #define  DPRINT_ADMIN(fmt, arg...)
 #define  DPRINT_MGMT(fmt, arg...)
 #define  DPRINT_EXC(fmt, arg...)
+#define  DPRINT_SPLIT(fmt, arg...)
+#define  DPRINT_TIMEOUT(fmt, arg...)
 #define  DPRINT_INIT(fmt, arg...)
 #define  DPRINT_TEMP(fmt, arg...)
 #endif

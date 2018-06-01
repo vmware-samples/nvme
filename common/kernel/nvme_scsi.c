@@ -164,12 +164,27 @@ NvmeScsiCmd_SetReturnStatus(void *cmdPtr, Nvme_Status nvmeStatus)
          senseValid   = VMK_TRUE;
          break;
       case NVME_STATUS_NS_OFFLINE:
-         hostStatus   = VMK_SCSI_HOST_OK;
-         deviceStatus = VMK_SCSI_DEVICE_CHECK_CONDITION;
-         senseKey     = VMK_SCSI_SENSE_KEY_ILLEGAL_REQUEST;
-         senseAsc     = VMK_SCSI_ASC_LU_NOT_SUPPORTED;
-         senseAscq    = 0;
-         senseValid   = VMK_TRUE;
+      /**
+       * APD return status: PSA will hang upper layer world, and retry IO. When upper
+       * layer IO is not timeout, it would continue when device comes back, don't need
+       * esxcfg-rescan since IO is in progress waiting. If IO is timeout, then need
+       * esxcfg-rescan to bring the path to active
+       */
+         hostStatus   = VMK_SCSI_HOST_NO_CONNECT;
+         deviceStatus = VMK_SCSI_DEVICE_GOOD;
+      /**
+       * PDL sense data: only when there is IO, driver could have a chance to report the
+       * PDL sense code. With this returned, PSA marks the device as PDL, and reject all
+       * IO directly, never retry IO. The device never recover even if the device comes
+       * back. esxcfg-rescan will prompt dead path...
+       *
+       * hostStatus   = VMK_SCSI_HOST_OK;
+       * deviceStatus = VMK_SCSI_DEVICE_CHECK_CONDITION;
+       * senseKey     = VMK_SCSI_SENSE_KEY_ILLEGAL_REQUEST;
+       * senseAsc     = VMK_SCSI_ASC_LU_NOT_SUPPORTED;
+       * senseAscq    = 0;
+       * senseValid   = VMK_TRUE;
+       */
          break;
       case NVME_STATUS_IO_ERROR:
          hostStatus   = VMK_SCSI_HOST_OK;
@@ -270,6 +285,14 @@ NvmeScsiCmd_SetReturnStatus(void *cmdPtr, Nvme_Status nvmeStatus)
         deviceStatus  = VMK_SCSI_DEVICE_GOOD;
         break;
 #endif
+      case NVME_STATUS_PARAM_LIST_LENGTH_ERROR:
+         hostStatus    = VMK_SCSI_HOST_OK;
+         deviceStatus  = VMK_SCSI_DEVICE_CHECK_CONDITION;
+         senseKey      = VMK_SCSI_SENSE_KEY_ILLEGAL_REQUEST;
+         senseAsc      = VMK_SCSI_ASC_PARAM_LIST_LENGTH_ERROR;
+         senseAscq     = 0;
+         senseValid    = VMK_TRUE;
+         break;
       case NVME_STATUS_CONFLICT_ATTRIBUTES:
       case NVME_STATUS_PROTOCOL_ERROR:
       case NVME_STATUS_FAILURE:
@@ -316,6 +339,65 @@ NvmeScsiCmd_SetReturnStatus(void *cmdPtr, Nvme_Status nvmeStatus)
    return vmkStatus;
 }
 
+Nvme_Status
+NvmeScsiCmd_SgCopyTo(vmk_ScsiCommand *vmkCmd,
+                     void *dataBuffer,
+                     vmk_ByteCount dataLen)
+{
+   vmk_ByteCount transferLen = dataLen;
+   vmk_ByteCount sgLen = vmk_SgGetDataLen(vmkCmd->sgArray);
+   VMK_ReturnStatus vmkStatus;
+
+   if (transferLen > sgLen) {
+      /* Sg data length should be no less than allocation length indicated in scsi cdb*/
+      VPRINT("vmkCmd %p [%Xh] sg array length %ld less than transferred data length %ld. " \
+             "Data will be truncated.", vmkCmd, vmkCmd->cdb[0], sgLen, transferLen);
+      transferLen = sgLen;
+   }
+
+   if (transferLen < vmkCmd->requiredDataLen) {
+      /* This case shouldn't be hit*/
+      EPRINT("vmkCmd %p [%Xh] transferred data length %ld less than required data length %d.",
+         vmkCmd, vmkCmd->cdb[0], transferLen, vmkCmd->requiredDataLen);
+      vmkCmd->bytesXferred = 0;
+      return NVME_STATUS_FAILURE;
+   }
+
+   vmkStatus = vmk_SgCopyTo(vmkCmd->sgArray, dataBuffer, transferLen);
+   if (vmkStatus == VMK_OK) {
+      vmkCmd->bytesXferred = transferLen;
+      return NVME_STATUS_SUCCESS;
+   } else {
+      WPRINT("vmkCmd %p [%Xh] copy data to sg fails, 0x%x.", vmkCmd, vmkCmd->cdb[0], vmkStatus);
+      vmkCmd->bytesXferred = 0;
+      return NVME_STATUS_FAILURE;
+   }
+}
+
+Nvme_Status
+NvmeScsiCmd_SgCopyFrom(void *dataBuffer,
+                       vmk_ScsiCommand *vmkCmd,
+                       vmk_ByteCount dataLen)
+{
+   vmk_ByteCount transferLen = dataLen;
+   vmk_ByteCount sgLen = vmk_SgGetDataLen(vmkCmd->sgArray);
+   VMK_ReturnStatus vmkStatus;
+
+   if (transferLen > sgLen) {
+      /* Sg data length should be no less than parameter list length indicated in scsi cdb*/
+      WPRINT("vmkCmd %p [%Xh] sg array length %ld less than required data length %ld.",
+         vmkCmd, vmkCmd->cdb[0], sgLen, transferLen);
+      return NVME_STATUS_INVALID_FIELD_IN_CDB;
+   }
+
+   vmkStatus = vmk_SgCopyFrom(dataBuffer, vmkCmd->sgArray, transferLen);
+   if (vmkStatus == VMK_OK) {
+      return NVME_STATUS_SUCCESS;
+   } else {
+      WPRINT("vmkCmd %p [%Xh] copy data from sg fails, 0x%x.", vmkCmd, vmkCmd->cdb[0], vmkStatus);
+      return NVME_STATUS_FAILURE;
+   }
+}
 
 /**
  * SCSI LUN data structure, Single level LUN structure using peripheral device addressing method
@@ -361,14 +443,16 @@ typedef struct ScsiReportLunsData {
  * @param [in]  ns pointer to namespace
  */
 static Nvme_Status
-NvmeScsiCmd_DoReportLuns(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct NvmeNsInfo *ns)
+NvmeScsiCmd_DoReportLuns(struct NvmeCtrlr *ctrlr,
+                         vmk_ScsiCommand *vmkCmd,
+                         struct NvmeNsInfo *ns)
 {
    ScsiReportLunsData response_data;
    vmk_ListLinks *itemPtr;
    struct NvmeNsInfo *nsInfo;
-   vmk_uint16                 count       = 0;
-   vmk_ScsiReportLunsCommand *cmd         = (vmk_ScsiReportLunsCommand *) vmkCmd->cdb;
-   vmk_uint32                 transferLen = _lto2b_32(cmd->len);
+   vmk_uint16 count = 0;
+   vmk_ScsiReportLunsCommand *cmd = (vmk_ScsiReportLunsCommand *) vmkCmd->cdb;
+   vmk_uint32 transferLen = _lto2b_32(cmd->len);
 
    // Validating the Report Luns command cdb and retuning failure when
    // 1. Reserved fields are non zero.
@@ -386,32 +470,35 @@ NvmeScsiCmd_DoReportLuns(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struc
 
    vmk_Memset(&response_data, 0, sizeof(response_data));
 
+   vmk_SpinlockLock(ctrlr->lock);
    VMK_LIST_FORALL(&ctrlr->nsList, itemPtr) {
       nsInfo = VMK_LIST_ENTRY(itemPtr, struct NvmeNsInfo, list);
       if (count >= SCSI_MAX_LUNS) {
-         IPRINT("Available LUN counts are exceeding the supported SCSI_MAX_LUNS count of %d", SCSI_MAX_LUNS);
+         IPRINT("Available LUN counts are exceeding the supported SCSI_MAX_LUNS count"
+                " of %d", SCSI_MAX_LUNS);
          break;
       }
 
       if (nsInfo->blockCount != 0) {
-         response_data.lunList[count].addrmethod = 0; /* peripheral device addressing method */
+         response_data.lunList[count].addrmethod = 0;
          response_data.lunList[count].busid      = 0;
          response_data.lunList[count++].lunid    = nsInfo->id - 1;
          DPRINT_NS("lun %d found, capacity %ld.", nsInfo->id - 1, nsInfo->blockCount);
       } else {
-         DPRINT_NS("empty lun %d found, skipping.", nsInfo->id);
+         DPRINT_NS("empty lun %d found, skipping.", nsInfo->id - 1);
       }
    }
+   vmk_SpinlockUnlock(ctrlr->lock);
 
    response_data.lunListLength = vmk_CPUToBE32(count * 8);
 
-   // The max data transfer to the host is the value in (count * 8) + 8 (plus 8 is the size of report Luns response data header)
+   /**
+    * The max data transfer to the host is the value in (count * 8) + 8 (plus 8 is the
+    * size of report Luns response data header)
+    */
    transferLen = (transferLen < ((count * 8) + 8)) ? transferLen : ((count * 8) + 8);
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
 }
 
 #define SCSI_INQUIRY_00H 0x00
@@ -450,10 +537,7 @@ NvmeScsiCmd_DoInquiryStd(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struc
 
    transferLen = (transferLen < sizeof(response_data)) ? transferLen : sizeof(response_data);
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
 }
 
 /**
@@ -519,10 +603,7 @@ NvmeScsiCmd_DoInquiryVpd00(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
 
    transferLen = (transferLen < sizeof(response_data)) ? transferLen : sizeof(response_data);
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
 }
 
 
@@ -576,9 +657,23 @@ NvmeScsiCmd_DoInquiryVpd80(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
    response_data.header.devclass = VMK_SCSI_CLASS_DISK;
    response_data.header.pqual = VMK_SCSI_PQUAL_CONNECTED;
    response_data.header.pageCode = SCSI_INQUIRY_80H;
-   response_data.header.payloadLen = sizeof(char) * MAX_SERIAL_NUMBER_LENGTH;
 
+   /**
+    * We don't change the VPD Page 0x80 now, because we need to keep back-compatibility.
+    * File system layer stores Disk ID in the logical volume metadata. When the device
+    * is exported to file system layer, it checks if the current Disk ID is matched with
+    * the one in metadata. If yes, it exports the datastore to upper layer, otherwise,
+    * it considers the device as a snapshot LUN and blocks it to upper layer. The
+    * current Disk ID (vml.xxx) is generated by VPD 0x80 Page data and LUN ID, and some
+    * other fields. If we change the generation, the Disk ID will be changed accordingly
+    * and may cause datastore unvisible to user.
+    *
+    * Although the current generation is incompatible with latest NVMe-SCSI Translation
+    * Reference, we are not able to update it due to compatibility. Let's keep it for
+    * now.
+    */
    if (eui64) {
+      response_data.header.payloadLen = 20;
       vmk_StringFormat(buffer, sizeof(buffer), NULL,
          "%02X%02X_%02X%02X_%02X%02X_%02X%02X",
          bytes[7], bytes[6], bytes[5], bytes[4],
@@ -590,7 +685,7 @@ NvmeScsiCmd_DoInquiryVpd80(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
       OsLib_StrToUpper(buffer, sizeof(buffer));
 
       DPRINT_NS("Generated serial number string: %s.", buffer);
-      vmk_Memcpy(response_data.serialNumber, buffer, MAX_SERIAL_NUMBER_LENGTH);
+      vmk_Memcpy(response_data.serialNumber, buffer, 20);
    } else {
 
       /**
@@ -601,6 +696,7 @@ NvmeScsiCmd_DoInquiryVpd80(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
        * disables serial number report on such devices to prevent device ID
        * collisions.
        */
+      response_data.header.payloadLen = 20;
       if (VMK_UNLIKELY(ctrlr->pcieVID == PCIE_VID_SAMSUNG) &&
           vmk_Strncmp(ctrlr->serial, SAMSUNG_PRE_PROD_SERIAL,
                       sizeof(SAMSUNG_PRE_PROD_SERIAL) - 1) == 0) {
@@ -616,10 +712,7 @@ NvmeScsiCmd_DoInquiryVpd80(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
 
    transferLen = (transferLen < sizeof(response_data)) ? transferLen : sizeof(response_data);
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
 }
 
 
@@ -836,20 +929,20 @@ NvmeScsiCmd_DoInquiryVpd83(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
    Nvme_Status                   nvmeStatus = NVME_STATUS_SUCCESS;
    nvme_ScsiInquiryVpd83Response response_data;
    vmk_ByteCount                 length = 0;
-   vmk_ScsiInquiryCmd              *inquiryCmd     = (vmk_ScsiInquiryCmd *)vmkCmd->cdb;
-   vmk_uint16                       transferLen    = 0;
+   vmk_ScsiInquiryCmd           *inquiryCmd = (vmk_ScsiInquiryCmd *)vmkCmd->cdb;
+   vmk_uint16                    transferLen = 0;
 
    transferLen = _lto2b_16(inquiryCmd->length);
 
    vmk_Memset(&response_data, 0, sizeof(response_data));
 
+   // TODO: Implement EUI64 based descriptor after we have a final decision
    nvmeStatus = ScsiGenerateT10VPD(&response_data, ctrlr, ns, &length);
 
    if (SUCCEEDED(nvmeStatus)) {
       transferLen = (transferLen < length) ? transferLen : length;
 
-      vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-      vmkCmd->bytesXferred = transferLen;
+      nvmeStatus = NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
    } else {
       vmkCmd->bytesXferred = 0;
    }
@@ -1002,10 +1095,7 @@ NvmeScsiCmd_DoInquiryVpd86(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
    response_data.vSup = ctrlr->nvmCacheSupport & 0x1;
 
    transferLen = (transferLen < sizeof(response_data)) ? transferLen : sizeof(response_data);
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
 }
 
 
@@ -1083,14 +1173,21 @@ NvmeScsiCmd_DoInquiryVpdB0(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
    response_data.header.pagecode = SCSI_INQUIRY_B0H;
    response_data.header.payloadLen = vmk_CPUToBE16(sizeof(response_data.payload));
 
-   response_data.payload.maxUnmabLbaCount = vmk_CPUToBE32((vmk_uint32) - 1);
+   /* according to NVMe: SCSI Translation Reference, Section 6.1.6 */
+   if ((ctrlr->nvmCmdSupport & 0x4) != 0) {
+      response_data.payload.maxUnmabLbaCount = vmk_CPUToBE32((vmk_uint32) - 1);
+      response_data.payload.maxUnmapBlockDescriptorCount = 0x100;
+   }
+
+   if ((ctrlr->nvmCmdSupport & 0x1) != 0 && (ctrlr->identify.fuseSupt & 0x1) != 0) {
+      response_data.payload.maxCompareWriteLen = ctrlr->maxXferLen;
+   }
+
+   response_data.payload.maxXferLen = ctrlr->maxXferLen;
 
    transferLen = (transferLen < sizeof(response_data)) ? transferLen : sizeof(response_data);
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
 }
 
 
@@ -1153,10 +1250,7 @@ NvmeScsiCmd_DoInquiryVpdB1(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
 
    transferLen = (transferLen < sizeof(response_data)) ? transferLen : sizeof(response_data);
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
 }
 
 #define MIN_TX_LEN_FOR_STD_INQUIRY  5
@@ -1226,9 +1320,9 @@ NvmeScsiCmd_DoInquiry(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct N
       if(inquiryCmd->pagecode != 0 ||
          transferLen < MIN_TX_LEN_FOR_STD_INQUIRY) {
          nvmeStatus = NVME_STATUS_INVALID_FIELD_IN_CDB;
-   } else {
-      nvmeStatus = NvmeScsiCmd_DoInquiryStd(ctrlr, vmkCmd, ns);
-   }
+      } else {
+         nvmeStatus = NvmeScsiCmd_DoInquiryStd(ctrlr, vmkCmd, ns);
+      }
    }
 
    return nvmeStatus;
@@ -1293,10 +1387,7 @@ NvmeScsiCmd_DoReadCapacity(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
    response_data.lbn = ns->blockCount > VMK_UINT32_MAX ? VMK_UINT32_MAX : (vmk_CPUToBE32(ns->blockCount - 1));
    response_data.blocksize = vmk_CPUToBE32(1 << ns->lbaShift);
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, sizeof(response_data));
-   vmkCmd->bytesXferred = sizeof(response_data);
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, sizeof(response_data));
 }
 
 
@@ -1392,11 +1483,296 @@ NvmeScsiCmd_DoReadCapacity16(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, s
    response_data.lbpme = (ctrlr->nvmCmdSupport & 0x4) ? 1 : 0;
    response_data.lbprz = 0;
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, transferLen);
 }
+
+/**
+ * Mode Select/Sense Related Structures
+ *
+ * Mode Select (6)
+ * +---------------------------------------------------------------+
+ * |                       opcode (0x15)                           |
+ * +---------------------------------------------------------------+
+ * |        resv           |  PF  |        resv             |  SP  |
+ * +---------------------------------------------------------------+
+ * |                            resv                               |
+ * +---------------------------------------------------------------+
+ * |                            resv                               |
+ * +---------------------------------------------------------------+
+ * |                      allocation length                        |
+ * +---------------------------------------------------------------+
+ * |                          control                              |
+ * +---------------------------------------------------------------+
+ *
+ *
+ * Mode Select (10)
+ * +---------------------------------------------------------------+
+ * |                       opcode (0x55)                           |
+ * +---------------------------------------------------------------+
+ * |        resv           |  PF  |        resv             |  SP  |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                                                               |
+ * |                            resv                               |
+ * |                                                               |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                      allocation length                        |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                          control                              |
+ * +---------------------------------------------------------------+
+ *
+ * PF: Page Format
+ * 0: all parameters following header and block descriptor(s) are vendor specific
+ *    - Not supported in SNT
+ * 1: pages standard are defined in SPC
+ *    - Supported in SNT
+ *
+ * SP: Save Pages
+ * 0: Perform the MODE SELECT and shall not save any mode pages
+ *    - Supported
+ * 1: Any saveable mode pages should be saved
+ *    - Supported
+ *
+ * Allocation Length
+ * The length of data-in/out buffer: mode parameter list
+ *
+ * Control:
+ * NACA (bit 2) must not be 0
+ *
+ * Mode Sense (6)
+ * +---------------------------------------------------------------+
+ * |                       opcode (0x1a)                           |
+ * +---------------------------------------------------------------+
+ * |        resv                  |  BDB  |         resv           |
+ * +---------------------------------------------------------------+
+ * |       PC       |                page code                     |
+ * +---------------------------------------------------------------+
+ * |                        subpage code                           |
+ * +---------------------------------------------------------------+
+ * |                      allocation length                        |
+ * +---------------------------------------------------------------+
+ * |                          control                              |
+ * +---------------------------------------------------------------+
+ *
+ * Mode Sense (10)
+ * +---------------------------------------------------------------+
+ * |                       opcode (0x5a)                           |
+ * +---------------------------------------------------------------+
+ * |        resv           |llbaa |  dbd  |         resv           |
+ * +---------------------------------------------------------------+
+ * |       pc       |                page code                     |
+ * +---------------------------------------------------------------+
+ * |                        subpage code                           |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                                                               |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                      allocation length                        |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                          control                              |
+ * +---------------------------------------------------------------+
+ *
+ * PC: Page Controller
+ * 00b Current values
+ *    - Supported in SNT
+ * 01b Changeable values
+ *    - Supported in SNT
+ * 10b Default values
+ *    - Supported in SNT
+ * 11b Saved values
+ *    - Not supported in SNT
+ *
+ * Page Code:
+ * 0x01: Read-Write Error Recovery Mode Page
+ * 0x08: Caching Mode Page
+ * 0x0A: Control Mode Page
+ * 0x1A: Power Condition Control Mode Page
+ * 0x1C: Informational Exceptions Control Mode Page
+ * 0x3F:
+ *       - Subpage Code = 0x00: All Supported Mode Pages
+ *       - Subpage Code = 0xFF: All Supported Mode Pages and Subpages
+ *
+ *
+ * Mode Select/Sense Parameter List
+ *
+ * +---------------------------------------------------------------+
+ * |                       Header (6/10)                           |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                      Block Descriptor                         |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                       Page(s)                                 |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ *
+ *
+ * Mode Select/Sense (6) Header
+ *
+ * +---------------------------------------------------------------+
+ * |                        Data Length                            |
+ * +---------------------------------------------------------------+
+ * |                        Medium Type                            |
+ * +---------------------------------------------------------------+
+ * |  WP   |   resv     | DPOFUA |         resv                    |
+ * +---------------------------------------------------------------+
+ * |                   Block Descriptor Length                     |
+ * +---------------------------------------------------------------+
+ *
+ * Mode Select/Sense (10) Header
+ *
+ * +---------------------------------------------------------------+
+ * |                        Data Length                            |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                        Medium Type                            |
+ * +---------------------------------------------------------------+
+ * |  wp   |   resv     | dpofua |         resv                    |
+ * +---------------------------------------------------------------+
+ * |                          resv                          | llba |
+ * +---------------------------------------------------------------+
+ * |                          resv                                 |
+ * +---------------------------------------------------------------+
+ * |                   Block Descriptor Length                     |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ *
+ * Data Length:
+ *    sizeof (Mode Parameter List) - sizeof (Data Length)
+ *    Reserved in MODE SELECT command
+ *
+ * Medium Type:
+ * 0: Direct Access device
+ *    - Supported
+ *
+ * WP: Write Protected
+ *    Set 1 if controller is in read only mode in MODE SENSE
+ *
+ * DPOFUA:
+ *    Not Supported
+ *
+ * Block Descritpor Length
+ *    indicating number of bytes of BLock Descriptor
+ *    Value = Block Descriptor Length * 8
+ *            when Mode 6 || (Mode 10 && llba = 0)
+ *    otherwise:
+ *    Value = Block Descriptor Length * 16
+ *
+ *
+ * Short Block Descriptor (Mode 6, or LLBAA = 0 for Mode 10)
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                      Number of Blocks                         |
+ * |                                                               |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                           resv                                |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                        Block Length                           |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ *
+ * Number of Blocks:
+ *    NS Capacity of NS Identify
+ * Block Length:
+ *    FLBAS of NS Identify
+ *
+ * Caching Page
+ * +---------------------------------------------------------------+
+ * |  PS  | resv |            Page Code (0x08)                     |
+ * +---------------------------------------------------------------+
+ * |                      Page Length (0x12)                       |
+ * +---------------------------------------------------------------+
+ * |      |      |      |       |       |  WCE   |       |         |
+ * +---------------------------------------------------------------+
+ * |                            |                                  |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ * |                                                               |
+ * |                                                               |
+ * |                                                               |
+ * |                                                               |
+ * |                                                               |
+ * +---------------------------------------------------------------+
+ *
+ * WCE: Write Back Cache Enable
+ * 0: Disable cache
+ * 1: Enable cache
+ */
+
+/**
+ * \brief Format of MODE SELECT 10 block.
+ * SPC 3 r23, Section 6.8 table 96
+ */
+typedef struct nvme_ScsiModeSelect10Command {
+   /** \brief Operation Code (55h) */
+   vmk_uint8 opcode;
+   /** \brief Save Pages */
+   vmk_uint8 sp:1,
+   /** \brief Reserved */
+             resv11:3,
+   /** \brief Page Format */
+             pf:1,
+   /** \brief Actually, reserved */
+             lun:3;
+   /** \brief Reserved */
+   vmk_uint8 resv2[5];
+   /** \brief Allocation Length */
+   vmk_uint16 len;
+   /** \brief Control */
+   vmk_uint8 control;
+} VMK_ATTRIBUTE_PACKED nvme_ScsiModeSelect10Command;
+
+/**
+ * \brief Format of MODE SENSE 10 block.
+ * SPC 3 r23, Section 6.10 table 100
+ */
+typedef struct nvme_ScsiModeSense10Command {
+   /** \brief Operation Code (5Ah) */
+   vmk_uint8 opcode;
+   /** \brief Reserved */
+   vmk_uint8 resv1:3,
+   /** \brief Disable block descriptors */
+             dbd:1,
+   /** \brief Long LBA Accepted */
+             llbaa:1,
+   /** \brief Reserved */
+             resv2:3;
+   /** \brief Page code */
+   vmk_uint8 pageCode:6,
+   /** \brief Page control */
+             pc:2;
+   /** \brief Subpage code */
+   vmk_uint8 subpageCode;
+   /** \brief Reserved */
+   vmk_uint8 resv3[3];
+   /** \brief Allocation Length */
+   vmk_uint16 len;
+   /** \brief Control */
+   vmk_uint8 control;
+} VMK_ATTRIBUTE_PACKED nvme_ScsiModeSense10Command;
 
 
 /**
@@ -1438,7 +1814,7 @@ typedef struct {
    vmk_uint8 reserved3:7;
    vmk_uint8 reserved4;
    /** BLOCK DESCRIPTOR LENGTH */
-   vmk_uint8 blockDescriptorLen[2];
+   vmk_uint16 blockDescriptorLen;
 } VMK_ATTRIBUTE_PACKED nvme_ScsiModeSenseHeader8;
 
 /**
@@ -1743,6 +2119,11 @@ typedef struct {
 #define MODE_SENSE6_CDB_LEN            (6)
 /** Mode sense 10 command cdb length */
 #define MODE_SENSE10_CDB_LEN           (10)
+/** Mode select 6 command cdb length */
+#define MODE_SELECT6_CDB_LEN            (6)
+/** Mode select 10 command cdb length */
+#define MODE_SELECT10_CDB_LEN           (10)
+
 
 typedef struct {
    vmk_Scsi4ByteModeSenseParameterHeader header;
@@ -1754,10 +2135,10 @@ typedef struct {
    vmk_uint8                 allModePagesData[TOTAL_MODE_PAGE_DATA_LEN];
 } VMK_ATTRIBUTE_PACKED modeParameterList_8B;
 
-union {
+typedef union {
    modeParameterList_6B resp6B;
    modeParameterList_8B resp8B;
-} VMK_ATTRIBUTE_PACKED modeParameterListResponseData;
+} VMK_ATTRIBUTE_PACKED nvme_ModeParameterListResponseData;
 
 nvme_ScsiModeSenseCachingPage defCacheModePage = {
    .pageCode = NVME_SCSI_MS_PAGE_CACHE,
@@ -1802,21 +2183,14 @@ VMK_ASSERT_LIST(modeSenseSizeChecker,
 )
 
 
-/**
- * Handle SCSI Mode Sense Caching page
- *
- * @param [in]  ctrlr pointer to the controller instance
- * @param [in]  vmkCmd pointer to the scsi command
- * @param [in]  ns pointer to the namespace
- */
 static Nvme_Status
-NvmeScsiCmd_DoModeSenseCache(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct NvmeNsInfo *ns)
+NvmeScsiCmd_FillModeSenseCachePage(vmk_ScsiCommand *vmkCmd, vmk_uint8 wce)
 {
-   vmk_Scsi4ByteModeSenseParameterHeader     *p6Bheader = NULL;
-   nvme_ScsiModeSenseHeader8     *p8Bheader = NULL;
+   vmk_Scsi4ByteModeSenseParameterHeader *p6Bheader = NULL;
+   nvme_ScsiModeSenseHeader8 *p8Bheader = NULL;
    nvme_ScsiModeSenseCachingPage *caching = NULL;
-
-   vmk_ByteCount transferLen = vmk_SgGetDataLen(vmkCmd->sgArray);
+   nvme_ModeParameterListResponseData modeParameterListResponseData;
+   vmk_ByteCount transferLen = 0;
    vmk_ByteCount sizeOfData = 0;
 
    vmk_Memset(&modeParameterListResponseData, 0, sizeof(modeParameterListResponseData));
@@ -1824,14 +2198,20 @@ NvmeScsiCmd_DoModeSenseCache(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, s
    if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE10) {
       p8Bheader = (nvme_ScsiModeSenseHeader8 *)&modeParameterListResponseData;
       caching = (nvme_ScsiModeSenseCachingPage *) &p8Bheader[1];
+      transferLen = _lto2b_16(((nvme_ScsiModeSense10Command *)vmkCmd->cdb)->len);
       if (transferLen < 2) {
          vmkCmd->bytesXferred = 0;
-         return NVME_STATUS_SUCCESS;
+         if (transferLen == 0) {
+            return NVME_STATUS_SUCCESS;
+         } else {
+            return NVME_STATUS_INVALID_FIELD_IN_CDB;
+         }
       }
       sizeOfData = sizeof(defCacheModePage)+sizeof(nvme_ScsiModeSenseHeader8);
    } else if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE) {
       p6Bheader = (vmk_Scsi4ByteModeSenseParameterHeader *)&modeParameterListResponseData;
       caching = (nvme_ScsiModeSenseCachingPage *) &p6Bheader[1];
+      transferLen = ((vmk_ScsiModeSenseCmd *)vmkCmd->cdb)->length;
       if (transferLen < 1) {
          vmkCmd->bytesXferred = 0;
          return NVME_STATUS_SUCCESS;
@@ -1841,14 +2221,7 @@ NvmeScsiCmd_DoModeSenseCache(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, s
 
    vmk_Memcpy(caching,&defCacheModePage, sizeof(defCacheModePage));
 
-   /*
-    * TODO: Acquire Volatile Write Cache Feature via GetFeatures, and assign
-    * the value to WCE.
-    */
-   caching->wce = (ns->ctrlr->identify.volWrCache) & 0x01;
-
-   /* Sanity check that the command carries SG buffer with adequate size */
-//   VMK_ASSERT(vmk_SgGetDataLen(vmkCmd->sgArray) >= sizeof(response_data));
+   caching->wce = wce;
 
    /* If the buffersize is not adequate, copy until the buffersize */
    if (transferLen > sizeOfData) {
@@ -1862,10 +2235,67 @@ NvmeScsiCmd_DoModeSenseCache(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, s
       p6Bheader->modeDataLength = (vmk_uint8)((transferLen - 1)&0xFF);
    }
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &modeParameterListResponseData, transferLen);
-   vmkCmd->bytesXferred = transferLen;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &modeParameterListResponseData, transferLen);
+}
 
-   return NVME_STATUS_SUCCESS;
+/*
+ * @brief Complete SCSI MODE SENSE command.
+ *
+ * Note: queue lock is held by the caller
+ */
+static void
+NvmeScsiCmd_ModeSenseCacheDone(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
+{
+   vmk_uint8 wce;
+   vmk_ScsiCommand *vmkCmd = cmdInfo->doneData;
+   Nvme_Status nvmeStatus;
+
+   VMK_ASSERT(vmkCmd);
+
+   vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_CMD_STATUS_DONE);
+   nvmeStatus = cmdInfo->cmdStatus;
+   if (cmdInfo->cmdStatus) {
+      EPRINT("Get Feature VWC Error: cmd %p status 0x%x, %s.", cmdInfo,
+             cmdInfo->cmdStatus,
+             NvmeCore_StatusToString(cmdInfo->cmdStatus));
+   } else {
+      wce = cmdInfo->cqEntry.param.cmdSpecific & 0x1;
+      DPRINT_ADMIN("wce: %d", wce);
+      nvmeStatus = NvmeScsiCmd_FillModeSenseCachePage(vmkCmd, wce);
+   }
+   NvmeScsiCmd_SetReturnStatus(vmkCmd, nvmeStatus);
+   SCSI_CMD_INVOKE_COMPLETION_CB(vmkCmd);
+   NvmeCore_PutCmdInfo(qinfo, cmdInfo);
+}
+
+
+/**
+ * Handle SCSI Mode Sense Caching page
+ *
+ * @param [in]  ctrlr pointer to the controller instance
+ * @param [in]  vmkCmd pointer to the scsi command
+ * @param [in]  ns pointer to the namespace
+ */
+static Nvme_Status
+NvmeScsiCmd_DoModeSenseCache(struct NvmeCtrlr *ctrlr,
+                             vmk_ScsiCommand *vmkCmd,
+                             struct NvmeNsInfo *ns)
+{
+   VMK_ReturnStatus vmkStatus = VMK_OK;
+   if (((ctrlr->identify.volWrCache) & 0x01) == 0) {
+      IPRINT("Invalid operation. Controller doesn't have a cache");
+      return NVME_STATUS_INVALID_FIELD_IN_CDB;
+   } else {
+      vmkStatus = NvmeCtrlrCmd_GetFeatureAsync(ctrlr, 0, FTR_ID_WRITE_CACHE, 0,
+                                               NvmeScsiCmd_ModeSenseCacheDone, vmkCmd);
+      if (vmkStatus != VMK_OK) {
+         vmkCmd->bytesXferred = 0;
+         EPRINT("Failed to submit get feature command");
+         return NVME_STATUS_FAILURE;
+      } else {
+         return NVME_STATUS_WOULD_BLOCK;
+      }
+   }
 }
 
 
@@ -1877,13 +2307,15 @@ NvmeScsiCmd_DoModeSenseCache(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, s
  * @param [in]  ns pointer to the namespace
  */
 static Nvme_Status
-NvmeScsiCmd_DoModeSenseControl(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct NvmeNsInfo *ns)
+NvmeScsiCmd_DoModeSenseControl(struct NvmeCtrlr *ctrlr,
+                               vmk_ScsiCommand *vmkCmd,
+                               struct NvmeNsInfo *ns)
 {
-   vmk_Scsi4ByteModeSenseParameterHeader     *p6Bheader = NULL;
-   nvme_ScsiModeSenseHeader8     *p8Bheader = NULL;
+   vmk_Scsi4ByteModeSenseParameterHeader *p6Bheader = NULL;
+   nvme_ScsiModeSenseHeader8 *p8Bheader = NULL;
    nvme_ScsiModeSenseControlPage *control = NULL;
-
-   vmk_ByteCount transferLen = vmk_SgGetDataLen(vmkCmd->sgArray);
+   nvme_ModeParameterListResponseData modeParameterListResponseData;
+   vmk_ByteCount transferLen = 0;
    vmk_ByteCount sizeOfData = 0;
 
    vmk_Memset(&modeParameterListResponseData, 0, sizeof(modeParameterListResponseData));
@@ -1891,19 +2323,26 @@ NvmeScsiCmd_DoModeSenseControl(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
    if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE10) {
       p8Bheader = (nvme_ScsiModeSenseHeader8 *)&modeParameterListResponseData;
       control = (nvme_ScsiModeSenseControlPage*) &p8Bheader[1];
+      transferLen = _lto2b_16(((nvme_ScsiModeSense10Command *)vmkCmd->cdb)->len);
       if (transferLen < 2) {
          vmkCmd->bytesXferred = 0;
-         return NVME_STATUS_SUCCESS;
+         if (transferLen == 0) {
+            return NVME_STATUS_SUCCESS;
+         } else {
+            return NVME_STATUS_INVALID_FIELD_IN_CDB;
+         }
       }
       sizeOfData = sizeof(defControlModePage)+sizeof(nvme_ScsiModeSenseHeader8);
    } else if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE) {
-      p6Bheader = (vmk_Scsi4ByteModeSenseParameterHeader *)&modeParameterListResponseData;
+      p6Bheader = (vmk_Scsi4ByteModeSenseParameterHeader*)&modeParameterListResponseData;
       control = (nvme_ScsiModeSenseControlPage*) &p6Bheader[1];
+      transferLen = ((vmk_ScsiModeSenseCmd *)vmkCmd->cdb)->length;
       if (transferLen < 1) {
          vmkCmd->bytesXferred = 0;
          return NVME_STATUS_SUCCESS;
-       }
-      sizeOfData = sizeof(defControlModePage)+sizeof(vmk_Scsi4ByteModeSenseParameterHeader);
+      }
+      sizeOfData = sizeof(defControlModePage) +
+                   sizeof(vmk_Scsi4ByteModeSenseParameterHeader);
    }
 
    vmk_Memcpy(control, &defControlModePage, sizeof(defControlModePage));
@@ -1918,11 +2357,7 @@ NvmeScsiCmd_DoModeSenseControl(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
       p6Bheader->modeDataLength = (vmk_uint8)((transferLen - 1)&0xFF);
    }
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &modeParameterListResponseData, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
-
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &modeParameterListResponseData, transferLen);
 }
 
 
@@ -1936,11 +2371,11 @@ NvmeScsiCmd_DoModeSenseControl(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
 static Nvme_Status
 NvmeScsiCmd_DoModeSensePC(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct NvmeNsInfo *ns)
 {
-   vmk_Scsi4ByteModeSenseParameterHeader     *p6Bheader = NULL;
-   nvme_ScsiModeSenseHeader8     *p8Bheader = NULL;
-   nvme_ScsiModeSensePCPage      *pc = NULL;
-
-   vmk_ByteCount transferLen = vmk_SgGetDataLen(vmkCmd->sgArray);
+   vmk_Scsi4ByteModeSenseParameterHeader *p6Bheader = NULL;
+   nvme_ScsiModeSenseHeader8 *p8Bheader = NULL;
+   nvme_ScsiModeSensePCPage *pc = NULL;
+   nvme_ModeParameterListResponseData modeParameterListResponseData;
+   vmk_ByteCount transferLen = 0;
    vmk_ByteCount sizeOfData = 0;
 
    vmk_Memset(&modeParameterListResponseData, 0, sizeof(modeParameterListResponseData));
@@ -1948,18 +2383,24 @@ NvmeScsiCmd_DoModeSensePC(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, stru
    if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE10) {
       p8Bheader = (nvme_ScsiModeSenseHeader8 *)&modeParameterListResponseData;
       pc = (nvme_ScsiModeSensePCPage*) &p8Bheader[1];
+      transferLen = _lto2b_16(((nvme_ScsiModeSense10Command *)vmkCmd->cdb)->len);
       if (transferLen < 2) {
          vmkCmd->bytesXferred = 0;
-         return NVME_STATUS_SUCCESS;
+         if (transferLen == 0) {
+            return NVME_STATUS_SUCCESS;
+         } else {
+            return NVME_STATUS_INVALID_FIELD_IN_CDB;
+         }
       }
       sizeOfData = sizeof(defPcModePage)+sizeof(nvme_ScsiModeSenseHeader8);
    } else if(vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE) {
       p6Bheader = (vmk_Scsi4ByteModeSenseParameterHeader *)&modeParameterListResponseData;
       pc = (nvme_ScsiModeSensePCPage*) &p6Bheader[1];
+      transferLen = ((vmk_ScsiModeSenseCmd *)vmkCmd->cdb)->length;
       if (transferLen < 1) {
          vmkCmd->bytesXferred = 0;
-   return NVME_STATUS_SUCCESS;
-}
+      return NVME_STATUS_SUCCESS;
+   }
       sizeOfData = sizeof(defPcModePage)+sizeof(vmk_Scsi4ByteModeSenseParameterHeader);
    }
 
@@ -1975,10 +2416,7 @@ NvmeScsiCmd_DoModeSensePC(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, stru
       p6Bheader->modeDataLength = (vmk_uint8)((transferLen - 1)&0xFF);
    }
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &modeParameterListResponseData, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &modeParameterListResponseData, transferLen);
 }
 /**
  * Handle SCSI Mode Sense RW Error Recovery page
@@ -1991,11 +2429,11 @@ NvmeScsiCmd_DoModeSensePC(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, stru
 static Nvme_Status
 NvmeScsiCmd_DoModeSenseRWER(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct NvmeNsInfo *ns)
 {
-   vmk_Scsi4ByteModeSenseParameterHeader     *p6Bheader = NULL;
-   nvme_ScsiModeSenseHeader8     *p8Bheader = NULL;
+   vmk_Scsi4ByteModeSenseParameterHeader *p6Bheader = NULL;
+   nvme_ScsiModeSenseHeader8 *p8Bheader = NULL;
    nvme_ScsiModeSenseRWErrorRecoveryPage *rwer = NULL;
-
-   vmk_ByteCount transferLen = vmk_SgGetDataLen(vmkCmd->sgArray);
+   nvme_ModeParameterListResponseData modeParameterListResponseData;
+   vmk_ByteCount transferLen = 0;
    vmk_ByteCount sizeOfData = 0;
 
    vmk_Memset(&modeParameterListResponseData, 0, sizeof(modeParameterListResponseData));
@@ -2003,14 +2441,20 @@ NvmeScsiCmd_DoModeSenseRWER(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, st
    if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE10) {
       p8Bheader = (nvme_ScsiModeSenseHeader8 *)&modeParameterListResponseData;
       rwer = (nvme_ScsiModeSenseRWErrorRecoveryPage*) &p8Bheader[1];
+      transferLen = _lto2b_16(((nvme_ScsiModeSense10Command *)vmkCmd->cdb)->len);
       if (transferLen < 2) {
          vmkCmd->bytesXferred = 0;
-         return NVME_STATUS_SUCCESS;
+         if (transferLen == 0) {
+            return NVME_STATUS_SUCCESS;
+         } else {
+            return NVME_STATUS_INVALID_FIELD_IN_CDB;
+         }
       }
       sizeOfData = sizeof(defRwErrorRecoveryModePage)+sizeof(nvme_ScsiModeSenseHeader8);
    } else if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE) {
       p6Bheader = (vmk_Scsi4ByteModeSenseParameterHeader *)&modeParameterListResponseData;
       rwer = (nvme_ScsiModeSenseRWErrorRecoveryPage*) &p6Bheader[1];
+      transferLen = ((vmk_ScsiModeSenseCmd *)vmkCmd->cdb)->length;
       if (transferLen < 1) {
          vmkCmd->bytesXferred = 0;
          return NVME_STATUS_SUCCESS;
@@ -2030,10 +2474,7 @@ NvmeScsiCmd_DoModeSenseRWER(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, st
       p6Bheader->modeDataLength = (vmk_uint8)((transferLen - 1)&0xFF);
    }
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &modeParameterListResponseData, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &modeParameterListResponseData, transferLen);
 }
 
 
@@ -2047,14 +2488,14 @@ NvmeScsiCmd_DoModeSenseRWER(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, st
 static Nvme_Status
 NvmeScsiCmd_DoModeSenseReturnAll(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct NvmeNsInfo *ns)
 {
-   vmk_Scsi4ByteModeSenseParameterHeader     *p6Bheader = NULL;
-   nvme_ScsiModeSenseHeader8     *p8Bheader = NULL;
+   vmk_Scsi4ByteModeSenseParameterHeader *p6Bheader = NULL;
+   nvme_ScsiModeSenseHeader8 *p8Bheader = NULL;
    nvme_ScsiModeSenseRWErrorRecoveryPage *rwer = NULL;
    nvme_ScsiModeSenseCachingPage *caching = NULL;
    nvme_ScsiModeSenseControlPage *control = NULL;
-   nvme_ScsiModeSensePCPage      *pc = NULL;
-
-   vmk_ByteCount transferLen = vmk_SgGetDataLen(vmkCmd->sgArray);
+   nvme_ScsiModeSensePCPage *pc = NULL;
+   nvme_ModeParameterListResponseData modeParameterListResponseData;
+   vmk_ByteCount transferLen = 0;
    vmk_ByteCount sizeOfData = 0;
 
    vmk_Memset(&modeParameterListResponseData, 0, sizeof(modeParameterListResponseData));
@@ -2062,14 +2503,20 @@ NvmeScsiCmd_DoModeSenseReturnAll(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCm
    if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE10) {
       p8Bheader = (nvme_ScsiModeSenseHeader8 *)&modeParameterListResponseData;
       rwer = (nvme_ScsiModeSenseRWErrorRecoveryPage*) &p8Bheader[1];
+      transferLen = ((vmk_ScsiModeSenseCmd *)vmkCmd->cdb)->length;
       if (transferLen < 2) {
          vmkCmd->bytesXferred = 0;
-         return NVME_STATUS_SUCCESS;
+         if (transferLen == 0) {
+            return NVME_STATUS_SUCCESS;
+         } else {
+            return NVME_STATUS_INVALID_FIELD_IN_CDB;
+         }
       }
       sizeOfData = TOTAL_MODE_PAGE_DATA_LEN + sizeof(nvme_ScsiModeSenseHeader8);
    } else if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SENSE) {
       p6Bheader = (vmk_Scsi4ByteModeSenseParameterHeader *)&modeParameterListResponseData;
       rwer = (nvme_ScsiModeSenseRWErrorRecoveryPage*) &p6Bheader[1];
+      transferLen = ((vmk_ScsiModeSenseCmd *)vmkCmd->cdb)->length;
       if (transferLen < 1) {
          vmkCmd->bytesXferred = 0;
          return NVME_STATUS_SUCCESS;
@@ -2101,10 +2548,7 @@ NvmeScsiCmd_DoModeSenseReturnAll(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCm
       p6Bheader->modeDataLength = (vmk_uint8)((transferLen - 1)&0xFF);
    }
 
-   vmk_SgCopyTo(vmkCmd->sgArray, &modeParameterListResponseData, transferLen);
-   vmkCmd->bytesXferred = transferLen;
-
-   return NVME_STATUS_SUCCESS;
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &modeParameterListResponseData, transferLen);
 }
 
 
@@ -2185,6 +2629,190 @@ NvmeScsiCmd_DoModeSense(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct
    return nvmeStatus;
 }
 
+/*
+ * @brief Complete SCSI MODE SELECT command.
+ *
+ * Note: queue lock is held by the caller
+ */
+static void
+NvmeScsiCmd_ModeSelectCacheDone(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
+{
+   vmk_ScsiCommand *vmkCmd = cmdInfo->doneData;
+   VMK_ASSERT(vmkCmd);
+   vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_CMD_STATUS_DONE);
+   NvmeScsiCmd_SetReturnStatus(vmkCmd, cmdInfo->cmdStatus);
+   SCSI_CMD_INVOKE_COMPLETION_CB(vmkCmd);
+   NvmeCore_PutCmdInfo(qinfo, cmdInfo);
+}
+
+
+/**
+ * Handle SCSI Mode Select Caching page
+ *
+ * @param [in]  ctrlr pointer to the controller instance
+ * @param [in]  vmkCmd pointer to the scsi command
+ * @param [in]  ns pointer to the namespace
+ */
+static inline Nvme_Status
+NvmeScsiCmd_DoModeSelectCache(struct NvmeCtrlr *ctrlr,
+                              vmk_ScsiCommand *vmkCmd,
+                              struct NvmeNsInfo *ns,
+                              vmk_uint8 *page)
+{
+   VMK_ReturnStatus               vmkStatus = VMK_OK;
+   nvme_ScsiModeSenseCachingPage *cachePage = (nvme_ScsiModeSenseCachingPage *)page;
+   vmk_uint8                       wce = 0;
+
+   if (((ctrlr->identify.volWrCache) & 0x01) == 0) {
+      IPRINT("Invalid Operation! Controller doesn't have a cache");
+      return NVME_STATUS_INVALID_FIELD_IN_CDB;
+   }
+
+   if (cachePage->pageLen != 0x12) {
+      IPRINT("Invalid page length, 0x%x", cachePage->pageLen);
+      return NVME_STATUS_INVALID_FIELD_IN_CDB;
+   }
+
+   wce = cachePage->wce;
+   vmkStatus = NvmeCtrlrCmd_SetFeatureAsync(ctrlr, 0, FTR_ID_WRITE_CACHE, wce,
+                                            NvmeScsiCmd_ModeSelectCacheDone, vmkCmd);
+   if (vmkStatus != VMK_OK) {
+      EPRINT("Failed to submit set feature page");
+      return NVME_STATUS_FAILURE;
+   } else {
+      return NVME_STATUS_WOULD_BLOCK;
+   }
+
+}
+
+/**
+ * Handle SCSI Mode Select command
+ *
+ * @param [in]  ctrlr pointer to the controller instance
+ * @param [in]  vmkCmd pointer to the scsi command
+ * @param [in]  ns pointer to the namespace
+ */
+static Nvme_Status
+NvmeScsiCmd_DoModeSelect(struct NvmeCtrlr *ctrlr,
+                         vmk_ScsiCommand *vmkCmd,
+                         struct NvmeNsInfo *ns)
+{
+   Nvme_Status nvmeStatus;
+   vmk_uint8 pageCode = 0;
+   vmk_uint8 *page = NULL;
+   vmk_ByteCount transferLen = 0;
+   nvme_ModeParameterListResponseData modeParameterListResponseData;
+
+   if (vmkCmd->cdb[0] == VMK_SCSI_CMD_MODE_SELECT) {
+      vmk_ScsiModeSelectCommand *cdb = (vmk_ScsiModeSelectCommand *)vmkCmd->cdb;
+
+      // Vendor specific formant is not supported
+      if (cdb->pf == 0) {
+         IPRINT("Invalid PF: 0x%x", cdb->pf);
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+
+      if ((cdb->control & 0x4) != 0) {
+         IPRINT("Invalid NACA: 0x1");
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+
+      if (vmkCmd->cdbLen != MODE_SELECT6_CDB_LEN) {
+         IPRINT("Invalid cdb length: 0x%x", vmkCmd->cdbLen);
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+
+      transferLen = cdb->len;
+      if (transferLen == 0) {
+         return NVME_STATUS_SUCCESS;
+      }
+      transferLen = (transferLen < sizeof(modeParameterListResponseData)) ? transferLen : sizeof(modeParameterListResponseData);
+      nvmeStatus = NvmeScsiCmd_SgCopyFrom(&modeParameterListResponseData, vmkCmd, transferLen);
+      if (nvmeStatus) {
+         return nvmeStatus;
+      }
+
+      modeParameterList_6B *pList = &(modeParameterListResponseData.resp6B);
+      vmk_Scsi4ByteModeSenseParameterHeader *pHeader = &pList->header;
+
+      // We only support direct access block device
+      if (pHeader->mediumType != 0) {
+         IPRINT("Invalid medium type: 0x%x", pHeader->mediumType);
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+
+      // So far, we only support cache page, which doesn't need block descriptor.
+      if(pHeader->blockDescriptorLength != 0) {
+         IPRINT("Invalid blck descriptor length: 0x%x", pHeader->blockDescriptorLength);
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+      pageCode = pList->allModePagesData[0] & 0x3f;
+      page = pList->allModePagesData;
+   } else {
+      nvme_ScsiModeSelect10Command *cdb = (nvme_ScsiModeSelect10Command *)vmkCmd->cdb;
+
+      // Vendor specific formant is not supported
+      if (cdb->pf == 0) {
+         IPRINT("Invalid PF: 0x%x", cdb->pf);
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+
+      if ((cdb->control & 0x4) != 0) {
+         IPRINT("Invalid NACA: 0x1");
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+
+      if (vmkCmd->cdbLen != MODE_SELECT10_CDB_LEN) {
+         IPRINT("Invalid cdb length: 0x%x", vmkCmd->cdbLen);
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+
+      transferLen = _lto2b_16(cdb->len);
+      if (transferLen == 0) {
+         return NVME_STATUS_SUCCESS;
+      }
+      transferLen = (transferLen < sizeof(modeParameterListResponseData)) ? transferLen : sizeof(modeParameterListResponseData);
+      nvmeStatus = NvmeScsiCmd_SgCopyFrom(&modeParameterListResponseData, vmkCmd, transferLen);
+      if (nvmeStatus) {
+         return nvmeStatus;
+      }
+
+      modeParameterList_8B *pList = &(modeParameterListResponseData.resp8B);
+      nvme_ScsiModeSenseHeader8 *pHeader = &pList->header;
+
+      // We only support direct access block device
+      if (pHeader->mediumType != 0) {
+         IPRINT("Invalid medium type: 0x%x", pHeader->mediumType);
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+
+      // So far, we only support cache page, which doesn't need block descriptor.
+      if(pHeader->blockDescriptorLen != 0) {
+         IPRINT("Invalid block descriptor length: 0x%x",
+                _lto2b_16(pHeader->blockDescriptorLen));
+         return NVME_STATUS_INVALID_FIELD_IN_CDB;
+      }
+      pageCode = pList->allModePagesData[0] & 0x3f;
+      page = pList->allModePagesData;
+   }
+
+   switch(pageCode) {
+      case NVME_SCSI_MS_PAGE_CACHE:
+         nvmeStatus = NvmeScsiCmd_DoModeSelectCache(ctrlr, vmkCmd, ns, page);
+         break;
+      case NVME_SCSI_MS_PAGE_CONTROL:
+      case NVME_SCSI_MS_PAGE_PC:
+      case NVME_SCSI_MS_PAGE_RWER:
+      case NVME_SCSI_MS_PAGE_ALL:
+      default:
+         nvmeStatus = NVME_STATUS_INVALID_FIELD_IN_CDB;
+         break;
+   }
+
+   return nvmeStatus;
+}
+
+
 typedef enum {
    LOG_SENSE_SUPPORTED_PAGES            = 0x00,
    LOG_SENSE_TEMPERATURE_PAGE           = 0x0d,
@@ -2252,10 +2880,8 @@ static Nvme_Status NvmeScsiCmd_SupportedLogPages(vmk_ScsiCommand *vmkCmd, vmk_ui
    response_data.supportPageList[0] = LOG_SENSE_TEMPERATURE_PAGE;
    response_data.supportPageList[1] = LOG_SENSE_IE_PAGE;
 
-   vmkCmd->bytesXferred = min_t(vmk_ByteCount, sizeof(response_data), vmk_SgGetDataLen(vmkCmd->sgArray));
-   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, vmkCmd->bytesXferred);
-
-   return NVME_STATUS_SUCCESS;
+   vmkCmd->bytesXferred = min_t(vmk_ByteCount, sizeof(response_data), len);
+   return NvmeScsiCmd_SgCopyTo(vmkCmd, &response_data, vmkCmd->bytesXferred);
 }
 
 /**
@@ -2373,16 +2999,6 @@ typedef struct ScsiLogPageInfo {
 
 
 #define SMART_INVALID_TEMPERATURE 0xff
-
-static void
-NvmeScsiCmd_CleanLogPage(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
-{
-   if(cmdInfo->cleanupData) {
-      Nvme_Free(cmdInfo->cleanupData);
-      cmdInfo->cleanupData = NULL;
-   }
-
-}
 
 /*
  * @brief Fill proper values to IE Log Page's fields.
@@ -2525,67 +3141,75 @@ static void NvmeScsiCmd_FillTempLogPage(struct vmk_ScsiCommand *vmkCmd, vmk_uint
    tempPage->tempLogPara.temperature = temp8;
 }
 
-
-
-
 /*
  * @brief Complete SCSI LOG SENSE command.
  *
  * Note: queue lock is held by the caller
  */
 static void
-NvmeScsiCmd_CompleteLogPage(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
+NvmeScsiCmd_GetSmartLogPageDone(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
 {
-   vmk_uint32	           	temp32;
-   vmk_uint8    	        temp8;
-   vmk_ScsiCommand      	*vmkCmd;
-   struct ScsiLogPageInfo	*pageInfo = (ScsiLogPageInfo*)cmdInfo->cleanupData;
-   struct ScsiIELogPage		IEPage;
-   struct ScsiTempLogPage	tempPage;
+   vmk_uint8                temp8;
+   vmk_uint32               pageCode;
+   struct ScsiIELogPage     IEPage;
+   struct ScsiTempLogPage   tempPage;
+   struct smart_log         *smartLog;
+   vmk_ScsiCommand          *vmkCmd;
+   vmk_uint16               transferLen;
+   Nvme_Status              nvmeStatus;
 
-   GET_VMK_SCSI_CMD(cmdInfo->cmdPtr, vmkCmd);
+   vmkCmd = cmdInfo->doneData;
    VMK_ASSERT(vmkCmd);
 
-   if (VMK_UNLIKELY(cmdInfo->type == ABORT_CONTEXT)) {
+   vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_CMD_STATUS_DONE);
+
+   nvmeStatus = cmdInfo->cmdStatus;
+   if (nvmeStatus) {
       vmkCmd->bytesXferred = 0;
-      goto out;
-   } else {
-      /*Copy log page data from dma's va*/
-      Nvme_Memcpy64(&(pageInfo->smart), (struct smart_log*)cmdInfo->prps, LOG_PG_SIZE/sizeof(vmk_uint64));
-      cmdInfo->status = NVME_CMD_STATUS_DONE;
-      if(NvmeMgmt_Convert(pageInfo->smart.temperature, 2, &temp32) == VMK_OK) {
-         temp32 -= 273;
-         temp8 = temp32 & 0xff;
-      } else {
-         temp8 = SMART_INVALID_TEMPERATURE;
-      }
+      goto complete_cmd;
    }
 
-   switch (pageInfo->pageCode) {
+   smartLog = Nvme_Alloc(sizeof (struct smart_log), 0, NVME_ALLOC_ZEROED);
+   if (smartLog == NULL) {
+      EPRINT("Failed to allocate smart log.");
+      vmkCmd->bytesXferred = 0;
+      nvmeStatus = NVME_STATUS_FAILURE;
+      goto complete_cmd;
+   }
+
+   pageCode = ((nvme_ScsiLogSenseCommand *)vmkCmd->cdb)->pageCode;
+   transferLen = _lto2b_16(((nvme_ScsiLogSenseCommand *)vmkCmd->cdb)->allocationLength);
+
+   /*Copy log page data from dma's va*/
+   Nvme_Memcpy64(smartLog, (struct smart_log*)cmdInfo->prps,
+                 SMART_LOG_PG_SIZE/sizeof(vmk_uint64));
+
+   temp8 = (*(vmk_uint16 *)(smartLog->temperature) - 273) & 0xff;
+
+   switch (pageCode) {
       case LOG_SENSE_TEMPERATURE_PAGE:
          NvmeScsiCmd_FillTempLogPage(vmkCmd, temp8, &tempPage);
-         vmkCmd->bytesXferred = min_t(vmk_ByteCount, sizeof(tempPage), vmk_SgGetDataLen(vmkCmd->sgArray));
-         vmk_SgCopyTo(vmkCmd->sgArray, &tempPage, vmkCmd->bytesXferred);
+         vmkCmd->bytesXferred = min_t(vmk_ByteCount, sizeof(tempPage), transferLen);
+         nvmeStatus = NvmeScsiCmd_SgCopyTo(vmkCmd, &tempPage, vmkCmd->bytesXferred);
          break;
       case LOG_SENSE_IE_PAGE:
          NvmeScsiCmd_FillIELogPage(vmkCmd, temp8, &IEPage);
-         vmkCmd->bytesXferred = min_t(vmk_ByteCount, sizeof(IEPage), vmk_SgGetDataLen(vmkCmd->sgArray));
-         vmk_SgCopyTo(vmkCmd->sgArray, &IEPage, vmkCmd->bytesXferred);
+         vmkCmd->bytesXferred = min_t(vmk_ByteCount, sizeof(IEPage), transferLen);
+         nvmeStatus = NvmeScsiCmd_SgCopyTo(vmkCmd, &IEPage, vmkCmd->bytesXferred);
          break;
       default:
-         EPRINT("log sense Page code 0x%x not supported.", pageInfo->pageCode);
+         EPRINT("log sense Page code 0x%x not supported.", pageCode);
+         vmkCmd->bytesXferred = 0;
+         nvmeStatus = NVME_STATUS_INVALID_FIELD_IN_CDB;
          break;
    }
 
-out:
-   SCSI_CMD_INVOKE_COMPLETION_CB(cmdInfo->cmdPtr);
+   Nvme_Free(smartLog);
 
-   if (cmdInfo->cleanup) {
-      cmdInfo->cleanup(qinfo, cmdInfo);
-   }
-
+complete_cmd:
+   NvmeScsiCmd_SetReturnStatus(vmkCmd, nvmeStatus);
+   SCSI_CMD_INVOKE_COMPLETION_CB(vmkCmd);
    NvmeCore_PutCmdInfo(qinfo, cmdInfo);
-   qinfo->timeout[cmdInfo->timeoutId] --;
 }
 
 
@@ -2602,12 +3226,9 @@ static Nvme_Status
 NvmeScsiCmd_DoLogSense(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
                        struct NvmeNsInfo *ns)
 {
-   struct NvmeQueueInfo         *qinfo = &(ctrlr->adminq);
-   struct NvmeCmdInfo           *cmdInfo;
-   struct ScsiLogPageInfo	*logPageInfo;
-   VMK_ReturnStatus             vmkStatus;
-
+   VMK_ReturnStatus vmkStatus = VMK_OK;
    nvme_ScsiLogSenseCommand *logSenseCmd = (nvme_ScsiLogSenseCommand *)vmkCmd->cdb;
+   vmk_uint16 transferLen = _lto2b_16(logSenseCmd->allocationLength);
 
    if (logSenseCmd->sp == 1) {
       EPRINT("logSenseCmd->sp is %d", logSenseCmd->sp);
@@ -2625,56 +3246,25 @@ NvmeScsiCmd_DoLogSense(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
 
    switch(logSenseCmd->pageCode) {
       case LOG_SENSE_SUPPORTED_PAGES:
-         return NvmeScsiCmd_SupportedLogPages(vmkCmd, logSenseCmd->allocationLength);
+         return NvmeScsiCmd_SupportedLogPages(vmkCmd, transferLen);
 
       case LOG_SENSE_TEMPERATURE_PAGE:
       case LOG_SENSE_IE_PAGE:
-         logPageInfo = Nvme_Alloc(sizeof(*logPageInfo), 0, NVME_ALLOC_ZEROED);
-         if (!logPageInfo) {
-            EPRINT("failed to allocate ScsiLogPageInfo.");
-            return NVME_STATUS_FAILURE;
-         }
-         /* Obtain cmdInfo, allocate space and set cleanup*/
-         LOCK_FUNC(qinfo);
-         cmdInfo = NvmeCore_GetCmdInfo(qinfo);
-         if (!cmdInfo) {
-            UNLOCK_FUNC(qinfo);
-            EPRINT("failed to acuqire cmdInfo");
-            goto free_logpage;
-         }
-         UNLOCK_FUNC(qinfo);
-
-         vmk_Memset(logPageInfo, 0, sizeof(*logPageInfo));
-         logPageInfo->pageCode = logSenseCmd->pageCode;
-         cmdInfo->cleanupData = logPageInfo;
-         cmdInfo->done = NvmeScsiCmd_CompleteLogPage;
-         cmdInfo->cleanup = NvmeScsiCmd_CleanLogPage;
-         cmdInfo->cmdPtr = vmkCmd;
-
-         vmkStatus = NvmeCtrlrCmd_GetSmartLog(ctrlr, ns->id, (void*)(&logPageInfo->smart), cmdInfo, VMK_FALSE);
+         vmkStatus = NvmeCtrlrCmd_GetLogPageAsync(ctrlr, -1, GLP_ID_SMART_HEALTH,
+                                                  SMART_LOG_PG_SIZE,
+                                                  NvmeScsiCmd_GetSmartLogPageDone,
+                                                  vmkCmd);
          if (vmkStatus != VMK_OK) {
             vmkCmd->bytesXferred = 0;
             EPRINT("failed to get smart log");
-            goto putcmd;
+            return NVME_STATUS_FAILURE;
          } else {
             return NVME_STATUS_WOULD_BLOCK;
          }
-
       default:
          DPRINT_CMD("logSenseCmd->pageCode %x is INVALID", logSenseCmd->pageCode);
          return NVME_STATUS_INVALID_FIELD_IN_CDB;
    }
-
-putcmd:
-   LOCK_FUNC(qinfo);
-   NvmeCore_PutCmdInfo(qinfo, cmdInfo);
-   qinfo->timeout[cmdInfo->timeoutId] --;
-   UNLOCK_FUNC(qinfo);
-
-free_logpage:
-   Nvme_Free(logPageInfo);
-   return NVME_STATUS_FAILURE;
-
 }
 
 
@@ -2721,10 +3311,8 @@ NvmeScsiCmd_DoTUR(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd,
 static Nvme_Status
 NvmeScsiCmd_DoUnmap(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct NvmeNsInfo *ns)
 {
-   VMK_ReturnStatus vmkStatus;
-#if NVME_DEBUG
    nvme_ScsiUnmapCommand *cdb = (nvme_ScsiUnmapCommand *)vmkCmd->cdb;
-#endif
+   vmk_uint16 transferLen;
    nvme_ScsiUnmapParameterList *unmapParamList = NULL;
    /** This is a temporary buffer to hold SCSI UNMAP -> DSM Ranges translation */
    struct nvme_dataset_mgmt_data *dsmData = NULL;
@@ -2737,9 +3325,20 @@ NvmeScsiCmd_DoUnmap(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct Nvm
    vmk_AtomicInc64(&ctrlr->activeUnmaps);
    if (vmk_AtomicRead64(&ctrlr->maxUnmaps) < vmk_AtomicRead64(&ctrlr->activeUnmaps))
       vmk_AtomicWrite64(&ctrlr->maxUnmaps, vmk_AtomicRead64(&ctrlr->activeUnmaps));
-   DPRINT_CMD("scsi unmap cmd num: active: %ld, max: %ld, supported: %d.",
+      DPRINT_CMD("scsi unmap cmd num: active: %ld, max: %ld, supported: %d.",
            vmk_AtomicRead64(&ctrlr->activeUnmaps), vmk_AtomicRead64(&ctrlr->maxUnmaps),
            max_scsi_unmap_requests);
+
+   transferLen = _lto2b_16(cdb->parameterListLen);
+   if (transferLen == 0) {
+      nvmeStatus = NVME_STATUS_SUCCESS;
+      goto out_return;
+   }
+
+   if (transferLen > 0 && transferLen < 8) {
+      nvmeStatus = NVME_STATUS_PARAM_LIST_LENGTH_ERROR;
+      goto out_return;
+   }
 
    unmapParamList = vmk_SlabAlloc(ctrlr->scsiUnmapSlabId);
    if (!unmapParamList) {
@@ -2755,13 +3354,10 @@ NvmeScsiCmd_DoUnmap(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct Nvm
       goto out_return;
    }
 
-   vmkStatus = vmk_SgCopyFrom(unmapParamList, vmkCmd->sgArray,
-                              min_t(vmk_ByteCount, sizeof(nvme_ScsiUnmapParameterList),
-                                    vmk_SgGetDataLen(vmkCmd->sgArray)));
-   if (vmkStatus != VMK_OK) {
+   nvmeStatus = NvmeScsiCmd_SgCopyFrom(unmapParamList, vmkCmd,
+                    min_t(vmk_ByteCount, sizeof(nvme_ScsiUnmapParameterList), transferLen));
+   if (nvmeStatus) {
       EPRINT("failed to acquire unmap parameter lists.");
-      VMK_ASSERT(vmkStatus == VMK_OK);
-      nvmeStatus = NVME_STATUS_INVALID_FIELD_IN_CDB;
       goto out_return;
    }
 
@@ -2835,31 +3431,29 @@ NvmeScsiCmd_DoSyncCache(struct NvmeCtrlr *ctrlr, void *cmdPtr, struct NvmeNsInfo
       return NVME_STATUS_QUIESCED;
    }
 
-   /* Check IMMED bit. According to spc4r36, An immediate (IMMED)=0 specifies that the device server
-    * shall not return status until the operation has been completed. IMMED=1 specifies that the device
-    * server shall return status as soon as the CDB has been validated. However, the issuing path
-    * (SCSIStartPathCommands()) disallows blocking in this world (PR159076, PR158746). PSOD would be
-    * triggered in debug build otherwise*/
+   /**
+    * Check IMMED bit. According to spc4r36, An immediate (IMMED)=0 specifies that the
+    * device server shall not return status until the operation has been completed.
+    * IMMED=1 specifies that the device server shall return status as soon as the CDB
+    * has been validated. However, the issuing path (SCSIStartPathCommands()) disallows
+    * blocking in this world (PR159076, PR158746). PSOD would be triggered in debug
+    * build otherwise
+    *
+    * However, PSA will return to the consumer only when the flush command is completed,
+    * That means, PSA will guarantee the operation is done although IMMED = 0.
+    */
+   /*
    if (!(vmkCmd->cdb[1]& 0x02)) {
       WPRINT("IMMED=0 is not allowed");
       return NVME_STATUS_INVALID_FIELD_IN_CDB;
    }
+   */
 
    vmkCmd->bytesXferred = vmkCmd->requiredDataLen;
 
    qinfo = &ctrlr->ioq[qid];
 
    nvmeStatus = NvmeIo_SubmitFlush(ns, cmdPtr, qinfo);
-
-   /*account for the number of IO requests to the queue*/
-   if (nvmeStatus == NVME_STATUS_WOULD_BLOCK) {
-      LOCK_FUNC(qinfo);
-      qinfo->nrReq ++;
-      if (qinfo->maxReq < qinfo->nrReq) {
-         qinfo->maxReq = qinfo->nrReq;
-      }
-      UNLOCK_FUNC(qinfo);
-   }
 
    return nvmeStatus;
 }
@@ -2910,7 +3504,7 @@ VMK_ReturnStatus scsiProcessCommand(void *clientData, void *cmdPtr, void *device
    }
 #endif
 
-   state = NvmeState_GetCtrlrState(ctrlr, VMK_TRUE);
+   state = NvmeState_GetCtrlrState(ctrlr);
 
    if (VMK_UNLIKELY(state > NVME_CTRLR_STATE_INRESET)) {
       /**
@@ -2980,6 +3574,10 @@ VMK_ReturnStatus scsiProcessCommand(void *clientData, void *cmdPtr, void *device
       case VMK_SCSI_CMD_MODE_SENSE:
          nvmeStatus = NvmeScsiCmd_DoModeSense(ctrlr, vmkCmd, ns);
          break;
+      case VMK_SCSI_CMD_MODE_SELECT10:
+      case VMK_SCSI_CMD_MODE_SELECT:
+         nvmeStatus = NvmeScsiCmd_DoModeSelect(ctrlr, vmkCmd, ns);
+         break;
       case VMK_SCSI_CMD_LOG_SENSE:
          nvmeStatus = NvmeScsiCmd_DoLogSense(ctrlr, vmkCmd, ns);
          break;
@@ -2990,7 +3588,7 @@ VMK_ReturnStatus scsiProcessCommand(void *clientData, void *cmdPtr, void *device
       case VMK_SCSI_CMD_RELEASE_UNIT:
       case VMK_SCSI_CMD_VERIFY:
       case VMK_SCSI_CMD_START_UNIT:
-         vmkCmd->bytesXferred = 0;
+         vmkCmd->bytesXferred = vmkCmd->requiredDataLen;
          nvmeStatus           = NVME_STATUS_SUCCESS;
          break;
       case VMK_SCSI_CMD_UNMAP:
@@ -3046,11 +3644,17 @@ ScsiTaskMgmt(void *clientData, vmk_ScsiTaskMgmt *taskMgmt, void *deviceData)
 #endif
    struct NvmeCtrlr *ctrlr = (struct NvmeCtrlr *)clientData;
    struct NvmeNsInfo *ns = (struct NvmeNsInfo *)deviceData;
+   int logLevel;
 
-   VPRINT("taskMgmt: %s status %02x:%02x:%02x I:%p SN:0x%lx W:%d.",
+   /**
+    * Not print virt reset in default log level to avoid spew when lots of VMs powered on.
+    */
+   logLevel = (taskMgmt->type != VMK_SCSI_TASKMGMT_VIRT_RESET)? NVME_LOG_LEVEL_WARNING : NVME_LOG_LEVEL_VERBOSE;
+
+   Nvme_Log(logLevel, "taskMgmt:%s status %02x:%02x:%02x I:%p SN:0x%lx W:%d ctrlr:%s nsid:%d",
           vmk_ScsiGetTaskMgmtTypeName(taskMgmt->type), taskMgmt->status.host,
           taskMgmt->status.device, taskMgmt->status.plugin, taskMgmt->cmdId.initiator,
-          taskMgmt->cmdId.serialNumber, taskMgmt->worldId);
+          taskMgmt->cmdId.serialNumber, taskMgmt->worldId, Nvme_GetCtrlrName(ctrlr), ns->id);
 
    /**
     * Task managements should be serialized.
@@ -3127,7 +3731,10 @@ ScsiTaskMgmt(void *clientData, vmk_ScsiTaskMgmt *taskMgmt, void *deviceData)
 
    vmk_SemaUnlock(&ctrlr->taskMgmtMutex);
 
-   VPRINT("vmkStatus = %x", vmkStatus);
+   if (vmkStatus != VMK_OK) {
+      WPRINT("taskMgmt %s failed 0x%x",
+         vmk_ScsiGetTaskMgmtTypeName(taskMgmt->type), vmkStatus);
+   }
    return vmkStatus;
 }
 
@@ -3148,7 +3755,7 @@ ScsiDiscover(void *clientData, vmk_ScanAction action, int channel, int targetId,
    VMK_ReturnStatus vmkStatus;
    struct NvmeCtrlr *ctrlr = (struct NvmeCtrlr *)clientData;
    vmk_ListLinks *itemPtr;
-   struct NvmeNsInfo *itr, *ns;
+   struct NvmeNsInfo *itr, *ns = NULL;
 
    DPRINT_NS("enter, c:%d, t:%d, l:%d, act: 0x%x", channel, targetId, lunId, action);
 
@@ -3156,10 +3763,7 @@ ScsiDiscover(void *clientData, vmk_ScanAction action, int channel, int targetId,
 
    switch (action) {
       case VMK_SCSI_SCAN_CREATE_PATH:
-         /**
-          * TODO: Rescan namespaces here.
-          */
-         ns = NULL;
+         vmk_SpinlockLock(ctrlr->lock);
          VMK_LIST_FORALL(&ctrlr->nsList, itemPtr) {
             itr = VMK_LIST_ENTRY(itemPtr, struct NvmeNsInfo, list);
             /* Namespace id starts from 1. NSID 1 maps to LUN 0 */
@@ -3170,10 +3774,15 @@ ScsiDiscover(void *clientData, vmk_ScanAction action, int channel, int targetId,
             }
          }
 
-         /* Return NO_CONNECT if target NS not found */
+         /**
+          * Change VMK_NO_CONNECT to VMK_NOT_FOUND when there is no namespace for the
+          * corresponding LUN ID. VMK_NO_CONNECT indicates the whole target is not
+          * connected, causes PSA stop scanning for the following LUNs.
+          */
          if (!ns) {
             DPRINT_NS("No ns found for C%d:T%d:L%d.", channel, targetId, lunId);
-            return VMK_NO_CONNECT;
+            vmk_SpinlockUnlock(ctrlr->lock);
+            return VMK_NOT_FOUND;
          }
 
          NvmeCtrlr_GetNs(ns);
@@ -3182,12 +3791,14 @@ ScsiDiscover(void *clientData, vmk_ScanAction action, int channel, int targetId,
          if (vmkStatus != VMK_OK) {
             EPRINT("Namespace %d not supported.", ns->id);
             NvmeCtrlr_PutNs(ns);
+            vmk_SpinlockUnlock(ctrlr->lock);
             *deviceData = NULL;
-            vmkStatus = VMK_NOT_READY; //<TBD> changing here to VMK_NOT_READY for CYCTWO-1016 workaround.
+            vmkStatus = VMK_NOT_SUPPORTED;
             return vmkStatus;
          }
 
          *deviceData = ns;
+         vmk_SpinlockUnlock(ctrlr->lock);
          vmkStatus = VMK_OK;
          break;
 
@@ -3279,9 +3890,9 @@ ScsiDumpPollHandler(void *clientData)
 
    for (i = 0; i < ctrlr->numIoQueues; i++) {
       qinfo = &ctrlr->ioq[i];
-      LOCK_FUNC(qinfo);
+      LOCK_COMPQ(qinfo);
       nvmeCoreProcessCq(qinfo, 1);
-      UNLOCK_FUNC(qinfo);
+      UNLOCK_COMPQ(qinfo);
    }
 
    return;
@@ -3319,19 +3930,6 @@ ScsiQueryDeviceQueueDepth(void *clientData, void *deviceData)
    DPRINT_TEMP("enter");
 
    return ctrlr->qDepth;
-}
-
-
-/**
- * Close callback
- *
- * Deprecated.
- */
-void
-ScsiClose(void *clientData)
-{
-   DPRINT_TEMP("enter");
-   return;
 }
 
 

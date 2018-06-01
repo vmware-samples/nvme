@@ -147,7 +147,7 @@ OsLib_LockDomainDestroy(struct NvmeCtrlOsResources *ctrlOsResources);
 
 void OsLib_StrToUpper(char *str, int length);
 
-VMK_ReturnStatus OsLib_SetPathLostByDevice(struct NvmeCtrlOsResources *ctrlOsResources);
+VMK_ReturnStatus OsLib_SetPathLostByDevice(struct NvmeCtrlr *ctrlr);
 
 /* SCSI layer requirements */
 
@@ -160,6 +160,28 @@ ScsiNotifyIOAllowed(vmk_Device logicalDevice, vmk_Bool ioAllowed);
 VMK_ReturnStatus OsLib_StartCompletionWorlds(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus OsLib_EndCompletionWorlds(struct NvmeCtrlr *ctrlr);
 void OsLib_IOCompletionEnQueue(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd);
+
+/**
+ * NvmeQueue_BindCompletionWorld - set interrupt to the same PCPU with completion
+ *                                 world running.
+ *
+ * This is only valid when using MSIX interrupts.
+ *
+ * @param [IN]  qinfo      pointer to the completion queue
+ */
+VMK_ReturnStatus
+NvmeQueue_BindCompletionWorld(struct NvmeQueueInfo* qInfo);
+
+/**
+ * NvmeQueue_UnBindCompletionWorld - unset interrupt to the same PCPU with completion
+ *                                   world running.
+ *
+ * This is only valid when using MSIX interrupts.
+ *
+ * @param [IN]  qinfo      pointer to the completion queue
+ */
+VMK_ReturnStatus
+NvmeQueue_UnbindCompletionWorld(struct NvmeQueueInfo* qInfo);
 #endif
 
 VMK_ReturnStatus
@@ -174,10 +196,12 @@ NvmeScsi_Init(struct NvmeCtrlr *ctrlr);
 void OsLib_ShutdownExceptionHandler(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus OsLib_SetupExceptionHandler(struct NvmeCtrlr *ctrlr);
 
+#if USE_TIMER
 VMK_ReturnStatus OsLib_TimerQueueCreate(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus OsLib_TimerQueueDestroy(struct NvmeCtrlr *ctrlr);
 void OsLib_StartIoTimeoutCheckTimer(struct NvmeCtrlr *ctrlr);
 void OsLib_StopIoTimeoutCheckTimer(struct NvmeCtrlr *ctrlr);
+#endif
 
 #define SCSI_CMD_INVOKE_COMPLETION_CB(scsiCmd) vmk_ScsiSchedCommandCompletion((vmk_ScsiCommand *)scsiCmd)
 

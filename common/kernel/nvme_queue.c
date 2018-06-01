@@ -14,9 +14,9 @@
  */
 
 #include "oslib.h"
-#include "../../common/kernel/nvme_private.h"
+#include "nvme_private.h"
 #include "nvme_scsi_cmds.h"
-#include "../../common/kernel/nvme_core.h"
+#include "nvme_core.h"
 
 #if NVME_DEBUG
 #include "nvme_debug.h"
@@ -67,10 +67,10 @@ NvmeQueue_CmdInfoDestroy(struct NvmeQueueInfo *qinfo)
    }
 
    /* By now the active cmd list should be empty */
-   VMK_ASSERT(vmk_ListIsEmpty(&qinfo->cmdActive));
 
    /* Clear free cmd list to avoid potential allocation */
-   vmk_ListInit(&qinfo->cmdFree);
+   qinfo->freeCmdList = 0;
+   vmk_AtomicWrite64(&qinfo->pendingCmdFree.atomicComposite, 0);
 
    /* cmdList is freed in NvmeQueue_Destroy(). */
 
@@ -104,8 +104,8 @@ NvmeQueue_CmdInfoConstruct(struct NvmeQueueInfo *qinfo)
 
    ctrlr = qinfo->ctrlr;
 
-   vmk_ListInit(&qinfo->cmdFree);
-   vmk_ListInit(&qinfo->cmdActive);
+   qinfo->freeCmdList = 0;
+   vmk_AtomicWrite64(&qinfo->pendingCmdFree.atomicComposite, 0);
 
    cmdInfo = qinfo->cmdList;
 
@@ -113,6 +113,7 @@ NvmeQueue_CmdInfoConstruct(struct NvmeQueueInfo *qinfo)
 
       /* Use (i+1) as cid */
       cmdInfo->cmdId = i + 1;
+      vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_CMD_STATUS_FREE);
 
       vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, (sizeof (struct nvme_prp)) * max_prp_list,
          &cmdInfo->dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
@@ -126,7 +127,8 @@ NvmeQueue_CmdInfoConstruct(struct NvmeQueueInfo *qinfo)
 
       /* TODO: Initialize wait queue */
 
-      vmk_ListInsert(&cmdInfo->list, vmk_ListAtRear(&qinfo->cmdFree));
+      cmdInfo->freeLink = qinfo->freeCmdList;
+      qinfo->freeCmdList = cmdInfo->cmdId;
 
       cmdInfo ++;
    }
@@ -186,13 +188,13 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
    /* Queue init to SUSPEND state */
    qinfo->flags |= QUEUE_SUSPEND;
 
-   /* Create a per-queue lock */
    vmk_StringFormat(propName, VMK_MISC_NAME_MAX, NULL, "nvmeCqLock-%s-%d",
                     Nvme_GetCtrlrName(ctrlr), qid);
    vmkStatus = OsLib_LockCreate(&ctrlr->ctrlOsResources, NVME_LOCK_RANK_MEDIUM,
-      propName, &qinfo->lock);
+      propName, &qinfo->compqLock);
    if (vmkStatus != VMK_OK) {
-      return vmkStatus;
+      EPRINT("Failed to create CQ [%d] lock, 0x%x.", qid, vmkStatus);
+      goto free_lock;
    }
 
    if (shared) {
@@ -206,26 +208,32 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
    /* Now allocate submission queue info */
    sqInfo = Nvme_Alloc(sizeof(*sqInfo), 0, NVME_ALLOC_ZEROED);
    if (sqInfo == NULL) {
+      EPRINT("Failed to alloc SQ [%d].", qid);
       vmkStatus = VMK_NO_MEMORY;
-      goto free_lock;
+      goto free_comp_lock;
    }
 
    qinfo->subQueue = sqInfo;
 
+   /**
+     *  We can still acquire the queue lock while under the completion lock for split commands
+     *  We need the proper ranking set for this situation
+     */
    sqInfo->ctrlr = ctrlr;
    sqInfo->qsize = sqsize;
    vmk_StringFormat(propName, VMK_MISC_NAME_MAX, NULL, "nvmeSqLock-%s-%d",
                     Nvme_GetCtrlrName(ctrlr), qid);
    vmkStatus = OsLib_LockCreate(&ctrlr->ctrlOsResources, NVME_LOCK_RANK_HIGH,
-      propName, &sqInfo->lock);
+      propName, &qinfo->lock);
    if (vmkStatus != VMK_OK) {
+      EPRINT("Failed to create SQ [%d] lock, 0x%x.", qid, vmkStatus);
       goto free_sq;
    }
 
    /* Allocate completion queue DMA buffer */
    vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, cqsize * sizeof(struct cq_entry), &qinfo->dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
-      EPRINT("Could not allocate CQ DMA buffer");       
+      EPRINT("Could not allocate CQ [%d] DMA buffer, 0x%x.", qid, vmkStatus);
       goto free_sq_lock;
    }
    qinfo->compq = (struct cq_entry *) qinfo->dmaEntry.va;
@@ -236,12 +244,11 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
    qinfo->head = 0;
    qinfo->tail = 0;
    qinfo->phase = 1;
-   qinfo->timeoutId = -1;  /* TODO: what is this? */
 
    /* Allocate submission queue DMA buffer */
    vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, sqsize * sizeof(struct nvme_cmd), &sqInfo->dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
-      EPRINT("Could not start allocate SQ DMA buffer");       
+      EPRINT("Could not allocate SQ [%d] DMA buffer, 0x%x.", qid, vmkStatus);
       goto free_cq_dma;
    }
    sqInfo->subq = (struct nvme_cmd *) sqInfo->dmaEntry.va;
@@ -259,21 +266,8 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
    sqInfo->id = qid;
    sqInfo->entries = sqInfo->qsize - 1;
    ctrlr->subQueueList[qid] = sqInfo;
-
-   /*
-    * Allocate Command Information Block
-    * Number of cached command IDs for IO queues are defined by
-    * driver parameter "io_command_id_size".
-    * Admin Queue cached commands IDs are same as queue size.
-    */
-   if (qid) {
-      qinfo->idCount = io_command_id_size;
-   } else {
-      qinfo->idCount = sqsize;
-   }
-
+   qinfo->idCount = sqsize;
    size = qinfo->idCount * sizeof(* qinfo->cmdList);
-   DPRINT_Q("Queue id: %d idCount: %d, size: %lu.", qid, qinfo->idCount, size);
 
    qinfo->cmdList = Nvme_Alloc(size, 0, NVME_ALLOC_ZEROED);
    if (qinfo->cmdList == NULL) {
@@ -283,8 +277,6 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
 
    /* TODO: Create work queues */
 
-   sqInfo->lockFunc = qinfo->lockFunc;
-   sqInfo->unlockFunc = qinfo->unlockFunc;
    sqInfo->compq = qinfo;
 
    ctrlr->queueList[qid] = qinfo;
@@ -296,6 +288,7 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
    /* Now, we create cmd lists for this queue */
    vmkStatus = NvmeQueue_CmdInfoConstruct(qinfo);
    if (vmkStatus != VMK_OK) {
+      EPRINT("Failed to construct cmd list for queue [%d], 0x%x.", qid, vmkStatus);
       goto free_cmd_list;
    }
 
@@ -304,9 +297,23 @@ NvmeQueue_Construct(struct NvmeQueueInfo *qinfo, int sqsize, int cqsize,
    if (ctrlr->ctrlOsResources.msixEnabled && intrIndex >= 0 && intrIndex < ctrlr->ctrlOsResources.numVectors) {
       vmkStatus = NvmeQueue_RequestIrq(qinfo);
       if (vmkStatus != VMK_OK) {
+         EPRINT("Failed to request irq for queue [%d], 0x%x.", qid, vmkStatus);
          goto destroy_cmd_info;
       }
+#if NVME_MUL_COMPL_WORLD
+      if (qid != 0) {
+         vmkStatus = NvmeQueue_BindCompletionWorld(qinfo);
+         if (vmkStatus != VMK_OK) {
+            /* Failure of binding completion world should not block queue enablement. */
+            EPRINT("Failed to bind completion world to queue %d, 0x%x.", qid, vmkStatus);
+         }
+      }
+#endif
    }
+
+   DPRINT_Q("Queue [%d] %p constructed. qsize: %d, idCount: %d, intrIndex: %d, CQ DB: 0x%lx, SQ DB: 0x%lx.",
+            qinfo->id, qinfo, qinfo->qsize, qinfo->idCount, qinfo->intrIndex,
+            qinfo->doorbell, qinfo->subQueue->doorbell);
 
    return VMK_OK;
 
@@ -323,13 +330,14 @@ free_cq_dma:
    OsLib_DmaFree(&ctrlr->ctrlOsResources, &qinfo->dmaEntry);
 
 free_sq_lock:
-   OsLib_LockDestroy(&sqInfo->lock);
+   OsLib_LockDestroy(&qinfo->lock);
 
 free_sq:
    Nvme_Free(sqInfo);
 
+free_comp_lock:
+   OsLib_LockDestroy(&qinfo->compqLock);
 free_lock:
-   OsLib_LockDestroy(&qinfo->lock);
 
    return vmkStatus;
 }
@@ -375,10 +383,14 @@ NvmeQueue_Destroy(struct NvmeQueueInfo *qinfo)
     * Note: we can only destory an IO queue if there are no outstanding
     *       cmds associated with this queue.
     */
-   VMK_ASSERT(qinfo->nrAct == 0);
-   VMK_ASSERT(vmk_ListIsEmpty(&qinfo->cmdActive));
+   VMK_ASSERT((qinfo->nrAct - qinfo->pendingCmdFree.freeListLength) == 0);
 
    if (ctrlr->ctrlOsResources.msixEnabled) {
+#if NVME_MUL_COMPL_WORLD
+      if (qinfo->id != 0) {
+         NvmeQueue_UnbindCompletionWorld(qinfo);
+      }
+#endif
       vmkStatus = NvmeQueue_FreeIrq(qinfo);
       VMK_ASSERT(vmkStatus == VMK_OK);
    }
@@ -396,13 +408,12 @@ NvmeQueue_Destroy(struct NvmeQueueInfo *qinfo)
    qinfo->compq = NULL;
    qinfo->compqPhy = 0L;
 
-   OsLib_LockDestroy(&sqInfo->lock);
+   OsLib_LockDestroy(&qinfo->lock);
 
    Nvme_Free(sqInfo);
    qinfo->subQueue = NULL;
 
-   OsLib_LockDestroy(&qinfo->lock);
-   LOCK_INIT(qinfo); 
+   OsLib_LockDestroy(&qinfo->compqLock);
 
    ctrlr->queueList[qid] = NULL;
    ctrlr->subQueueList[qid] = NULL;
@@ -415,7 +426,3 @@ NvmeQueue_Destroy(struct NvmeQueueInfo *qinfo)
 
    return VMK_OK;
 }
-
-
-
-

@@ -6,10 +6,322 @@ This is VMware native NVM Express driver compatible with NVM Express Specificati
 
 == Change Log ==
 
-2016/7/21 1.2.0.32-2vmw
+2017/11/17 1.2.1.34-1vmw
+
+   Fix PR #2002463: The PRP field in admin command is set incorrectly.
+
+   When sending admin commands whose data transfer size is larger than 4k, the
+   prp field in cmdInfo->nvmeCmd is updated first and then is overwritten to 0
+   by copying input command entry to cmdInfo->nvmeCmd. This will cause IOMMU fault.
+   This change fixes this issue by copying first and then updating prp fields.
+
+   This change also corrects the definitions of firmware commit command specific status.
+
+2017/11/16 1.2.1.33-1vmw
+
+   Fix PR #1997556: Retrieve SCSI command pointer from cmdInfo->doneData in mode select cache done function.
+
+2017/11/14 1.2.1.32-1vmw
+
+   Fix PR #1994497: Module parameter nvme_compl_worlds_num is set incorrectly.
+
+   Driver expected to get the number of cpu sockets by vmk_ScsiGetMaxNumCompletionQueues()
+   and use this value as the lower limit of module parameter nvme_compl_worlds_num.
+   However, vmk_ScsiGetMaxNumCompletionQueues() actually returns the number of last level
+   cache. On AMD Zen and latest Intel cpus, there may be multiple NUMA nodes/LLCs per socket.
+   It causes the lower limit of nvme_compl_worlds_num to be larger than the upper limit.
+
+   In this change, the range of nvme_compl_worlds_num is expanded to [1, pcpu number],
+   and the default value of nvme_compl_worlds_num is set to the return value of
+   vmk_ScsiGetMaxNumCompletionQueues().
+   This change also moves the code for validating nvme_compl_worlds_num to nvme_param.c.
+
+2017/11/9 1.2.1.31-1vmw
+
+   Fix PR #1995839: Submission queue fields are set incorrectly
+
+   Submission queue fields are set incorrectly when no command completion entry is
+   processed in nvmeCoreProcessCq due to wrong type conversion.
+
+   This change fixes it by making pendingHead and NVME_INVALID_HEAD as vmk_uint16.
+
+2017/11/1 1.2.1.30-1vmw
+
+   Fix PR #1991061:  Module parameters of nvme driver are set incorrectly
+
+   1. Module parameters: io_sub_queue_size, io_cpl_queue_size are reset incorrectly
+      when the controller is unable to support the default 1024 queue size
+   2. Set number of command list entires as io queue size instead of io_command_id_size.
+
+2017/10/30 1.2.1.29-1vmw
+
+   Fix PR #1931551: Bind interrupt with completion world for each IO queue
+
+   NVMe driver has separate completion world for each IO queue, each IO queue also
+   associates with a private interrupt. However, PCPU assignment of MSIx interrupt
+   is in a global round robin manner. This may cause performance drop when interrupts
+   are placed to different CPU node with the completion worlds.
+
+   This change fixes the performance drop by binding interrupt with the corresponding
+   completion world of each IO queue via VMKAPI vmk_WorldInterruptSet.
+
+2017/10/12 1.2.1.28-1vmw
+
+   Fix PR #1977228: Correct SCSI command's status and bytesXferred fields assignment.
+
+   When completing scsi commands, PSA demands that command bytesXferred cannot
+   be less than requiredDataLen unless the command fails. This change fixes a
+   bug in driver's SCSI LOG SENSE command done function to correctly set SCSI
+   command status. This change also corrects the command fields assignment in
+   other SCSI command completion funtions to satisfy PSA's requirements.
+
+2017/9/22 1.2.1.27-1vmw
+
+   Fix PR #1964335: Grab qinfo lock twice in flushing IO queue
+
+   When flushing IO queue, driver holds qinfo lock to build active command list and
+   abort commands. If there is a split command in active command list, it would grab
+   qinfo lock again in done() function.
+
+   This change fixes this issue by checking the command context in done() function.
+
+2017/8/7 1.2.1.26-1vmw
+
+   Fix PR #1930256: Create the same number of completion worlds as IO queues.
+
+   The number of allocated HW IO queues may be less than the value requested.
+   This makes numComplWorlds different with numIoQueues. The qID got by queue
+   selection function may be invalid.
+   To fix this issue, create the completion worlds after allocating HW IO queues.
+
+2017/7/21 1.2.1.25-1vmw
+
+   Log the reason when controller reset fails.
+
+   Some other minor changes:
+     - Add a "CONTRIBUTE" section in README file.
+     - Refine the code format in nvme_private.h.
+
+2017/6/6 1.2.1.24-1vmw
+
+   Fix PR #1885549: Enhance async event error handling.
+
+   1. Not parse the completion queue entry of async event command if it is completed with error.
+   2. Check controller state when it needs to clear async event by controller reset.
+
+2017/5/23 1.2.1.23-1vmw
+
+   Fix several bugs
+
+   1. Add controller lock for nsList in discover and report LUNs.
+   2. Correct the requested IO queue number which is 0's based value.
+   3. Add adapter name in controller structure to avoid NULL-access in some log message.
+   4. Return VMK_NOT_SUPPORTED when namespace is invalid in discovery.
+
+2017/5/22 1.2.1.22-1vmw
+
+   Fix PR #1756063: Refine usage of nvme_dbg.
+
+2017/5/19 1.2.1.21-1vmw
+
+   Fix PR #1855700: Enhance SMART plugin support in NVMe driver.
+
+   Translate following SMART parameters based on SMART log page:
+   Power-on Hours, Power Cycle Count, Reallocated Sector Count, Write Sectors TOT Count
+   and Read Sector TOT Count.
+
+   This change also fix an error of scsi log sense page for temperature.
+
+2017/5/18 1.2.1.20-1vmw
+
+   Fix several open issues left from driver version 1.2.1.10
+
+   1. Remove sqInfo->lockFunc and sqInfo->unlockFunc;
+   2. Remove Poll functions;
+   3. Remove locked parameter in function NvmeState_GetCtrlrState and NvmeState_SetCtrlrState;
+   4. Add a counter to track number of split commands.
+
+2017/5/15 1.2.1.19-1vmw
+
+   Change namespace mapping from ns:target to ns:LUN.
+
+   We changed the namespace mapping from ns:LUN to ns:taret in 1.2.1.17-1vmw in order
+   to simplify the device management. However, this may cause change of disk ID which
+   is generated based on VPD 0x80 Page, LUN ID and some other fields. Change of disk
+   ID blocks filesystem/datastore which is created with older driver being exported to
+   upper layer, thus break the back compatibility.
+
+   This change turns the mapping back as ns:LUN. For LUN0, when it doesn't exist,
+   driver returns VMK_NOT_FOUND rather than VMK_NO_CONNECT to continue the discovery
+   for other LUNs.
+
+2017/5/4 1.2.1.18-1vmw
+
+   Fix PR #1858880: Correct the Inquriy VPD Page 0x80 data size for EUI64 supported device
+
+   VPD Page 0x80 data size for EUI64 supported device is 20 bytes, while the current set is 30.
+   PSA uses this data to construct legacy disk ID for NVMe device, and the data changes every
+   time when PSA constructs legacy disk ID because there are 10 bytes undeterministic data,
+   which causes the datastore unable to recognized.
+
+   In addition, this change removes NGUID based translation for VPD Page 0x80 to avoid the same
+   issue happens on NGUID supported device.
+
+2017/4/8 1.2.1.17-1vmw
+
+   Implement multiple namespaces support
+
+   1. Implement the following namespace operations in both driver and esxcli nvme plugin
+      * create, delete
+      * attach, detach
+   2. Map a namespace as a target
+   3. Implement identify command compatible with NVMe 1.2 SPEC
+   4. Return APD status rather than PDL status for NVME_STATUS_NS_OFFLINE
+   5. Unify the format of common/kernel/nvme.h
+
+
+2017/4/5 1.2.1.16-1vmw
+
+   Enhance the check of SCSI command data-in and data-out buffer length.
+
+   1. Define NvmeScsiCmd_SgCopyTo and NvmeScsiCmd_SgCopyFrom for safely copying data to/from SCSI command sg array.
+   2. Add a new nvme status to indicate invalid parameter list length.
+   3. Fix PR #1840406: Not copy more than sg array length data in mode select command.
+
+2017/3/26 1.2.1.15-1vmw
+
+   Unify admin command submission interfaces in both sync and async manners
+
+   1. Provide two unified interfaces for driver and user tool to submit admin commands in both sync and async manners
+      * SYNC:  NvmeCtrlrCmd_SendAdmin
+      * ASYNC: NvmeCtrlrCmd_SendAdminAsync
+   2. Update the functions of get identify, set/get features, get log page, async event and admin passthru using the two interfaces
+   3. Use cmdInfo DMA buffer as the admin command data buffer if its length <= 4K, otherwise, allocate DMA buffer.
+      In fact, almost all admin commands are in the former case, exception are getting error log page and firmware download whose
+      data size may be > 4K.
+   4. This change fixes PR #1826136: IOMMU fault when admin command issued internally timeout.
+   5. This change fixes PR #1838737: Not allowed to set "Coalescing Disable" value for admin queue.
+
+2017/3/20 1.2.1.14-1vmw
+
+   Fix 2 PSODs introduced by driver synchronization improvement change.
+
+   1. Fix PR #1829430: Increase IOCompletionQueue lock rank to avoid lock rank violation in NvmeCore_FlushQueue.
+   2. Fix PR #1832027: Fix an overreactive assertion in nvmeCoreProcessCq.
+
+2017/3/15 1.2.1.13-1vmw
+
+   Enhance default level log message and fix one tiny issue
+
+   1. Fix PR #1809001: Enhance nvme driver log message with default log level
+   2. Allocate errorLog and smartLog when needed in exception handler
+
+2017/3/14 1.2.1.12-1vmw
+
+   Fix PR #1751311: Report a queue depth of (qsize - 1) to PSA.
+
+   In the NVMe device's queue, one entry is not available for use due to Head
+   and Tail entry pointer definition. So each queue should report one less
+   than the queue size to upper layer. Otherwise, QFULL error may be hit and
+   cause PSA to reduce the queue depth by half.
+
+2017/3/8 1.2.1.11-1vmw
+
+   Enhance controller start process and several admin command
+
+   1. Fix PR #1767464: Remove the redundent controller reset when starting controller
+   2. Fix PR #1819773: Check the arbitration support before setting arbituration feature
+   3. Fix PR #1781272: Check NVM format support before formatting namespace
+
+2017/2/8 1.2.1.10-1vmw
+
+   Fix PR #1810438 : NVMe driver performance is affected by sharing common locks and state between submission and completion paths.
+
+   Improve synchronization in the driver by eliminating the need for locking on hot paths.
+   Reduce the state shared between submission and completion paths.
+
+2017/1/8 1.2.1.9-1vmw
+
+   Fix PR #1790032: nvmeCoreLogError doesn't log any useful information
+
+   Log below information when NVMe command returned failure by controller:
+      - command status, opcode, qID, cmdID, nsID.
+      - lba and lbc if it's a read/write command.
+
+2017/1/4 1.2.1.8-1vmw
+
+   Fix PR #1789718: Don't check and split admin command due to stripe size for Intel device
+
+   For admin pass through command, we don't need to check and split command due to
+   stripe size for Intel device, because the data buffer is page size and page aligned,
+   it does not cross stripe boundry. Otherwise, it causes PSOD due to no namespace
+   structure attached to cmdInfo, which would be used by split command.
+
+2016/12/17 1.2.1.7-1vmw
+
+   Fix PR #1780457: Fix the performance drop in some Intel devices
+
+   Some Intel devices have a vendor specific limitation on their firmware/hardware.
+   With this limitation, all IOs across the stripe size (or boundary) delivered to
+   NVMe device suffer from significant performance drop.
+
+   Driver checks all IOs and splits command if it crosses the stripe on these device.
+
+   In addtion, this change also increases the max_prp_list to 512, thus max tranfer size
+   in one command could be MIN(mtds, 2MB).
+
+2016/11/25 1.2.1.6-1vmw
+
+   Fix PR #1745050: Support dynamic timeout configuration per device.
+
+   The code changes include:
+   1. Remove module parameter: io_timeout.
+   2. Remove timeoutId field in qinfo struct and add ioTimeout field in ctrlr struct.
+   2. Add USE_TIMER check for timeout checker related code.
+   3. Add 2 ioctl functions to set and get controller's timeout value.
+
+2016/11/24 1.2.1.5-1vmw
+
+   Fix PR #1747157: Write Cache Enable is reported mistakenly
+
+   LSOM enable/disable write cache by mode sense/select cache page command.
+   However, driver doesn't support this page. This change add this support
+   in scsi-nvme translation.
+
+   In addition, this change also removes an invalid return when IMMED bit is
+   assigned as 0 in sync cache command.
+
+2016/11/7 1.2.1.4-1vmw
+
+   1. Add controller state check in dump register management operation.
+   2. Correct wrong register definitions and add registers defined in NVMe 1.2.
+
+2016/9/13 1.2.1.3-1vmw
+
+   Fix PR #1705146: Enhance the check for device presence in driver initialization.
+
+   The code changes include:
+   1. Check for VMK_IO_ERROR return status from vmk_PCIAllocIntrCookie().
+   2. Fix NvmeCore_IsCtrlrRemoved() to use PCI config read of vendorID or device ID.
+   3. Add NvmeCore_IsCtrlrRemoved() in the process of waiting controller status
+      in NvmeCtrlr_HwStart() and NvmeCtrlr_HwStop().
+
+2016/8/19 1.2.1.2-1vmw
+
+   1. Fix PR #1712253: Use MDTS as a factor to set max host sector of scsi adapter
+   2. Enhance translation of VPD B0H page.
+
+2016/7/21 1.2.1.1-1vmw
+
+   Merge from vsphere-2016 branch (1.2.0.32-2vmw)
 
    1. Fix PR #1693956: Fix a Memory leak when MSIx interrupt cookies allcation failed.
    2. Correct the driver name as "nvme" instead of "nvme ".
+
+2016/5/12 1.2.1.0-1vmw
+
+   1. Enable 4k blocksize support in NVMe driver.
+   2. Enhance Makefile.inc and remove driver Makefile.
 
 2016/3/10 1.2.0.32-1vmw
 

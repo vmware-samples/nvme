@@ -13,8 +13,8 @@
  *    Nvme controller related stuff
  */
 #include "oslib.h"
-#include "../../common/kernel/nvme_private.h"
-#include "../../common/kernel/nvme_exc.h"
+#include "nvme_private.h"
+#include "nvme_exc.h"
 #include "nvme_debug.h"
 
 const char *NvmeCtrlr_GetErrorStatusString (int errorStatus);
@@ -66,46 +66,36 @@ const char* NvmeCtrlr_GetAsyncEventHealthStatusString (int healthStatus)
 VMK_ReturnStatus
 NvmeCtrlr_ValidateParams(struct NvmeCtrlr *ctrlr)
 {
-   vmk_uint64 minPage, maxPage, hwMaxQs, hwCap;
+   vmk_uint64 hwCap;
+   vmk_uint32 minPage, maxPage, hwMaxQs;
 
    hwCap = Nvme_Readq(ctrlr->regs + NVME_CAP);
    hwMaxQs = (hwCap & NVME_CAP_MQES_MSK64) + 1;
 
    DPRINT_CTRLR("Controller Capability reg: %016lx", hwCap);
 
+   ctrlr->ioCompQueueSize = io_cpl_queue_size;
+   ctrlr->ioSubQueueSize = io_sub_queue_size;
+
    /* Validate completion and submission queue size */
-   if (hwMaxQs && ((io_cpl_queue_size > hwMaxQs) ||
-      (io_sub_queue_size > hwMaxQs))) {
-      EPRINT("Parameter: maximum HW queue size %lu", hwMaxQs);
-      EPRINT("Adapting Hardware suggested queue size.");
+   if (hwMaxQs == 1) {
+      EPRINT("Invalid CAP.MQES: 0");
+   } else {
       if (io_cpl_queue_size > hwMaxQs) {
-         io_cpl_queue_size = hwMaxQs;
+         WPRINT("Parameter io_cpl_queue_size %d exceeds max HW queue size %d,"
+                " use HW max queue size.", io_cpl_queue_size, hwMaxQs);
+         ctrlr->ioCompQueueSize = hwMaxQs;
       }
       if (io_sub_queue_size > hwMaxQs) {
-         io_sub_queue_size = hwMaxQs;
+         WPRINT("Parameter io_sub_queue_size %d exceeds max HW queue size %d,"
+                " use HW max queue size.", io_sub_queue_size, hwMaxQs);
+         ctrlr->ioSubQueueSize = hwMaxQs;
       }
    }
 
-   /*
-    * Validate number of command IDs to context size (16 bits).
-    * Limit number of command issued to number of command IDs available.
-    */
-   if (io_command_id_size > 65535) {
-      io_command_id_size = 65535;
-       EPRINT("Adjusting io_command_id_size to %d", io_command_id_size);
-   }
-
-   if (max_io_request > io_command_id_size) {
-       max_io_request = io_command_id_size;
-       EPRINT("Adjusting max_io_request to %d", io_command_id_size);
-   }
-
-   minPage = (1 << (((hwCap & NVME_CAP_MPSMIN_MSK64) >>
-            NVME_CAP_MPSMIN_LSB) + 12));
-   maxPage = (1 << (((hwCap & NVME_CAP_MPSMAX_MSK64) >>
-            NVME_CAP_MPSMAX_LSB) + 12));
-   DPRINT_CTRLR("hardware maximum page size %lu", maxPage);
-   DPRINT_CTRLR("hardware minimum page size %lu", minPage);
+   minPage = (1 << (((hwCap & NVME_CAP_MPSMIN_MSK64) >> NVME_CAP_MPSMIN_LSB) + 12));
+   maxPage = (1 << (((hwCap & NVME_CAP_MPSMAX_MSK64) >> NVME_CAP_MPSMAX_LSB) + 12));
+   DPRINT_CTRLR("hardware max page size %d, min page size %d", maxPage, minPage);
 
    if ((maxPage < VMK_PAGE_SIZE) || (minPage > VMK_PAGE_SIZE)) {
        EPRINT("Controller does not support OS default Page size %u", VMK_PAGE_SIZE);
@@ -114,41 +104,6 @@ NvmeCtrlr_ValidateParams(struct NvmeCtrlr *ctrlr)
 
    max_prp_list = (transfer_size * 1024) / VMK_PAGE_SIZE;
    DPRINT_CTRLR("Max xfer %d, Max PRP %d", transfer_size, max_prp_list);
-
-#if NVME_MUL_COMPL_WORLD
-   /* equal to PCPU number of server */
-   vmk_int32 compl_worlds_upper_limit = Oslib_GetPCPUNum();
-   /* equal to CPU node number of server */
-   vmk_int32 compl_worlds_lower_limit = vmk_ScsiGetMaxNumCompletionQueues();
-
-   /* verify limitation of completion worlds number */
-   if (compl_worlds_lower_limit < 1) {
-      EPRINT("Fatal Error: CPU nodes number is %d.", compl_worlds_lower_limit);
-      return VMK_BAD_PARAM;
-   }
-   if (compl_worlds_upper_limit < compl_worlds_lower_limit) {
-      EPRINT("Fatal Error: compl_worlds_upper_limit is less than  \
-              compl_worlds_lower_limit.");
-      return VMK_BAD_PARAM;
-   }
-   if (compl_worlds_upper_limit > NVME_MAX_COMPL_WORLDS) {
-      compl_worlds_upper_limit = NVME_MAX_COMPL_WORLDS;
-   }
-
-   /* verify user configration of completion worlds number */
-   if (nvme_compl_worlds_num < compl_worlds_lower_limit) {
-      nvme_compl_worlds_num = compl_worlds_lower_limit;
-      EPRINT("The range of nvme_compl_worlds_num is [%d, %d].      \
-             Adjusting nvme_compl_worlds_num to %d", compl_worlds_lower_limit, \
-             compl_worlds_upper_limit, nvme_compl_worlds_num);
-   }
-   else if (nvme_compl_worlds_num > compl_worlds_upper_limit) {
-      nvme_compl_worlds_num = compl_worlds_upper_limit;
-      EPRINT("The range of nvme_compl_worlds_num is [%d, %d].      \
-             Adjusting nvme_compl_worlds_num to %d", compl_worlds_lower_limit, \
-             compl_worlds_upper_limit, nvme_compl_worlds_num);
-   }
-#endif
 
    return VMK_OK;
 }
@@ -204,12 +159,14 @@ NvmeCtrlr_AdminQueueDestroy(struct NvmeCtrlr *ctrlr)
 
    qinfo = &ctrlr->adminq;
 
-   NvmeCore_SuspendQueue(qinfo, 0);
+   NvmeCore_SuspendQueue(qinfo);
 
    /* Flush and reset Admin Queue in case there are still cmds in situation of hot plug. */
    NvmeCtrlr_FlushAdminQueue(ctrlr);
    NvmeCtrlr_ResetAdminQueue(ctrlr);
    vmkStatus = NvmeQueue_Destroy(qinfo);
+
+   DPRINT_Q("Destroyed admin queue, 0x%x.", vmkStatus);
 
    return vmkStatus;
 }
@@ -248,7 +205,7 @@ NvmeCtrlr_CreateIoQueues(struct NvmeCtrlr *ctrlr)
    shared = 1;
 
    ctrlr->ioq = Nvme_Alloc(sizeof(struct NvmeQueueInfo) * nrIoQueues,
-      0, NVME_ALLOC_ZEROED);
+      VMK_L1_CACHELINE_SIZE, NVME_ALLOC_ZEROED);
    if (!ctrlr->ioq) {
       return VMK_NO_MEMORY;
    }
@@ -258,7 +215,7 @@ NvmeCtrlr_CreateIoQueues(struct NvmeCtrlr *ctrlr)
 
       ctrlr->ioq[i-1].ctrlr = ctrlr;
       vmkStatus = NvmeQueue_Construct(&ctrlr->ioq[i - 1], /* IO queue starts from index 1 */
-         io_sub_queue_size, io_cpl_queue_size, i, shared, intrIndex);
+         ctrlr->ioSubQueueSize, ctrlr->ioCompQueueSize, i, shared, intrIndex);
       if (vmkStatus != VMK_OK) {
          goto free_queues;
       }
@@ -298,7 +255,7 @@ free_queues:
    while (--allocated >= 0) {
       NvmeCtrlrCmd_DeleteSq(ctrlr, allocated);
       NvmeCtrlrCmd_DeleteCq(ctrlr, allocated);
-      NvmeCore_SuspendQueue(&ctrlr->ioq[allocated], 0);
+      NvmeCore_SuspendQueue(&ctrlr->ioq[allocated]);
       NvmeQueue_Destroy(&ctrlr->ioq[allocated]);
    }
 
@@ -347,16 +304,16 @@ NvmeCtrlr_DeleteIoQueues(struct NvmeCtrlr *ctrlr)
        * We skip the destroy of hardware I/O queues if the controller is
        * already offline or failed.
        */
-      if (NvmeState_GetCtrlrState(ctrlr, VMK_FALSE) != NVME_CTRLR_STATE_FAILED &&
-          NvmeState_GetCtrlrState(ctrlr, VMK_FALSE) != NVME_CTRLR_STATE_QUIESCED &&
-          NvmeState_GetCtrlrState(ctrlr, VMK_FALSE) != NVME_CTRLR_STATE_MISSING) {
+      if (NvmeState_GetCtrlrState(ctrlr) != NVME_CTRLR_STATE_FAILED &&
+          NvmeState_GetCtrlrState(ctrlr) != NVME_CTRLR_STATE_QUIESCED &&
+          NvmeState_GetCtrlrState(ctrlr) != NVME_CTRLR_STATE_MISSING) {
          vmkStatus = NvmeCtrlrCmd_DeleteSq(ctrlr, sqInfo->id);
          DPRINT_Q("Destroyed sq %d, 0x%x.", sqInfo->id, vmkStatus);
          vmkStatus = NvmeCtrlrCmd_DeleteCq(ctrlr, qinfo->id);
          DPRINT_Q("Destroyed cq %d, 0x%x.", qinfo->id, vmkStatus);
       }
 
-      NvmeCore_SuspendQueue(qinfo, 0);
+      NvmeCore_SuspendQueue(qinfo);
       vmkStatus = NvmeQueue_Destroy(qinfo);
       DPRINT_Q("Destroyed queue %d, 0x%x.", qinfo->id, vmkStatus);
    }
@@ -395,6 +352,12 @@ NvmeCtrlr_HwStart(struct NvmeCtrlr *ctrlr)
    sqInfo = qinfo->subQueue;
    regs = ctrlr->regs;
 
+   if (NvmeCore_IsCtrlrRemoved(ctrlr)) {
+      EPRINT("Device is missing.");
+      NvmeCtrlr_SetMissing(ctrlr);
+      return VMK_PERM_DEV_LOSS;
+   }
+
    hwCap = Nvme_Readq(regs + NVME_CAP);
    DPRINT_CTRLR("Controller capability: 0x%016lx.", hwCap);
    ctrlr->hwTimeout = (hwCap & NVME_CAP_TO_MSK64) >> NVME_CAP_TO_LSB;
@@ -407,49 +370,17 @@ NvmeCtrlr_HwStart(struct NvmeCtrlr *ctrlr)
       DPRINT_CTRLR("CC: 0x%x.", Nvme_Readl((regs + NVME_CC)));
       Nvme_WaitCond(ctrlr, ctrlr->hwTimeout,
          (!(Nvme_Readl(regs+NVME_CSTS)&NVME_CSTS_RDY)), vmkStatus);
-      DPRINT_CTRLR("Initial disable result: 0x%x.", vmkStatus);
+      if (vmkStatus == VMK_PERM_DEV_LOSS) {
+         EPRINT("Device is missing. Controller reset clear enable fails.");
+         NvmeCtrlr_SetMissing(ctrlr);
+         return vmkStatus;
+      }
+      DPRINT_CTRLR("Initial disable status: 0x%x.", Nvme_Readl(regs + NVME_CSTS));
       if (vmkStatus != VMK_OK) {
          EPRINT("Controller reset clear enable failure status 0x%x.",
                 Nvme_Readl(regs + NVME_CSTS));
          return vmkStatus;
       }
-   }
-
-   /*
-    * Note: on the Qemu emulator, simply write NVME_CC_ENABLE (0x1) to
-    * (regs + NVME_CC) is not enough to bring controller to RDY state.
-    * IOSQES and IOCQES has to be set to bring the controller to RDY
-    * state for the initial reset.
-    */
-   config = NVME_CC_ENABLE;
-   config |= NVME_CC_CSS_NVM << NVME_CC_CSS_LSB;
-   config |= (VMK_PAGE_SHIFT - 12) << NVME_CC_MPS_LSB;
-   config |= (NVME_CC_ARB_RR << NVME_CC_AMS_LSB);
-   config |= (NVME_CC_SHN_NONE << NVME_CC_SHN_LSB);
-   config |= (6 << NVME_CC_IOSQES_LSB);
-   config |= (4 << NVME_CC_IOCQES_LSB);
-   DPRINT_CTRLR("Writing CC: 0x%08x.", config);
-   Nvme_Writel(config, (regs + NVME_CC));
-   Nvme_Readl((regs + NVME_CC));
-   Nvme_WaitCond(ctrlr, ctrlr->hwTimeout,
-      (Nvme_Readl(regs+NVME_CSTS)&NVME_CSTS_RDY), vmkStatus);
-   DPRINT_CTRLR("Initial reset result: 0x%x.", Nvme_Readl(regs+NVME_CSTS));
-
-   if (vmkStatus != VMK_OK) {
-      EPRINT("Controller reset enable failure status 0x%x.",
-             Nvme_Readl(regs + NVME_CSTS));
-      // return vmkStatus;
-   }
-
-   Nvme_Writel(0, (regs + NVME_CC));
-   Nvme_Readl((regs + NVME_CC));
-   Nvme_WaitCond(ctrlr, ctrlr->hwTimeout,
-      (!(Nvme_Readl(regs+NVME_CSTS)&NVME_CSTS_RDY)), vmkStatus);
-   DPRINT_CTRLR("Controller disable status: 0x%x.", vmkStatus);
-   if (vmkStatus != VMK_OK) {
-      EPRINT("Controller reset clear enable failure status 0x%x.",
-             Nvme_Readl(regs + NVME_CSTS));
-      return vmkStatus;
    }
 
    /* Set admin queue depth of completion and submission */
@@ -474,8 +405,13 @@ NvmeCtrlr_HwStart(struct NvmeCtrlr *ctrlr)
    Nvme_WaitCond(ctrlr, ctrlr->hwTimeout,
       (Nvme_Readl(regs+NVME_CSTS)&NVME_CSTS_RDY), vmkStatus);
    if (vmkStatus != VMK_OK) {
-      EPRINT("Controller reset enable failure status: 0x%x.",
-             Nvme_Readl(regs + NVME_CSTS));
+      if (vmkStatus != VMK_PERM_DEV_LOSS) {
+         EPRINT("Controller reset enable failure status: 0x%x.",
+                Nvme_Readl(regs + NVME_CSTS));
+      } else {
+         EPRINT("Device is missing. Controller reset enable fails.");
+         NvmeCtrlr_SetMissing(ctrlr);
+      }
       EPRINT("Failed to start controller, 0x%x.", vmkStatus);
       return vmkStatus;
    }
@@ -484,7 +420,7 @@ NvmeCtrlr_HwStart(struct NvmeCtrlr *ctrlr)
    if (ctrlr->version == 0xffffffff) {
        return VMK_FAILURE;
    }
-   IPRINT("Controller version: 0x%04x", ctrlr->version);
+   DPRINT_CTRLR("Controller version: 0x%04x", ctrlr->version);
 
    DPRINT_CTRLR("Controller %s started.", Nvme_GetCtrlrName(ctrlr));
 
@@ -508,7 +444,8 @@ NvmeCtrlr_HwStop(struct NvmeCtrlr *ctrlr)
    /*
     * Skip controller stop when controller is missing.
     */
-   if (NvmeState_GetCtrlrState(ctrlr, VMK_TRUE) == NVME_CTRLR_STATE_MISSING) {
+   if (NvmeCore_IsCtrlrRemoved(ctrlr)) {
+      NvmeCtrlr_SetMissing(ctrlr);
       return VMK_OK;
    }
 
@@ -519,127 +456,329 @@ NvmeCtrlr_HwStop(struct NvmeCtrlr *ctrlr)
    Nvme_WaitCond(ctrlr, ctrlr->hwTimeout,
       (!Nvme_Readl(ctrlr->regs+NVME_CSTS)&NVME_CSTS_RDY), vmkStatus);
 
-   DPRINT_CTRLR("Status after controller stop: 0x%x.",
-      Nvme_Readl(ctrlr->regs + NVME_CSTS));
-
    /*
     * Return VMK_OK when controller is missing.
     */
    if (NvmeCore_IsCtrlrRemoved(ctrlr)) {
+      NvmeCtrlr_SetMissing(ctrlr);
       return VMK_OK;
    }
+
+   DPRINT_CTRLR("Status after controller stop: 0x%x.",
+      Nvme_Readl(ctrlr->regs + NVME_CSTS));
 
    return vmkStatus;
 }
 
+static inline int
+GetAdminCmdDirection(struct nvme_cmd *entry)
+{
+   nvm_admin_opcodes_e opCode = entry->header.opCode;
+   switch(opCode) {
+      case NVM_ADMIN_CMD_FIRMWARE_DOWNLOAD:
+      case NVM_ADMIN_CMD_NS_ATTACH:
+         return XFER_TO_DEV;
+      case NVM_ADMIN_CMD_NS_MGMT:
+         if (entry->cmd.nsMgmt.sel == 0) {
+            return XFER_TO_DEV;
+         } else {
+            return XFER_FROM_DEV;
+         }
+
+      default:
+         return XFER_FROM_DEV;
+   }
+}
 
 /**
- * @brief This function Sends an Admin Command to controller.
+ * Free DMA buffer allocated for an Admin command, in ABORT context.
  *
- * @param[in] ctrlr pointer to nvme device context
- * @param[in] entry pointer to NVME command entry
- * @param[in] cqEntry pointer to NVME completion entry
+ * If an admin command failed (due to TIMEOUT or other reasons), the
+ * DMA buffer cannot be freed inline since the command may still be outstanding
+ * in the hardware and freeing the DMA buffer inline may introduce problems
+ * when hardware tries to access the DMA buffer which has alrady been freed.
+ *
+ * In that case, this function is called during command completion time, to
+ * free the DMA buffer when we are guaranteed that the command is leaving
+ * hardware.
+ */
+static void
+SendAdminCleanup(struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
+{
+   struct NvmeDmaEntry *dmaEntry = cmdInfo->cleanupData;
+
+   OsLib_DmaFree(&qinfo->ctrlr->ctrlOsResources, dmaEntry);
+   Nvme_Free(dmaEntry);
+}
+
+static inline void *
+PopulateAdminCmdInfo(struct NvmeCtrlr *ctrlr,
+                     struct NvmeCmdInfo *cmdInfo,
+                     struct nvme_cmd *entry,
+                     vmk_uint8 *buf,
+                     vmk_uint32 length)
+{
+   VMK_ReturnStatus     vmkStatus = VMK_OK;
+   struct NvmeDmaEntry *dmaEntry = NULL;
+   void                *dmaBuf;
+   vmk_uint32           processLen = 0;
+
+   cmdInfo->type = ADMIN_CONTEXT;
+   entry->header.cmdID = cmdInfo->cmdId;
+
+   if (length == 0) {
+      VMK_ASSERT(buf == NULL);
+      Nvme_Memcpy64(&cmdInfo->nvmeCmd, entry, sizeof(*entry)/sizeof(vmk_uint64));
+      return cmdInfo->prps;
+   }
+
+   Nvme_Memcpy64(&cmdInfo->nvmeCmd, entry, sizeof(*entry)/sizeof(vmk_uint64));
+
+   if (VMK_LIKELY(length <= VMK_PAGE_SIZE)) {
+      cmdInfo->nvmeCmd.header.prp[0].addr = cmdInfo->prpPhy;
+      dmaBuf = cmdInfo->prps;
+   } else {
+      dmaEntry = Nvme_Alloc(sizeof(*dmaEntry), 0, NVME_ALLOC_ZEROED);
+      if (dmaEntry == NULL) {
+         EPRINT("Failed to allocate memory!");
+         return NULL;
+      }
+
+      vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, length, dmaEntry,
+                                 VMK_TIMEOUT_UNLIMITED_MS);
+      if (vmkStatus != VMK_OK) {
+         EPRINT("Failed to allocate memory!");
+         Nvme_Free(dmaEntry);
+         return NULL;
+      }
+
+      dmaBuf = (void *)dmaEntry->va;
+
+      vmkStatus = vmk_SgFindPosition(dmaEntry->sgOut, 0, &cmdInfo->sgPosition);
+      VMK_ASSERT(vmkStatus == VMK_OK);
+
+      cmdInfo->cmdBase = cmdInfo;
+      cmdInfo->requiredLength= length;
+      cmdInfo->requestedLength = 0;
+      processLen = NvmeIo_ProcessPrps(&ctrlr->adminq, cmdInfo);
+      VMK_ASSERT(length == processLen);
+      cmdInfo->cmdBase = NULL;
+
+      cmdInfo->cleanup = SendAdminCleanup;
+      cmdInfo->cleanupData = dmaEntry;
+   }
+
+   if (VMK_UNLIKELY(GetAdminCmdDirection(entry) == XFER_TO_DEV)) {
+      VMK_ASSERT(buf != NULL);
+      vmk_Memcpy(dmaBuf, buf, length);
+   }
+
+   return dmaBuf;
+}
+
+/**
+ * @brief This function Sends a sync Admin Command to controller.
+ *
+ * @param[in] ctrlr     pointer to nvme device context
+ * @param[in] entry     pointer to NVME command entry
+ * @param[in] buf       pointer to data buf transferred
+ * @param[in] length    data transferred size
+ * @param[in] cqEntry   pointer to NVME completion entry
  * @param[in] timeoutUs command timeout in micronseconds
  *
  * @return This function returns VMK_OK if successful, otherwise Error Code
  */
-static VMK_ReturnStatus
-NvmeCtrlr_SendAdmin(struct NvmeCtrlr *ctrlr, struct nvme_cmd *entry,
-   struct cq_entry *cqEntry, int timeoutUs)
+VMK_ReturnStatus
+NvmeCtrlrCmd_SendAdmin(struct NvmeCtrlr *ctrlr,
+                       struct nvme_cmd *entry,
+                       vmk_uint8 *buf,
+                       vmk_uint32 length,
+                       struct cq_entry *cqEntry,
+                       int timeoutUs)
 {
-   VMK_ReturnStatus      vmkStatus;
+   VMK_ReturnStatus      vmkStatus = VMK_OK;
    Nvme_Status           nvmeStatus;
-   struct nvme_cmd      *cmd;
    struct NvmeQueueInfo *qinfo;
    struct NvmeCmdInfo   *cmdInfo;
+   void                 *dmaBuf;
+
+   if (length > ctrlr->maxXferLen && ctrlr->maxXferLen != 0) {
+      EPRINT("Data size: %d exceeds the limitation: %d.", length, ctrlr->maxXferLen);
+      return VMK_LIMIT_EXCEEDED;
+   }
+
+   qinfo = &ctrlr->adminq;
+
+   LOCK_FUNC(qinfo);
+   cmdInfo = NvmeCore_GetCmdInfo(qinfo);
+   if (!cmdInfo) {
+      UNLOCK_FUNC(qinfo);
+      EPRINT("Failed to get cmdInfo, opc 0x%x", entry->header.opCode);
+      return VMK_NO_RESOURCES;
+   }
+   UNLOCK_FUNC(qinfo);
+
+   dmaBuf = PopulateAdminCmdInfo(ctrlr, cmdInfo, entry, buf, length);
+   if (dmaBuf == NULL) {
+      NvmeCore_PutCmdInfo(qinfo, cmdInfo);
+      return VMK_NO_MEMORY;
+   }
 
    if (cqEntry) {
       vmk_Memset(cqEntry, 0, sizeof(struct cq_entry));
    }
 
-   qinfo = &ctrlr->adminq;
-   LOCK_FUNC(qinfo);
+   DPRINT_ADMIN("Submitting admin cmd %p [%d], opc: 0x%x.",
+                cmdInfo, cmdInfo->cmdId, entry->header.opCode);
+#if NVME_DEBUG
+   if (nvme_dbg & NVME_DEBUG_ADMIN) {
+      NvmeDebug_DumpCmd(&cmdInfo->nvmeCmd);
+   }
+#endif
 
+   nvmeStatus = NvmeCore_SubmitCommandWait(qinfo, cmdInfo, cqEntry, timeoutUs);
+
+   DPRINT_ADMIN("Completed admin command %p [%d], opc: 0x%x, status:0x%x",
+                cmdInfo, cmdInfo->cmdId, entry->header.opCode, nvmeStatus);
+
+   if (nvmeStatus == NVME_STATUS_ABORTED) {
+      // Command has been submitted to hardware, but timeout
+      return VMK_TIMEOUT;
+   }
+   if (nvmeStatus != NVME_STATUS_SUCCESS) {
+      // Command failed to be submitted to hardware
+       vmkStatus = VMK_BUSY;
+   } else {
+      // Command has been submitted to hardware
+      if (cmdInfo->cmdStatus == NVME_STATUS_SUCCESS) {
+         // Command executed successfully
+         if (GetAdminCmdDirection(entry) == XFER_FROM_DEV && length && buf) {
+            vmk_Memcpy(buf, dmaBuf, length);
+         }
+         vmkStatus = VMK_OK;
+      } else {
+         // Command executed with error
+         vmkStatus = VMK_FAILURE;
+      }
+#if NVME_DEBUG
+      if (cqEntry && (nvme_dbg & NVME_DEBUG_ADMIN)) {
+         NvmeDebug_DumpCpl(cqEntry);
+      }
+#endif
+   }
+
+   if (cmdInfo->cleanup) {
+      cmdInfo->cleanup(qinfo, cmdInfo);
+   }
+   NvmeCore_PutCmdInfo(qinfo, cmdInfo);
+
+   return vmkStatus;
+
+}
+
+/**
+ * @brief This function Sends an async Admin Command to controller.
+ *
+ * @param[in] ctrlr    pointer to nvme device context
+ * @param[in] entry    pointer to NVME command entry
+ * @param[in] buf      pointer to data buf transferred
+ * @param[in] length   data transferred size
+ * @param[in] done     completion callback
+ * @param[in] doneData data to completion callback
+ *
+ * @return returns VMK_OK if successfully submitting to hardware, otherwise Error Code
+ */
+VMK_ReturnStatus
+NvmeCtrlrCmd_SendAdminAsync(struct NvmeCtrlr *ctrlr,
+                            struct nvme_cmd *entry,
+                            vmk_uint8 *buf,
+                            vmk_uint32 length,
+                            NvmeCore_CompleteCommandCb done,
+                            void *doneData)
+{
+   VMK_ReturnStatus      vmkStatus;
+   Nvme_Status           nvmeStatus;
+   struct NvmeQueueInfo *qinfo;
+   struct NvmeCmdInfo   *cmdInfo;
+   void                 *dmaBuf;
+
+   if (length > ctrlr->maxXferLen && ctrlr->maxXferLen != 0) {
+      EPRINT("Data size: %d exceeds the limitation: %d.", length, ctrlr->maxXferLen);
+      return VMK_LIMIT_EXCEEDED;
+   }
+
+   qinfo = &ctrlr->adminq;
+
+   LOCK_FUNC(qinfo);
    cmdInfo = NvmeCore_GetCmdInfo(qinfo);
    if (!cmdInfo) {
       UNLOCK_FUNC(qinfo);
-      return VMK_NO_MEMORY;
+      EPRINT("Failed to get cmdInfo, opc 0x%x", entry->header.opCode);
+      return VMK_NO_RESOURCES;
    }
    UNLOCK_FUNC(qinfo);
 
-   cmdInfo->type = ADMIN_CONTEXT;
-   entry->header.cmdID = cmdInfo->cmdId;
-   cmd = &cmdInfo->nvmeCmd;
-   Nvme_Memcpy64(&cmdInfo->nvmeCmd, entry, sizeof(*entry)/sizeof(vmk_uint64));
+   dmaBuf = PopulateAdminCmdInfo(ctrlr, cmdInfo, entry, buf, length);
+   if (dmaBuf == NULL) {
+      NvmeCore_PutCmdInfo(qinfo, cmdInfo);
+      return VMK_NO_MEMORY;
+   }
 
-   DPRINT_ADMIN("Submitting admin command 0x%x, id:%d.", cmd->header.opCode, cmdInfo->cmdId);
+   cmdInfo->doneData = doneData;
+
+   DPRINT_ADMIN("Submitting async admin cmd %p [%d], opc: 0x%x.",
+                cmdInfo, cmdInfo->cmdId, entry->header.opCode);
 #if NVME_DEBUG
-   if (nvme_dbg & NVME_DEBUG_DUMP_CMD) {
-      NvmeDebug_DumpCmd(entry);
+   if (nvme_dbg & NVME_DEBUG_ADMIN) {
+      NvmeDebug_DumpCmd(&cmdInfo->nvmeCmd);
    }
 #endif
 
-   nvmeStatus = NvmeCore_SubmitCommandWait(qinfo, cmdInfo, cqEntry,
-                                           timeoutUs);
+   LOCK_FUNC(qinfo);
+   nvmeStatus = NvmeCore_SubmitCommandAsync(qinfo, cmdInfo, done);
+   UNLOCK_FUNC(qinfo);
    if (!SUCCEEDED(nvmeStatus)) {
-      VPRINT("admin command %p [%d] failed, 0x%x, %s.",
-             cmdInfo, cmdInfo->cmdId,
-             nvmeStatus, NvmeCore_StatusToString(nvmeStatus));
-      if (DELAYED_RETURN(nvmeStatus)) {
-         vmkStatus = VMK_TIMEOUT;
-      } else {
-         vmkStatus = VMK_FAILURE;
-      }
+      vmkStatus = VMK_FAILURE;
    } else {
+      DPRINT_ADMIN("Submitted async admin cmd [%d], opc: 0x%x.",
+                   entry->header.cmdID, entry->header.opCode);
       vmkStatus = VMK_OK;
    }
 
-   DPRINT_ADMIN("Completed admin command 0x%x, id:%d, status:0x%x",
-           entry->header.opCode, entry->header.cmdID, vmkStatus);
-
-#if NVME_DEBUG
-   if (cqEntry && (nvme_dbg & NVME_DEBUG_DUMP_CPL)) {
-      NvmeDebug_DumpCpl(cqEntry);
-   }
-#endif
-
    return vmkStatus;
 }
-
 
 /**
  * @brief This function Retrieves controller/Namespace identify data.
  *
  *
- * @param[in] ctrlr pointer to nvme device context
- * @param[in] nsId namespace ID
- * @param[in] dmaAddr dma address to copy Identify data
+ * @param[in] ctrlr         pointer to nvme device context
+ * @param[in] nsId          namespace ID
+ * @param[in] ctrlrId       controller ID
+ * @param[in] identifyData  identify data buffer
  *
- * @return This function returns VMK_OK if successful, otherwise Error Code
+ * @return returns VMK_OK if identify command executed successfully, otherwise Error Code
  */
 VMK_ReturnStatus
-NvmeCtrlrCmd_Identify(struct NvmeCtrlr *ctrlr, int nsId, vmk_IOA dmaAddr)
+NvmeCtrlrCmd_Identify(struct NvmeCtrlr *ctrlr,
+                      int cns,
+                      int ctrlrId,
+                      int nsId,
+                      vmk_uint8 *identifyData)
 {
-   VMK_ReturnStatus vmkStatus;
    struct nvme_cmd entry;
    struct cq_entry cqEntry;
 
+   DPRINT_ADMIN("Identify cns: %d, ctrlrId: %d, nsId：%d", cns, ctrlrId, nsId);
+
    Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
    entry.header.opCode = NVM_ADMIN_CMD_IDENTIFY;
-   if (nsId < 0) {
-      entry.cmd.identify.controllerStructure = IDENTIFY_CONTROLLER;
-   } else {
-      entry.cmd.identify.controllerStructure = IDENTIFY_NAMESPACE;
-      entry.header.namespaceID = nsId;
-   }
-   entry.header.prp[0].addr = dmaAddr;
-   entry.header.prp[1].addr = (dmaAddr+VMK_PAGE_SIZE) & ~(VMK_PAGE_SIZE -1);
+   entry.cmd.identify.controllerStructure = cns;
+   entry.cmd.identify.cntId = ctrlrId;
+   entry.header.namespaceID = nsId;
 
-   vmkStatus = NvmeCtrlr_SendAdmin(ctrlr, &entry, &cqEntry, ADMIN_TIMEOUT);
-   DPRINT_ADMIN("Identify [0x%04x] completion result 0x%x, Status 0x%x",
-               nsId, vmkStatus, cqEntry.SC);
-
-   return vmkStatus;
+   return NvmeCtrlrCmd_SendAdmin(ctrlr, &entry, identifyData, VMK_PAGE_SIZE, &cqEntry,
+                                 ADMIN_TIMEOUT);
 }
 
 
@@ -657,12 +796,12 @@ NvmeCtrlrCmd_DeleteSq(struct NvmeCtrlr *ctrlr, vmk_uint16 id)
 {
    struct nvme_cmd entry;
 
-   DPRINT_ADMIN("qid: %d.", id);
+   DPRINT_ADMIN("Delete submission qid: %d.", id);
 
    Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
    entry.header.opCode             = NVM_ADMIN_CMD_DEL_SQ;
    entry.cmd.deleteSubQ.identifier = id;
-   return (NvmeCtrlr_SendAdmin(ctrlr, &entry, NULL, ADMIN_TIMEOUT));
+   return NvmeCtrlrCmd_SendAdmin(ctrlr, &entry, NULL, 0, NULL, ADMIN_TIMEOUT);
 }
 
 
@@ -680,12 +819,12 @@ NvmeCtrlrCmd_DeleteCq(struct NvmeCtrlr *ctrlr, vmk_uint16 id)
 {
    struct nvme_cmd entry;
 
-   DPRINT_ADMIN("qid: %d.", id);
+   DPRINT_ADMIN("Delete completion qid: %d.", id);
 
    Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
    entry.header.opCode             = NVM_ADMIN_CMD_DEL_CQ;
    entry.cmd.deleteCplQ.identifier = id;
-   return (NvmeCtrlr_SendAdmin(ctrlr, &entry, NULL, ADMIN_TIMEOUT));
+   return NvmeCtrlrCmd_SendAdmin(ctrlr, &entry, NULL, 0, NULL, ADMIN_TIMEOUT);
 }
 
 
@@ -700,11 +839,13 @@ NvmeCtrlrCmd_DeleteCq(struct NvmeCtrlr *ctrlr, vmk_uint16 id)
  * @return This function returns VMK_OK if successful, otherwise Error Code
  */
 VMK_ReturnStatus
-NvmeCtrlrCmd_CreateCq(struct NvmeCtrlr *ctrlr, struct NvmeQueueInfo *qinfo, vmk_uint16 qid)
+NvmeCtrlrCmd_CreateCq(struct NvmeCtrlr *ctrlr,
+                      struct NvmeQueueInfo *qinfo,
+                      vmk_uint16 qid)
 {
    struct nvme_cmd entry;
 
-   DPRINT_ADMIN("qid: %d.", qid);
+   DPRINT_ADMIN("Create completion qid: %d.", qid);
 
    Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
    entry.header.opCode                  = NVM_ADMIN_CMD_CREATE_CQ;
@@ -715,7 +856,7 @@ NvmeCtrlrCmd_CreateCq(struct NvmeCtrlr *ctrlr, struct NvmeQueueInfo *qinfo, vmk_
    entry.cmd.createCplQ.interruptEnable = 1;
    entry.cmd.createCplQ.interruptVector = qinfo->intrIndex;
 
-   return(NvmeCtrlr_SendAdmin(ctrlr, &entry, NULL, ADMIN_TIMEOUT));
+   return NvmeCtrlrCmd_SendAdmin(ctrlr, &entry, NULL, 0, NULL, ADMIN_TIMEOUT);
 }
 
 
@@ -730,11 +871,13 @@ NvmeCtrlrCmd_CreateCq(struct NvmeCtrlr *ctrlr, struct NvmeQueueInfo *qinfo, vmk_
  * @return This function returns VMK_OK if successful, otherwise Error Code
  */
 VMK_ReturnStatus
-NvmeCtrlrCmd_CreateSq(struct NvmeCtrlr *ctrlr, struct NvmeQueueInfo *qinfo, vmk_uint16 qid)
+NvmeCtrlrCmd_CreateSq(struct NvmeCtrlr *ctrlr,
+                      struct NvmeQueueInfo *qinfo,
+                      vmk_uint16 qid)
 {
    struct nvme_cmd entry;
 
-   DPRINT_ADMIN("qid: %d.", qid);
+   DPRINT_ADMIN("Create submission qid: %d.", qid);
 
    Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
    entry.header.opCode                    = NVM_ADMIN_CMD_CREATE_SQ;
@@ -745,220 +888,214 @@ NvmeCtrlrCmd_CreateSq(struct NvmeCtrlr *ctrlr, struct NvmeQueueInfo *qinfo, vmk_
    entry.cmd.createSubQ.priority          = 0;  /** High */
    entry.cmd.createSubQ.completionQueueID = qinfo->id;
 
-   return (NvmeCtrlr_SendAdmin(ctrlr, &entry, NULL, ADMIN_TIMEOUT));
+   return NvmeCtrlrCmd_SendAdmin(ctrlr, &entry, NULL, 0, NULL, ADMIN_TIMEOUT);
 }
 
-
 /**
- * @brief This function Sends a set feature command
- *
- * @param[in] ctrlr pointer to nvme device context
- * @param[in] feature feature ID
- * @param[in] option feature option
- * @param[in] prp pointer to prp list of feature data
- * @param[in] cqEntry pointer to completion entry
+ * @brief This function sends a sync set feature command
+ * 
+ * @param[in]  ctrlr   pointer to nvme device context
+ * @param[in]  nsId    namespace ID
+ * @param[in]  feature feature ID
+ * @param[in]  option  feature option
+ * @param[out] buf     pointer to data buf transferred
+ * @param[in]  length  data transferred size
+ * @param[in]  cqEntry pointer to completion entry
  *
  * @return This function returns VMK_OK if successful, otherwise Error Code
  */
 VMK_ReturnStatus
-NvmeCtrlrCmd_SetFeature(struct NvmeCtrlr *ctrlr, vmk_uint16 feature, vmk_uint32 option,
-         struct nvme_prp *prp, struct cq_entry *cqEntry)
+NvmeCtrlrCmd_SetFeature(struct NvmeCtrlr *ctrlr,
+                        int nsId,
+                        vmk_uint16 featureId,
+                        vmk_uint32 option,
+                        vmk_uint8 *buf,
+                        vmk_uint32 length,
+                        struct cq_entry *cqEntry)
 {
    struct nvme_cmd entry;
 
-   DPRINT_NS("Feature ID 0x%0x, option 0x%08x", feature, option);
+   DPRINT_ADMIN("Set feature sync: Fid: 0x%x, nsid: %d, option 0x%08x",
+                featureId, nsId, option);
+
    Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
    entry.header.opCode             = NVM_ADMIN_CMD_SET_FEATURES;
-   if (prp) {
-       entry.header.prp[0]         = *prp;
-       entry.header.prp[1].addr    = (prp->addr + VMK_PAGE_SIZE) & ~(VMK_PAGE_SIZE -1);
-   }
-   entry.cmd.setFeatures.featureID = feature;
+   entry.header.namespaceID        = nsId;
+   entry.cmd.setFeatures.featureID = featureId;
    entry.cmd.asUlong[1]            = option;
-   return (NvmeCtrlr_SendAdmin(ctrlr, &entry, cqEntry, ADMIN_TIMEOUT));
+   return NvmeCtrlrCmd_SendAdmin(ctrlr, &entry, buf, length, cqEntry, ADMIN_TIMEOUT);
 }
 
-
 /**
- * @brief This function retrieves a feature information
- *
- * @param[in] ctrlr pointer to nvme device context
- * @param[in] feature feature ID
- * @param[in] option feature option
- * @param[in] prp pointer to prp list of feature data
- * @param[in] cqEntry pointer to completion entry
+ * @brief This function sends an async set feature command
+ * 
+ * @param[in] ctrlr    pointer to nvme device context
+ * @param[in] nsId     namespace ID
+ * @param[in] feature  feature ID
+ * @param[in] option   feature option
+ * @param[in] done     completion callback
+ * @param[in] doneData data to completion callback
  *
  * @return This function returns VMK_OK if successful, otherwise Error Code
  */
 VMK_ReturnStatus
-NvmeCtrlrCmd_GetFeature(struct NvmeCtrlr *ctrlr, int nsId, vmk_uint16 feature, vmk_uint32 option,
-         struct nvme_prp *prp, struct cq_entry *cqEntry)
+NvmeCtrlrCmd_SetFeatureAsync(struct NvmeCtrlr *ctrlr,
+                            int nsId,
+                            vmk_uint16 featureId,
+                            vmk_uint32 option,
+                            NvmeCore_CompleteCommandCb done,
+                            void *doneData)
 {
-   struct   nvme_cmd entry;
+   struct nvme_cmd entry;
 
-   DPRINT_NS("Feature ID 0x%0x", feature);
+   DPRINT_ADMIN("Set feature async: Fid: 0x%x, nsid: %d, option 0x%08x",
+                featureId, nsId, option);
+
+   Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
+   entry.header.opCode             = NVM_ADMIN_CMD_SET_FEATURES;
+   entry.header.namespaceID        = nsId;
+   entry.cmd.setFeatures.featureID = featureId;
+   entry.cmd.asUlong[1]            = option;
+
+   return NvmeCtrlrCmd_SendAdminAsync(ctrlr, &entry, NULL, 0, done, doneData);
+}
+
+/**
+ * @brief This function sends a sync get feature command
+ *
+ * @param[in]  ctrlr   pointer to nvme device context
+ * @param[in]  nsId    namespace ID
+ * @param[in]  feature feature ID
+ * @param[in]  option  feature option
+ * @param[out] buf     pointer to data buf transferred
+ * @param[in]  length  data transferred size
+ * @param[in]  cqEntry pointer to completion entry
+ *
+ * @return This function returns VMK_OK if successful, otherwise Error Code
+ */
+VMK_ReturnStatus
+NvmeCtrlrCmd_GetFeature(struct NvmeCtrlr *ctrlr,
+                        int nsId,
+                        vmk_uint16 featureId,
+                        vmk_uint32 option,
+                        vmk_uint8 *buf,
+                        vmk_uint32 length,
+                        struct cq_entry *cqEntry)
+{
+   struct nvme_cmd entry;
+
+   DPRINT_ADMIN("Get feature sync: Fid: 0x%x, nsid: %d, option 0x%08x",
+                featureId, nsId, option);
+
    Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
    entry.header.opCode             = NVM_ADMIN_CMD_GET_FEATURES;
    entry.header.namespaceID        = nsId;
-   if (prp) {
-       entry.header.prp[0]         = *prp;
-       entry.header.prp[1].addr    = (prp->addr + VMK_PAGE_SIZE) & ~(VMK_PAGE_SIZE -1);
-   }
-   entry.cmd.getFeatures.featureID = feature;
+   entry.cmd.getFeatures.featureID = featureId;
    entry.cmd.asUlong[1]            = option;
-   return (NvmeCtrlr_SendAdmin(ctrlr, &entry, cqEntry, ADMIN_TIMEOUT));
+   return NvmeCtrlrCmd_SendAdmin(ctrlr, &entry, buf, length, cqEntry, ADMIN_TIMEOUT);
 }
 
+
 /**
- * @brief This function obtains log page via synchronous command
+ * @brief This function sends an async get feature command
  * 
- * @para[in] ctrlr pointer to nvme controller structure
- * @para[in] cmd pointer to nvme_cmd that has been partly assigned values by caller
- * @para[out] logPage address to copy log page data to
- * 
- * @return VMK_OK if successful, otherwise error code.
+ * @param[in] ctrlr    pointer to nvme device context
+ * @param[in] nsId     namespace ID
+ * @param[in] feature  feature ID
+ * @param[in] option   feature option
+ * @param[in] done     completion callback
+ * @param[in] doneData data to completion callback
+ *
+ * @return This function returns VMK_OK if successful, otherwise Error Code
  */
+
 VMK_ReturnStatus
-NvmeCtrlrCmd_GetLogPageSync(struct NvmeCtrlr *ctrlr, struct nvme_cmd *cmd, void* logPage)
+NvmeCtrlrCmd_GetFeatureAsync(struct NvmeCtrlr *ctrlr,
+                             int nsId,
+                             vmk_uint16 featureId,
+                             vmk_uint32 option,
+                             NvmeCore_CompleteCommandCb done,
+                             void *doneData)
 {
-   VMK_ReturnStatus     vmkStatus;
-   struct NvmeDmaEntry  dmaEntry;
+   struct nvme_cmd entry;
 
-   /*create dma entry*/
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
-   if (vmkStatus != VMK_OK) {
-      EPRINT("failed to allocate memory!");
-      return VMK_FAILURE;
-   }
+   DPRINT_ADMIN("Get feature async: Fid: 0x%x, nsid: %d, option 0x%08x",
+                featureId, nsId, option);
 
-   cmd->header.prp[0].addr = dmaEntry.ioa;
-   cmd->header.prp[1].addr = (cmd->header.prp[0].addr + (VMK_PAGE_SIZE)) &
-                     ~(VMK_PAGE_SIZE -1);
+   Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
+   entry.header.opCode             = NVM_ADMIN_CMD_GET_FEATURES;
+   entry.header.namespaceID        = nsId;
+   entry.cmd.getFeatures.featureID = featureId;
+   entry.cmd.asUlong[1]            = option;
 
-   /* Send sync command*/
-   DPRINT_ADMIN("admin cmd 0x%x ", cmd->header.opCode);
-   vmkStatus = NvmeCtrlr_SendAdmin(ctrlr, cmd, NULL, ADMIN_TIMEOUT);
-
-   /* Copy log page info*/
-   if(vmkStatus == VMK_OK) {
-      Nvme_Memcpy64(logPage, (struct smart_log*)dmaEntry.va, LOG_PG_SIZE/sizeof(vmk_uint64));
-   }
-   OsLib_DmaFree(&ctrlr->ctrlOsResources, &dmaEntry);
-
-   DPRINT_ADMIN("GetLogPage [0x%04x],timeout %d us, completion result 0x%x",
-          cmd->header.namespaceID, ADMIN_TIMEOUT, vmkStatus);
-
-   return vmkStatus;
+   return NvmeCtrlrCmd_SendAdminAsync(ctrlr, &entry, NULL, 0, done, doneData);
 }
 
 /**
- * @brief This fucntion obtains log page via asycn command
+ * @brief This function sends a sync request to retrieve a log page
  *
- * @para[in] ctrlr pointer to nvme controller structure
- * @para[in] cmd pointer to nvme_cmd that has been partly assigned values by caller
- * @para[out] logPage address to copy log page data to
- * @para[in] pointer to command info structure
- *
- * @return VMK_OK if successful, otherwise error code.
- */
-VMK_ReturnStatus
-NvmeCtrlrCmd_GetLogPageAsync(struct NvmeCtrlr *ctrlr, struct nvme_cmd *cmd, void* logPage,
-                             struct NvmeCmdInfo* cmdInfo)
-{
-   VMK_ReturnStatus     vmkStatus = VMK_OK;
-   struct NvmeQueueInfo *qinfo;
-   Nvme_Status  nvmeStatus;
-
-   /* handle async GetLogPage request */
-   DPRINT_ADMIN("async GetLogPage cmd 0x%x ", cmd->header.opCode);
-   VMK_ASSERT(cmdInfo != NULL);
-
-   /* use cmdInfo->prps to save log page data*/
-   cmd->header.prp[0].addr = cmdInfo->prpPhy;
-   cmd->header.prp[1].addr = (cmd->header.prp[0].addr + (VMK_PAGE_SIZE)) &
-                             ~(VMK_PAGE_SIZE -1);
-
-
-   qinfo = &(ctrlr->adminq);
-
-   cmdInfo->type = ADMIN_CONTEXT;
-   cmdInfo->status = NVME_CMD_STATUS_ACTIVE;
-   cmd->header.cmdID = cmdInfo->cmdId;
-   Nvme_Memcpy64(&cmdInfo->nvmeCmd, cmd, sizeof(cmdInfo->nvmeCmd)/sizeof(vmk_uint64));
-   DPRINT_ADMIN("submit async GetLogPage admin cmd 0x%x, id:%d", cmdInfo->nvmeCmd.header.opCode, cmdInfo->cmdId);
-
-   nvmeStatus = NvmeCore_SubmitCommandAsync(qinfo, cmdInfo, cmdInfo->done);
-
-   if(!SUCCEEDED(nvmeStatus)) {
-      VPRINT("Failed to submit Get Log Page command in async manner");
-      cmdInfo->type = ABORT_CONTEXT;
-      vmkStatus = VMK_FAILURE;
-      LOCK_FUNC(qinfo);
-      if (cmdInfo->cleanup) {
-         cmdInfo->cleanup(qinfo, cmdInfo);
-      }
-      NvmeCore_PutCmdInfo(qinfo, cmdInfo);
-      qinfo->timeout[cmdInfo->timeoutId] --;
-      UNLOCK_FUNC(qinfo);
-   }
-   return vmkStatus;
-}
-/**
- * @brief This function sends a request to retrieve a log page
- *
- * @param[in] ctrlr pointer to nvme device context
- * @param[in] nsID: namespace ID
- * @param[out] logPage pointer to memory used for copying log page data. It is
- *            used only when sending sync cmd, Asnyc cmd has nothing to do with it.
- * @param[in] logPageID Log Page Identifier
- * @param[in] cmdInfo pointer to command info structure, used only in async manner
- * @param[in] isSync If VMK_TRUE, issue command via sync cmd NvmeCtrlr_SendAdmin
- *            which waits the comand to complete. Otherwise use async cmd.
+ * @param[in]  ctrlr     pointer to nvme device context
+ * @param[in]  nsID      namespace ID
+ * @param[in]  logPageID Log Page Identifier
+ * @param[out] logPage   pointer to memory used for copying log page data
+ * @param[in]  length    data transferred size
  *
  * @return This function returns vmk_OK if successful, otherwise Error Code
  *
  */
-
 VMK_ReturnStatus
-NvmeCtrlrCmd_GetLogPage(struct NvmeCtrlr *ctrlr, vmk_uint32 nsID, void* logPage, vmk_uint16 logPageID,
-                        struct NvmeCmdInfo* cmdInfo, vmk_Bool isSync)
+NvmeCtrlrCmd_GetLogPage(struct NvmeCtrlr *ctrlr,
+                        vmk_uint32 nsID,
+                        vmk_uint16 logPageID,
+                        void* logPage,
+                        vmk_uint32 length)
 {
-   VMK_ReturnStatus	vmkStatus;
    struct nvme_cmd	entry;
 
+   DPRINT_ADMIN("Get log page sync: nsId: %d, pageId: 0x%x", nsID, logPageID);
+
    Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
+   entry.header.opCode = NVM_ADMIN_CMD_GET_LOG_PAGE;
    entry.header.namespaceID = nsID;
    entry.cmd.getLogPage.LogPageID = logPageID & 0xFFFF;
-   entry.cmd.getLogPage.numDW = (LOG_PG_SIZE/sizeof(vmk_uint32)-1);
+   entry.cmd.getLogPage.numDW = (length/sizeof(vmk_uint32)-1);
+
+   return NvmeCtrlrCmd_SendAdmin(ctrlr, &entry, logPage, length, NULL, ADMIN_TIMEOUT);
+}
+
+/**
+ * @brief This function sends an sync request to retrieve a log page
+ *
+ * @param[in] ctrlr     pointer to nvme device context
+ * @param[in] nsID      namespace ID
+ * @param[in] logPageID Log Page Identifier
+ * @param[in] length    data transferred size
+ * @param[in] done      completion callback
+ * @param[in] doneData  data to completion callback
+ *
+ * @return This function returns vmk_OK if successful, otherwise Error Code
+ */
+
+VMK_ReturnStatus
+NvmeCtrlrCmd_GetLogPageAsync(struct NvmeCtrlr *ctrlr,
+                             vmk_uint32 nsID,
+                             vmk_uint16 logPageID,
+                             vmk_uint32 length,
+                             NvmeCore_CompleteCommandCb done,
+                             void *doneData)
+{
+   struct nvme_cmd entry;
+
+   DPRINT_ADMIN("Get log page async: nsId: %d, pageId: 0x%x", nsID, logPageID);
+
+   Nvme_Memset64(&entry, 0LL, sizeof(entry)/sizeof(vmk_uint64));
    entry.header.opCode = NVM_ADMIN_CMD_GET_LOG_PAGE;
+   entry.header.namespaceID = nsID;
+   entry.cmd.getLogPage.LogPageID = logPageID & 0xFFFF;
+   entry.cmd.getLogPage.numDW = (length/sizeof(vmk_uint32)-1);
 
-   /* TODO: handle GLP_ID_ERR_INFO and GLP_ID_FIRMWARE_SLOT_INFO */
-
-   if (isSync == VMK_TRUE) {
-      vmkStatus = NvmeCtrlrCmd_GetLogPageSync(ctrlr, &entry, logPage);
-   }
-   else {
-      vmkStatus = NvmeCtrlrCmd_GetLogPageAsync(ctrlr, &entry, logPage, cmdInfo);
-   }
-   return vmkStatus;
+   return NvmeCtrlrCmd_SendAdminAsync(ctrlr, &entry, NULL, length, done, doneData);
 }
-
-
-
-VMK_ReturnStatus
-NvmeCtrlrCmd_GetSmartLog(struct NvmeCtrlr *ctrlr, vmk_uint32 nsID, struct smart_log *smartLog,
-                         struct NvmeCmdInfo *cmdInfo, vmk_Bool isSyncCmd)
-{
-   return NvmeCtrlrCmd_GetLogPage(ctrlr, nsID, (void*)smartLog, GLP_ID_SMART_HEALTH, cmdInfo, isSyncCmd);
-}
-
-VMK_ReturnStatus
-NvmeCtrlrCmd_GetErrorLog(struct NvmeCtrlr *ctrlr, vmk_uint32 nsID, struct error_log *errorLog,
-                         struct NvmeCmdInfo *cmdInfo, vmk_Bool isSyncCmd)
-{
-   return NvmeCtrlrCmd_GetLogPage(ctrlr, nsID, (void*)errorLog, GLP_ID_ERR_INFO, cmdInfo, isSyncCmd);
-}
-
 
 /**
  * This function replaces chars after a nul terminator (including the nul
@@ -1020,20 +1157,13 @@ static VMK_ReturnStatus
 NvmeCtrlr_GetIdentify(struct NvmeCtrlr *ctrlr)
 {
    VMK_ReturnStatus vmkStatus;
-   struct NvmeDmaEntry dmaEntry;
 
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
+   vmkStatus = NvmeCtrlrCmd_Identify(ctrlr, IDENTIFY_CONTROLLER, 0, 0,
+                                     (vmk_uint8 *)&ctrlr->identify);
    if (vmkStatus != VMK_OK) {
+      EPRINT("Failed to get controller identify data.");
       return vmkStatus;
    }
-
-   vmkStatus = NvmeCtrlrCmd_Identify(ctrlr, -1, dmaEntry.ioa);
-   if (vmkStatus != VMK_OK) {
-      goto free_dma;
-   }
-
-   Nvme_Memcpy64(&ctrlr->identify, (void *)dmaEntry.va, VMK_PAGE_SIZE/sizeof(vmk_uint64));
-   vmkStatus = VMK_OK;
 
    /* Now we have completed IDENTIFY command, update controller
     * parameters based on IDENTIFY result.
@@ -1044,7 +1174,7 @@ NvmeCtrlr_GetIdentify(struct NvmeCtrlr *ctrlr)
    ctrlr->nvmCmdSupport   = ctrlr->identify.cmdSupt;
    ctrlr->logPageAttr     = ctrlr->identify.logPgAttrib;
    ctrlr->pcieVID         = ctrlr->identify.pcieVID;
-
+   ctrlr->ctrlrId         = ctrlr->identify.cntlId;
 
    vmk_StringCopy(ctrlr->serial, ctrlr->identify.serialNum,
                   sizeof(ctrlr->serial));
@@ -1069,19 +1199,26 @@ NvmeCtrlr_GetIdentify(struct NvmeCtrlr *ctrlr)
       ctrlr->maxAen = MAX_EVENTS;
    }
 
-   ctrlr->nsCount = ctrlr->identify.numNmspc;
+   if (ctrlr->identify.numNmspc > NVME_MAX_NAMESPACE_PER_CONTROLLER) {
+      WPRINT("identify.nn %d exceeds to driver's capability %d, "
+             "only the first %d namespaces supported",
+             ctrlr->identify.numNmspc,
+             NVME_MAX_NAMESPACE_PER_CONTROLLER,
+             NVME_MAX_NAMESPACE_PER_CONTROLLER);
+      ctrlr->nn = NVME_MAX_NAMESPACE_PER_CONTROLLER;
+   } else {
+      ctrlr->nn = ctrlr->identify.numNmspc;
+   }
 
-   IPRINT("Controller: %s.", Nvme_GetCtrlrName(ctrlr));
-   IPRINT("Serial no: %s.", ctrlr->serial);
-   IPRINT("Model no: %s.", ctrlr->model);
-   IPRINT("Firmware revision: %s.", ctrlr->firmwareRev);
+   DPRINT_CTRLR("Controller: %s.", Nvme_GetCtrlrName(ctrlr));
+   DPRINT_CTRLR("Serial no: %s.", ctrlr->serial);
+   DPRINT_CTRLR("Model no: %s.", ctrlr->model);
+   DPRINT_CTRLR("Firmware revision: %s.", ctrlr->firmwareRev);
 
    DPRINT_CTRLR("Admin Cmd Vendor Cfg: 0x%x.", ctrlr->admVendCmdCfg);
    DPRINT_CTRLR("NVM Cmd Vendor Cfg: 0x%x.", ctrlr->nvmVendCmdCfg);
-   DPRINT_CTRLR("Number of namespaces: %d.", ctrlr->nsCount);
+   DPRINT_CTRLR("Max Number of Namespaces: %d.", ctrlr->nn);
 
-free_dma:
-   OsLib_DmaFree(&ctrlr->ctrlOsResources, &dmaEntry);
    return vmkStatus;
 }
 
@@ -1152,26 +1289,33 @@ NvmeCtrlr_RequestIoQueues(struct NvmeCtrlr *ctrlr, vmk_uint32 *nrIoQueues)
 {
    struct cq_entry cqEntry;
    VMK_ReturnStatus vmkStatus;
+   vmk_uint16 allocNum;
 
    DPRINT_Q("attempting to allocate [%d] IO queues", *nrIoQueues);
 
    do {
-      vmkStatus = NvmeCtrlrCmd_SetFeature(ctrlr, FTR_ID_NUM_QUEUE,
-         (*nrIoQueues << 16) | *nrIoQueues,
-         NULL, &cqEntry);
+      vmkStatus = NvmeCtrlrCmd_SetFeature(ctrlr, 0, FTR_ID_NUM_QUEUE,
+                                          ((*nrIoQueues - 1) << 16) | (*nrIoQueues - 1),
+                                          NULL, 0, &cqEntry);
 
       if (vmkStatus != VMK_OK) {
          EPRINT("Failed requesting nr_io_queues 0x%x", cqEntry.SC);
-         if (*nrIoQueues == 1) {
+         if (*nrIoQueues == 0) {
             break;
          }
 
-         *nrIoQueues = 1;
+         *nrIoQueues = 0;
       }
    } while(vmkStatus != VMK_OK);
 
-   if (vmkStatus != VMK_OK) {
-      DPRINT_Q("maximum of [%d] IO queues", cqEntry.param.numCplQAlloc);
+   if (vmkStatus == VMK_OK) {
+      allocNum = cqEntry.param.numCplQAlloc + 1;
+      DPRINT_Q("Allocated [%d] IO queues", allocNum);
+      if (allocNum < *nrIoQueues) {
+         WPRINT("Number of IO queues allocated [%d] is less than requested [%d],"
+                " set IO queue number as %d.", allocNum, *nrIoQueues, allocNum);
+         *nrIoQueues = allocNum;
+      }
    }
 
    return vmkStatus;
@@ -1190,9 +1334,11 @@ NvmeCtrlr_RequestIoQueues(struct NvmeCtrlr *ctrlr, vmk_uint32 *nrIoQueues)
 static void
 NvmeCtrlr_FreeNs(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo *ns)
 {
+   VMK_ASSERT(vmk_AtomicRead64(&ns->refCount) == 0);
    DPRINT_NS("Releasing Namespace [%d] %p", ns->id, ns);
    OsLib_LockDestroy(&ns->lock);
    vmk_ListRemove(&ns->list);
+   vmk_AtomicDec32(&ctrlr->nsCount);
    Nvme_Free(ns);
 }
 
@@ -1215,40 +1361,37 @@ NvmeCtrlr_AllocNs(struct NvmeCtrlr *ctrlr, int nsId)
    vmk_uint32   lba_format;
    struct NvmeNsInfo *ns;
    struct iden_namespace *ident;
-   struct NvmeDmaEntry dmaEntry;
    char propName[VMK_MISC_NAME_MAX];
 
    ns = Nvme_Alloc(sizeof(*ns), 0, NVME_ALLOC_ZEROED);
-   if (! ns) {
+   if (!ns) {
        EPRINT("Failed NS memory allocation.");
        return (NULL);
    }
 
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
-   if (vmkStatus != VMK_OK) {
-      goto free_ns;
+   ident = Nvme_Alloc(sizeof(*ident), 0, NVME_ALLOC_ZEROED);
+   if (!ident) {
+       EPRINT("Failed ident memory allocation.");
+       goto free_ns;
    }
 
-
-   vmkStatus = NvmeCtrlrCmd_Identify(ctrlr, nsId, dmaEntry.ioa);
+   vmkStatus = NvmeCtrlrCmd_Identify(ctrlr, IDENTIFY_NAMESPACE, 0, nsId,
+                                     (vmk_uint8 *)ident);
    if (vmkStatus != VMK_OK) {
        EPRINT("Failed get NS Identify data.");
-       goto free_dma;
+       goto free_ident;
    }
 
-   ident = (struct iden_namespace *)dmaEntry.va;
    DPRINT_NS("NS [%d], size %lu, lba_fmt 0x%02x, Formats 0x%02x",
-            nsId, ident->size,
-            ident->fmtLbaSize, ident->numLbaFmt);
+            nsId, ident->size, ident->fmtLbaSize, ident->numLbaFmt);
    DPRINT_NS("NS [%d], feature 0x%02x, Prot Cap 0x%02x, Prot Set 0x%02x",
-            nsId, ident->feat,
-            ident->dataProtCap, ident->dataProtSet);
+            nsId, ident->feat, ident->dataProtCap, ident->dataProtSet);
 
    for (i = 0; i <= ident->numLbaFmt; i++) {
       DPRINT_NS("supported LBA format 0x%08x",
                *(vmk_uint32 *)&ident->lbaFmtSup[i]);
    }
-   lba_format   = *(vmk_uint32 *)&ident->lbaFmtSup[ident->fmtLbaSize & 0x0F];
+   lba_format = *(vmk_uint32 *)&ident->lbaFmtSup[ident->fmtLbaSize & 0x0F];
    DPRINT_NS("LBA format 0x%08x", lba_format);
    DPRINT_NS("Meta Data Capability 0x%02x", ident->metaDataCap);
    DPRINT_NS("LBA Data Prot Cap/Set 0x%02x/0x%02x",
@@ -1260,7 +1403,7 @@ NvmeCtrlr_AllocNs(struct NvmeCtrlr *ctrlr, int nsId)
                                 propName, &ns->lock);
    if (vmkStatus != VMK_OK) {
        EPRINT("Failed NS lock creation.");
-       goto free_dma;
+       goto free_ident;
    }
 
    vmk_ListInit(&ns->list);
@@ -1282,13 +1425,13 @@ NvmeCtrlr_AllocNs(struct NvmeCtrlr *ctrlr, int nsId)
    ns->ctrlr       = ctrlr;
 
    ns->eui64       = ident->eui64;
+   vmk_Memcpy(ns->nguid, &ident->nguid, 16);
 
    DPRINT_NS("NS [%d] %p, adding to dev list %p, lba size %u",
-         ns->id, ns, &ctrlr->nsList, (1 << ns->lbaShift));
+             ns->id, ns, &ctrlr->nsList, (1 << ns->lbaShift));
+   vmk_SpinlockLock(ctrlr->lock);
    vmk_ListInsert(&ns->list, vmk_ListAtRear(&ctrlr->nsList));
-
-   /* Need to free the DMA buffer used here */
-   OsLib_DmaFree(&ctrlr->ctrlOsResources, &dmaEntry);
+   vmk_SpinlockUnlock(ctrlr->lock);
 
    /* Mark ns as ONLINE by default */
    ns->flags |= NS_ONLINE;
@@ -1296,10 +1439,13 @@ NvmeCtrlr_AllocNs(struct NvmeCtrlr *ctrlr, int nsId)
    /* Initially set ref count to 0 */
    vmk_AtomicWrite64(&ns->refCount, 0);
 
+   Nvme_Free(ident);
+
+   vmk_AtomicInc32(&ctrlr->nsCount);
    return (ns);
 
-free_dma:
-   OsLib_DmaFree(&ctrlr->ctrlOsResources, &dmaEntry);
+free_ident:
+   Nvme_Free(ident);
 
 free_ns:
    Nvme_Free(ns);
@@ -1312,10 +1458,9 @@ vmk_uint64
 NvmeCtrlr_GetNs(struct NvmeNsInfo *ns)
 {
    vmk_uint64 rc;
-   rc = vmk_AtomicReadInc64(&ns->refCount);
+   rc = vmk_AtomicReadInc64(&ns->refCount) + 1;
 #if NVME_DEBUG
-   DPRINT_NS("ns %d refCount increased to %ld.",
-      ns->id, vmk_AtomicRead64(&ns->refCount));
+   DPRINT_NS("ns %d refCount increased to %ld.", ns->id, rc);
 #endif
    return rc;
 }
@@ -1325,26 +1470,20 @@ NvmeCtrlr_PutNs(struct NvmeNsInfo *ns)
 {
    vmk_uint64 rc;
 
-   rc = vmk_AtomicReadDec64(&ns->refCount);
+   rc = vmk_AtomicReadDec64(&ns->refCount) - 1;
 
 #if NVME_DEBUG
-   DPRINT_NS("ns %d refCount decreased to %ld.",
-      ns->id, vmk_AtomicRead64(&ns->refCount));
+   DPRINT_NS("ns %d refCount decreased to %ld.", ns->id, rc);
 #endif
-
-   /**
-    * Free the namespace data structure if reference count reaches 0.
-    *
-    * Note: We should never hit this condition when the device is operational.
-    */
-   if (rc == 1) {
-      VMK_ASSERT(NvmeState_GetCtrlrState(ns->ctrlr, VMK_FALSE) != NVME_CTRLR_STATE_OPERATIONAL);
-      NvmeCtrlr_FreeNs(ns->ctrlr, ns);
-   }
 
    return rc;
 }
 
+static inline vmk_Bool
+SupportNsMgmtAttach(struct NvmeCtrlr *ctrlr)
+{
+   return (ctrlr->identify.adminCmdSup & 0x8);
+}
 
 /**
  * Allocate namespace data blocks for the controller
@@ -1357,8 +1496,10 @@ NvmeCtrlr_PutNs(struct NvmeNsInfo *ns)
 VMK_ReturnStatus
 NvmeCtrlr_AllocDisks(struct NvmeCtrlr *ctrlr)
 {
-   int nsId;
+   int i, n = 0;
+   VMK_ReturnStatus vmkStatus = VMK_OK;
    struct NvmeNsInfo *ns;
+   struct ns_list *nsList = NULL;
 
    /**
     * For number of Namespaces discovered:
@@ -1368,37 +1509,133 @@ NvmeCtrlr_AllocDisks(struct NvmeCtrlr *ctrlr)
     * c. create a disk device.
     * d. add Namespace to list of devices
     */
-   for (nsId = 1; nsId <= ctrlr->nsCount; nsId++) {
-
-      DPRINT_NS("allocating Namespace %d", nsId);
-      ns = NvmeCtrlr_AllocNs(ctrlr, nsId);
-      if (! ns) {
-         EPRINT("Failed to allocate NS information structure.");
-         continue;
+   if (SupportNsMgmtAttach(ctrlr)) {
+      nsList = Nvme_Alloc(sizeof(*nsList), 0, NVME_ALLOC_ZEROED);
+      if (nsList == NULL) {
+         EPRINT("Failed to allocate memory.");
+         return VMK_NO_MEMORY;
       }
 
-      /**
-       * Grab a reference to the namespace. The reference will be released
-       * at device cleanup.
-       */
-      NvmeCtrlr_GetNs(ns);
+      vmkStatus = NvmeCtrlrCmd_Identify(ctrlr, ACTIVE_NAMESPACE_LIST, 0, 0,
+                                        (vmk_uint8 *)nsList);
+      if (vmkStatus != VMK_OK) {
+         EPRINT("Failed to get attached namespace list, status: %x", vmkStatus);
+         goto out;
+      }
 
-#if 0
-#if USE_NS_ATTR
-       /**
-        * Get Namespace attributes/
-        */
-       if (nvme_ns_attr(dev, nsId, ns)) {
-         EPRINT("Failed get NS attributes, ignoring namespace.");
-         continue;
-       }
-#endif
-#endif
+      for (i = 0; i < ctrlr->nn; i++) {
+         if (nsList->nsId[i] == 0) {
+            break;
+         }
+
+         DPRINT_NS("allocating Namespace %d", nsList->nsId[i]);
+         ns = NvmeCtrlr_AllocNs(ctrlr, nsList->nsId[i]);
+         if (!ns) {
+            EPRINT("Failed to allocate NS [%d] information structure.", nsList->nsId[i]);
+            continue;
+         }
+         n ++;
+      }
+
+      DPRINT_NS("Attached Namespace number: %d", n);
+   } else {
+      for (i = 1; i <= ctrlr->nn; i++) {
+         DPRINT_NS("allocating Namespace %d", i);
+         ns = NvmeCtrlr_AllocNs(ctrlr, i);
+         if (!ns) {
+            EPRINT("Failed to allocate NS [%d] information structure.", i);
+            continue;
+         }
+         n ++;
+      }
    }
 
-   return VMK_OK;
+out:
+   if (nsList != NULL) {
+      Nvme_Free(nsList);
+   }
+   return vmkStatus;
 }
 
+VMK_ReturnStatus
+NvmeCtrlr_UpdateNsList(struct NvmeCtrlr *ctrlr, int sel, vmk_uint32 nsId)
+{
+   VMK_ReturnStatus   vmkStatus = VMK_OK;
+   Nvme_Status        nvmeStatus = NVME_STATUS_SUCCESS;
+   struct ns_list    *nsList;
+   struct NvmeNsInfo *ns = NULL;
+   vmk_ListLinks     *itemPtr, *nextPtr;
+   int                i, num;
+   vmk_Bool           found = VMK_FALSE;
+
+   nsList = Nvme_Alloc(sizeof(*nsList), 0, NVME_ALLOC_ZEROED);
+   if (nsList == NULL) {
+      EPRINT("Failed to allocate memory.");
+      return VMK_NO_MEMORY;
+   }
+
+   vmkStatus = NvmeCtrlrCmd_Identify(ctrlr, ACTIVE_NAMESPACE_LIST, 0, 0,
+                                     (vmk_uint8 *)nsList);
+   if (vmkStatus != VMK_OK) {
+      EPRINT("Failed to get attached namespace list, status: %x", vmkStatus);
+      goto out;
+   }
+
+   for (i = 0; i < ctrlr->nn; i++) {
+      if (nsList->nsId[i] == 0) {
+         break;
+      }
+      if (nsList->nsId[i] == nsId) {
+         found = VMK_TRUE;
+      }
+   }
+
+   num = i;
+   DPRINT_NS("num: %d, nsCount: %d, found: %d\n",
+             num, vmk_AtomicRead32(&ctrlr->nsCount), (int)found);
+
+   if (sel == NS_ATTACH) {
+      VMK_ASSERT(num == vmk_AtomicRead32(&ctrlr->nsCount) + 1 && found);
+      ns = NvmeCtrlr_AllocNs(ctrlr, nsId);
+      if (!ns) {
+         EPRINT("Failed to allocate NS information structure.");
+         vmkStatus =  VMK_NO_MEMORY;
+         goto out;
+      }
+      nvmeStatus = NvmeCore_SetNamespaceOnline(ctrlr, VMK_TRUE, nsId);
+      if (nvmeStatus != NVME_STATUS_SUCCESS) {
+         EPRINT("Failed to set the namespace %d online.", nsId);
+         vmkStatus = VMK_FAILURE;
+         goto out;
+      }
+   } else {
+      VMK_ASSERT(num == vmk_AtomicRead32(&ctrlr->nsCount) - 1 && !found);
+
+      found = VMK_FALSE;
+      vmk_SpinlockLock(ctrlr->lock);
+      VMK_LIST_FORALL_SAFE(&ctrlr->nsList, itemPtr, nextPtr) {
+         ns = VMK_LIST_ENTRY(itemPtr, struct NvmeNsInfo, list);
+         if (ns->id == nsId) {
+            found = VMK_TRUE;
+            break;
+         }
+      }
+      /*
+       * Before this function is called, this path should be unclaimed, and the
+       * namespace is set as offline by user world tool, which means, the path
+       * has already been destroied.
+       */
+      VMK_ASSERT(found);
+      if (found) {
+         NvmeCtrlr_FreeNs(ctrlr, ns);
+      }
+      vmk_SpinlockUnlock(ctrlr->lock);
+   }
+
+out:
+   Nvme_Free(nsList);
+   return vmkStatus;
+}
 
 /**
  * Free namespace data blocks for the adatper.
@@ -1411,30 +1648,9 @@ NvmeCtrlr_FreeDisks(struct NvmeCtrlr *ctrlr)
    struct NvmeNsInfo *ns;
    vmk_ListLinks *itemPtr, *nextPtr;
 
-   /*
-    * First, offline all namespace by marking all LUNs as PDL.
-    */
-   if (ctrlr->ctrlOsResources.scsiAdapter) {
-      OsLib_SetPathLostByDevice(&ctrlr->ctrlOsResources);
-   }
-
    VMK_LIST_FORALL_SAFE(&ctrlr->nsList, itemPtr, nextPtr) {
       ns = VMK_LIST_ENTRY(itemPtr, struct NvmeNsInfo, list);
-
-      /*
-       * Try to delete the path. This is a best-effort operation, if there
-       * are open handles to the SCSI device and path, the clean up would
-       * fail.
-       */
-      if (ctrlr->ctrlOsResources.scsiAdapter) {
-         vmk_ScsiScanDeleteAdapterPath(&ctrlr->ctrlOsResources.scsiAdapter->name,
-               0,
-               0,
-               ns->id - 1);
-      }
-
-      DPRINT_NS("NS [%d], releasing resource %p", ns->id, ns);
-      NvmeCtrlr_PutNs(ns);
+      NvmeCtrlr_FreeNs(ctrlr, ns);
    }
 
    return VMK_OK;
@@ -1460,7 +1676,7 @@ NvmeCtrlr_CheckIOFunction(struct NvmeNsInfo *ns, struct NvmeQueueInfo *qinfo)
    cmdInfo = NvmeCore_GetCmdInfo(qinfo);
    if (!cmdInfo) {
       UNLOCK_FUNC(qinfo);
-      return VMK_NO_MEMORY;
+      return VMK_NO_RESOURCES;
    }
    UNLOCK_FUNC(qinfo);
 
@@ -1474,36 +1690,37 @@ NvmeCtrlr_CheckIOFunction(struct NvmeNsInfo *ns, struct NvmeQueueInfo *qinfo)
    cmd->header.prp[1].addr = 0;
    cmd->header.namespaceID = ns->id;
    cmd->header.cmdID = cmdInfo->cmdId;
+#if USE_TIMER
    cmdInfo->timeoutId = ctrlr->timeoutId;
+#endif
    cmdInfo->doneData = NULL;
-   cmd->cmd.read.numLBA = 1;
+   cmd->cmd.read.numLBA = 0;
+   cmd->cmd.read.startLBA = 0;
    if (END2END_DPS_TYPE(ns->dataProtSet)) {
       cmd->cmd.read.protInfo = 0x8;
    }
 
-   qinfo->timeout[cmdInfo->timeoutId] ++;
-
    cmdInfo->type = BIO_CONTEXT;
-   cmdInfo->status = NVME_CMD_STATUS_ACTIVE;
 
    timeout = 1 * 1000 * 1000; /* 1 second in microseconds */
    DPRINT_CMD("issue read to fw");
    nvmeStatus = NvmeCore_SubmitCommandWait(qinfo, cmdInfo, NULL, timeout);
 
-   if (SUCCEEDED(nvmeStatus)) {
-      /* When the command has been submitted into hardware, we should check cmdStatus 
-       * to confirm whether the command is completed successfully*/
-      nvmeStatus = cmdInfo->cmdStatus;
-   }
    /*(1) Theoretically, nvmeStatus should reflect whether the command is truly completed.
     * If not, sleep 1 second before issuing next command to avoid high CPU utilization.
     *(2) There is a minor possibility that the command times out due to fw problem, in this case,
     * the command will be marked with ABORT_CONTEXT and handled in processCq routine. Since at most
     * 60 commands will be issued, the submission queue will not get overwhelmed given that its size is 1024*/
    if(!SUCCEEDED(nvmeStatus)) {
+      if (nvmeStatus != NVME_STATUS_ABORTED) {
+         // Command failed to be submitted to hardwware
+         NvmeCore_PutCmdInfo(qinfo, cmdInfo);
+      }
       DPRINT_CMD("read fails, sleep 1s");
       vmk_WorldSleep(timeout);
       DPRINT_CMD("sleep finished");
+   } else {
+      NvmeCore_PutCmdInfo(qinfo, cmdInfo);
    }
    return nvmeStatus;
 }
@@ -1536,7 +1753,7 @@ NvmeCtrlr_WaitDeviceReady(struct NvmeCtrlr *ctrlr)
 
    validNs = VMK_FALSE;
    /*Use the 1st namespace whose size > 0*/
-   if(ctrlr->nsCount > 0) {
+   if(ctrlr->nn > 0) {
       /*issue cmd to the first useable namespace */
       VMK_LIST_FORALL_SAFE(&ctrlr->nsList, itemPtr, nextPtr) {
          ns = VMK_LIST_ENTRY(itemPtr, struct NvmeNsInfo, list);
@@ -1548,7 +1765,7 @@ NvmeCtrlr_WaitDeviceReady(struct NvmeCtrlr *ctrlr)
       }
    }
    else {
-      VPRINT("nsCount = 0, no need to check IO, return success");
+      VPRINT("nn = 0, no need to check IO, return success");
       return  NVME_STATUS_SUCCESS;
    }
 
@@ -1575,7 +1792,7 @@ NvmeCtrlr_WaitDeviceReady(struct NvmeCtrlr *ctrlr)
       }
 
       if(!OsLib_TimeAfter(OsLib_GetTimerUs(), timeout)) {
-         VPRINT("device not ready after 60 seconds, quit");
+         EPRINT("device not ready after 60 seconds, quit");
          nvmeStatus = NVME_STATUS_FAILURE;
          break;
       }
@@ -1597,6 +1814,9 @@ NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr)
 {
    VMK_ReturnStatus vmkStatus;
    int              nrIoQueues;
+   vmk_uint64       hwCap = 0;
+   vmk_uint32       minPage = 0;
+   vmk_uint32       maxSize = VMK_UINT32_MAX;
 
    DPRINT_CTRLR("NvmeCtrlr_Start");
 
@@ -1617,6 +1837,25 @@ NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr)
    vmkStatus = NvmeCtrlr_GetIdentify(ctrlr);
    if (vmkStatus != VMK_OK) {
       goto stop_hw;
+   }
+
+   /* Initialize max transfer length of controller */
+   DPRINT_CTRLR("mdts: %d\n", ctrlr->identify.mdts);
+   if (ctrlr->identify.mdts != 0) {
+      hwCap = Nvme_Readq(ctrlr->regs + NVME_CAP);
+      minPage = (1 << (((hwCap & NVME_CAP_MPSMIN_MSK64) >> NVME_CAP_MPSMIN_LSB) + 12));
+      maxSize = (1 << ctrlr->identify.mdts) * minPage;
+   }
+   ctrlr->maxXferLen = min_t(vmk_uint32, transfer_size * 1024, maxSize);
+   DPRINT_CTRLR("maxXferLen: %d\n", ctrlr->maxXferLen);
+
+   if (NvmeCtrlr_IsIntelStripeLimit(ctrlr)) {
+      /**
+       * According to Intel, the stripe size could be retrieved from byte 3075
+       * in controller identify page.
+       */
+      ctrlr->stripeSize = (1 << ctrlr->identify.reservedF[3]) * minPage;
+      DPRINT_CTRLR("stripeSize: %d\n", ctrlr->stripeSize);
    }
 
 #if ASYNC_EVENTS_ENABLED
@@ -1650,6 +1889,16 @@ NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr)
    DPRINT_Q("Got %d HW IO queues.", nrIoQueues);
    ctrlr->numIoQueues = nrIoQueues;
 
+#if NVME_MUL_COMPL_WORLD
+   vmkStatus = OsLib_StartCompletionWorlds(ctrlr);
+   if (vmkStatus != VMK_OK) {
+      EPRINT("Failed to create completion worlds. vmkStatus: 0x%x.",  \
+            vmkStatus);
+      goto stop_hw;
+
+   }
+#endif
+
    /*
     * Allocate IO queue information blocks, required DMA resources
     * and register IO queues with controller.
@@ -1657,7 +1906,7 @@ NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr)
    vmkStatus = NvmeCtrlr_CreateIoQueues(ctrlr);
    if (vmkStatus != VMK_OK) {
       EPRINT("Failed to allocate IO queues, 0x%x.", vmkStatus);
-      goto stop_hw;
+      goto cleanup_compl_worlds;
    }
 
    /*
@@ -1685,10 +1934,14 @@ NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr)
    /*
     * Device is now operational.
     */
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_STARTED, VMK_TRUE);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_STARTED);
 
    return VMK_OK;
 
+cleanup_compl_worlds:
+#if NVME_MUL_COMPL_WORLD
+   OsLib_EndCompletionWorlds(ctrlr);
+#endif
 
 stop_hw:
    NvmeCtrlr_HwStop(ctrlr);
@@ -1705,7 +1958,7 @@ stop_hw:
 void
 NvmeCtrlr_SetMissing(struct NvmeCtrlr *ctrlr)
 {
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_MISSING, VMK_TRUE);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_MISSING);
 }
 
 
@@ -1715,7 +1968,7 @@ NvmeCtrlr_SuspendAdminQueue(struct NvmeCtrlr *ctrlr)
    /**
     * TODO: pick a correct timeoutId when doing suspend
     */
-   NvmeCore_SuspendQueue(&ctrlr->adminq, 0);
+   NvmeCore_SuspendQueue(&ctrlr->adminq);
 }
 
 static void
@@ -1748,17 +2001,13 @@ NvmeCtrlr_SuspendIoQueues(struct NvmeCtrlr *ctrlr)
 {
    struct NvmeQueueInfo *qinfo;
    int   i;
-   /**
-    * TODO: pick a correct new timeoutId
-    */
-   int   newId = 0;
 
    DPRINT_CMD("device %p [%s], suspending %d queues",
             ctrlr, Nvme_GetCtrlrName(ctrlr), ctrlr->numIoQueues);
 
    for( i = 1; i <= ctrlr->numIoQueues; i++ ) {
       qinfo = &ctrlr->ioq[i - 1];
-      NvmeCore_SuspendQueue(qinfo, newId);
+      NvmeCore_SuspendQueue(qinfo);
    }
 }
 
@@ -1822,15 +2071,17 @@ NvmeCtrlr_FlushAdminQueue(struct NvmeCtrlr *ctrlr)
 #endif
 
    qinfo = &ctrlr->adminq;
-   LOCK_FUNC(qinfo);
    NvmeCore_FlushQueue(qinfo, NULL, INVALID_TIMESLOT, NVME_STATUS_IN_RESET , VMK_FALSE);
-
-#if ENABLE_REISSUE == 0
-   for (id = 0; id < io_timeout; id ++) {
-      qinfo->timeout[id] = 0;
+#if ((ENABLE_REISSUE == 0) && (USE_TIMER))
+   /**
+    * Reinitialize the timeout values. This is done outside the lock since
+    * the queue is disabled and no IOs should affect these fields
+    */
+   for (id = 0; id < NVME_IO_TIMEOUT; id ++) {
+      qinfo->timeoutCount[id] = 0;
+      vmk_AtomicWrite32(&qinfo->timeoutComplCount[id], 0);
    }
 #endif
-   UNLOCK_FUNC(qinfo);
 }
 
 
@@ -1857,27 +2108,29 @@ NvmeCtrlr_FlushIoQueues(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns, int stat
    int   id;
 #endif
 
-   DPRINT_CMD("device %p [%s], flushing %d queues",
+   DPRINT_Q("device %p [%s], flushing %d queues",
             ctrlr, Nvme_GetCtrlrName(ctrlr), ctrlr->numIoQueues);
 
    for(i = 1; i <= ctrlr->numIoQueues; i++ ) {
       qinfo = &ctrlr->ioq[i - 1];
 
-      DPRINT_CMD("qinfo %p [%d], nr_req %d, nr_act %d", qinfo, qinfo->id,
-               qinfo->nrReq, qinfo->nrAct);
-
-      LOCK_FUNC(qinfo);
+      DPRINT_Q("qinfo %p [%d], nr_act %d", qinfo, qinfo->id,
+               qinfo->nrAct - qinfo->pendingCmdFree.freeListLength);
+#if USE_TIMER
       NvmeCore_FlushQueue(qinfo, ns, ctrlr->timeoutId, status, doReissue);
-#if ENABLE_REISSUE == 0
-      /**
-       * Clear timeout table.
-       */
-      for (id=0; id<io_timeout; id++) {
-         qinfo->timeout[id] = 0;
-      }
-      qinfo->nrAct = 0;     /* reset active requests */
+#else
+      NvmeCore_FlushQueue(qinfo, ns, 0, status, doReissue);
 #endif
-      UNLOCK_FUNC(qinfo);
+#if ((ENABLE_REISSUE == 0) && (USE_TIMER))
+      /**
+       * Reinitialize the timeout values. This is done outside the lock since
+       * the queue is disabled and no IOs should affect these fields
+       */
+      for (id = 0; id < NVME_IO_TIMEOUT; id ++) {
+         qinfo->timeoutCount[id] = 0;
+         vmk_AtomicWrite32(&qinfo->timeoutComplCount[id], 0);
+      }
+#endif
    }
 }
 
@@ -1970,7 +2223,7 @@ NvmeQueue_RestartIoQueue(struct NvmeQueueInfo *qinfo, int restart)
 {
    int   result = 0;
 
-   IPRINT("Restarting io queue %p[%d].", qinfo, qinfo->id);
+   DPRINT_Q("Restarting io queue %p[%d].", qinfo, qinfo->id);
    /* TODO: Do we need to grab the queue lock here? */
    // qinfo->lockFunc(qinfo->lock);
    result = NvmeQueue_ResetIoQueue(qinfo, restart);
@@ -1986,8 +2239,14 @@ NvmeQueue_RestartIoQueue(struct NvmeQueueInfo *qinfo, int restart)
       vmk_ListLinks *itemPtr, *nextPtr;
       Nvme_Status nvmeStatus;
       vmk_ScsiCommand      *vmkCmd;
-
-      VMK_LIST_FORALL_SAFE(&qinfo->cmdActive, itemPtr, nextPtr) {
+      vmk_ListLinks cmdActive;
+      /**
+        * We need to hold the lock queue because the reset enables the
+        * interrupts and the active list might be modified
+        */
+      LOCK_FUNC(qinfo);
+      NvmeCore_QueryActiveCommands(qinfo, &cmdActive);
+      VMK_LIST_FORALL_SAFE(&cmdActive, itemPtr, nextPtr) {
          cmdInfo = VMK_LIST_ENTRY(itemPtr, struct NvmeCmdInfo, list);
          vmkCmd  = NvmeCore_CmdInfoToScsiCmd(cmdInfo);
 
@@ -2003,12 +2262,14 @@ NvmeQueue_RestartIoQueue(struct NvmeQueueInfo *qinfo, int restart)
           * don't need to reissue it because it has been completed.
           * See PR #1473498.
           * */
-         if (!(cmdInfo->cmdBase == cmdInfo && cmdInfo->status == NVME_CMD_STATUS_DONE)) {
+         if (!(cmdInfo->cmdBase == cmdInfo &&
+            vmk_AtomicRead32(&cmdInfo->atomicStatus) == NVME_CMD_STATUS_DONE)) {
             nvmeStatus = NvmeCore_ReissueCommand(qinfo, cmdInfo);
             VMK_ASSERT(nvmeStatus == NVME_STATUS_SUCCESS);
          }
 
       }
+      UNLOCK_FUNC(qinfo);
    }
 #endif
 
@@ -2076,14 +2337,17 @@ NvmeCtrlr_RestartIoQueues(struct NvmeCtrlr *ctrlr, int restart)
  * @return Error Code if failed
  */
 VMK_ReturnStatus
-NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns , Nvme_Status status, vmk_Bool doReissue)
+NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr,
+                  struct NvmeNsInfo* ns,
+                  Nvme_Status status,
+                  vmk_Bool doReissue)
 {
    VMK_ReturnStatus vmkStatus;
    Nvme_CtrlrState state;
    int nrIoQueues;
 
    IPRINT("Restarting Controller %s.", Nvme_GetCtrlrName(ctrlr));
-   state = NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_INRESET, VMK_TRUE);
+   state = NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_INRESET);
    if (state == NVME_CTRLR_STATE_INRESET) {
       /**
        * We are already in reset
@@ -2134,8 +2398,7 @@ NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns , Nvme_Status s
     */
    vmkStatus = NvmeCtrlr_HwStart(ctrlr);
    if (vmkStatus != VMK_OK) {
-      EPRINT("Controller Reset Failure.");
-      EPRINT("Offlining Controller.");
+      EPRINT("Controller Reset Failure. Offlining Controller.");
       goto err_out;
    }
 
@@ -2143,7 +2406,7 @@ NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns , Nvme_Status s
     *  Transit ctrlr state from INRESET to STARTED to make sure completion
     *  callback:nvmeCoreProcessCq would handle the admin commands later correctly.
     */
-    NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_STARTED, VMK_TRUE);
+    NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_STARTED);
 
    /**
     * Resume admin queue now.
@@ -2156,29 +2419,27 @@ NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns , Nvme_Status s
     */
    vmkStatus = NvmeCtrlr_GetIdentify(ctrlr);
    if (vmkStatus != VMK_OK) {
-       EPRINT("Controller Identify Failure.");
-       EPRINT("Offlining Controller.");
-       goto err_out;
+      EPRINT("Controller Identify Failure. Offlining Controller.");
+      goto err_out;
    }
 
    /* Double check number of queues to be same as nrIoQueues */
    nrIoQueues = ctrlr->numIoQueues;
    vmkStatus = NvmeCtrlr_RequestIoQueues(ctrlr, &nrIoQueues);
    if (vmkStatus != VMK_OK) {
-       EPRINT("Failed to allocate hardware IO Queue error.");
-       goto err_out;
+      EPRINT("Failed to allocate hardware IO Queue error.");
+      goto err_out;
    }
    if (nrIoQueues != ctrlr->numIoQueues) {
-       EPRINT("IO queue configuration changed!!!");
-       EPRINT("Unsupported configuration, failing controller.");
-       goto err_out;
+      EPRINT("IO queue configuration changed! Failing controller.");
+      goto err_out;
    }
    DPRINT_Q("Got %d hw IO queues", nrIoQueues);
 
    vmkStatus = NvmeCtrlr_RestartIoQueues(ctrlr, VMK_TRUE);
    if (vmkStatus) {
-       EPRINT("Failed to restart IO queue %0x.", vmkStatus);
-       goto err_out;
+      EPRINT("Failed to restart IO queue %0x.", vmkStatus);
+      goto err_out;
    }
 
    /**
@@ -2198,9 +2459,7 @@ NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns , Nvme_Status s
     * Device is operational, restart timer and kick restart
     * IO queue processing.
     */
-   vmk_SpinlockLock(ctrlr->lock);
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_OPERATIONAL, VMK_FALSE);
-   vmk_SpinlockUnlock(ctrlr->lock);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_OPERATIONAL);
 
 #if 0 /* @todo - to validate namespaces. */
    /**
@@ -2217,9 +2476,7 @@ NvmeCtrlr_HwReset(struct NvmeCtrlr *ctrlr, struct NvmeNsInfo* ns , Nvme_Status s
    return vmkStatus;
 
 err_out:
-   vmk_SpinlockLock(ctrlr->lock);
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_FAILED, VMK_FALSE);
-   vmk_SpinlockUnlock(ctrlr->lock);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_FAILED);
 #if ENABLE_REISSUE
    /**
     * Abort all commands in active list.
@@ -2260,7 +2517,7 @@ NvmeCtrlr_Remove(struct NvmeCtrlr *ctrlr)
    * Inform stack of  PDL.
    */
   if (ctrlr->ctrlOsResources.scsiAdapter) {
-     OsLib_SetPathLostByDevice(&ctrlr->ctrlOsResources);
+     OsLib_SetPathLostByDevice(ctrlr);
   }
 
   return VMK_OK;
@@ -2282,7 +2539,7 @@ NvmeCtrlr_Quiesce(struct NvmeCtrlr *ctrlr)
    /**
     * First, block IOs to the controller.
     */
-   state = NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_SUSPEND, VMK_TRUE);
+   state = NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_SUSPEND);
 
    NvmeCtrlr_SuspendIoQueues(ctrlr);
    /**
@@ -2291,15 +2548,13 @@ NvmeCtrlr_Quiesce(struct NvmeCtrlr *ctrlr)
    for (i = 0; i < ctrlr->numIoQueues; i++) {
       qinfo = &ctrlr->ioq[i];
 
-      LOCK_FUNC(qinfo);
       /**
        * Flush completed items, make sure that completed items are preserved.
        */
       NvmeCore_ProcessQueueCompletions(qinfo);
-      UNLOCK_FUNC(qinfo);
    }
    NvmeCtrlr_ResumeIoQueues(ctrlr);
-   NvmeState_SetCtrlrState(ctrlr, state, VMK_TRUE);
+   NvmeState_SetCtrlrState(ctrlr, state);
    return VMK_OK;
 }
 
@@ -2314,7 +2569,7 @@ NvmeCtrlr_Stop(struct NvmeCtrlr *ctrlr)
 {
    VMK_ReturnStatus vmkStatus;
 
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_QUIESCED, VMK_TRUE);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_QUIESCED);
 
    vmkStatus = NvmeCtrlr_HwStop(ctrlr);
 
@@ -2341,6 +2596,10 @@ NvmeCtrlr_Stop(struct NvmeCtrlr *ctrlr)
    /* Free queue resources and namespace resources */
    NvmeCtrlr_DeleteIoQueues(ctrlr);
 
+#if NVME_MUL_COMPL_WORLD
+   OsLib_EndCompletionWorlds(ctrlr);
+#endif
+
    NvmeCtrlr_FreeDisks(ctrlr);
 
    return vmkStatus;
@@ -2356,7 +2615,9 @@ NvmeCtrlr_Stop(struct NvmeCtrlr *ctrlr)
  *
  * @return VMK_OK if task completes successfully
  */
-VMK_ReturnStatus NvmeCtrlr_DoTaskMgmtReset(struct NvmeCtrlr *ctrlr, Nvme_ResetType resetType, struct NvmeNsInfo *ns)
+VMK_ReturnStatus NvmeCtrlr_DoTaskMgmtReset(struct NvmeCtrlr *ctrlr,
+                                           Nvme_ResetType resetType,
+                                           struct NvmeNsInfo *ns)
 {
    VMK_ReturnStatus vmkStatus;
 
@@ -2420,7 +2681,9 @@ VMK_ReturnStatus NvmeCtrlr_DoTaskMgmtReset(struct NvmeCtrlr *ctrlr, Nvme_ResetTy
  * @return VMK_OK if request completes successfully
  */
 VMK_ReturnStatus
-NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr, vmk_ScsiTaskMgmt *taskMgmt, struct NvmeNsInfo *ns)
+NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr,
+                          vmk_ScsiTaskMgmt *taskMgmt,
+                          struct NvmeNsInfo *ns)
 {
    int                   i;
    int                   cmdsFound = 0, qf = 0;
@@ -2430,9 +2693,9 @@ NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr, vmk_ScsiTaskMgmt *taskMgmt, s
    vmk_ScsiCommand      *vmkCmd;
    vmk_ListLinks        *itemPtr;
    Nvme_CtrlrState       ctrlrState;
+   vmk_ListLinks cmdActive;
 
-
-   ctrlrState = NvmeState_GetCtrlrState(ctrlr, VMK_TRUE);
+   ctrlrState = NvmeState_GetCtrlrState(ctrlr);
    if (ctrlrState != NVME_CTRLR_STATE_OPERATIONAL) {
       WPRINT("task management abort received while controller is in"
                       " %s state.", NvmeState_GetCtrlrStateString(ctrlrState));
@@ -2449,9 +2712,16 @@ NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr, vmk_ScsiTaskMgmt *taskMgmt, s
    /**
     * First, block controlelr
     */
-   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_SUSPEND, VMK_TRUE);
+   NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_SUSPEND);
 
    NvmeCtrlr_SuspendIoQueues(ctrlr);
+
+   /**
+     *  We disabled the queues (and interrupts above) but we might still have
+     *  interrupts just fired on a different CPU and executing the handlers
+     *  will race with the enumeration of the active list below
+     */
+   vmk_WorldSleep(NVME_ABORT_DELAY_US);
 
    /**
     * Stop the controller, then give outstanding commands a chance to complete.
@@ -2462,12 +2732,11 @@ NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr, vmk_ScsiTaskMgmt *taskMgmt, s
       qf = 0;
       qi = 0;
 
-      DPRINT_Q("scan %s I:%p SN:0x%lx in queue %d, req:%d act:%d.",
+      DPRINT_Q("scan %s I:%p SN:0x%lx in queue %d, act:%d.",
               vmk_ScsiGetTaskMgmtTypeName(taskMgmt->type),
               taskMgmt->cmdId.initiator, taskMgmt->cmdId.serialNumber, qinfo->id,
-              qinfo->nrReq, qinfo->nrAct);
+              qinfo->nrAct - qinfo->pendingCmdFree.freeListLength);
 
-      LOCK_FUNC(qinfo);
 
       /**
        * Flush completed items, make sure that completed items are preserved.
@@ -2478,7 +2747,10 @@ NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr, vmk_ScsiTaskMgmt *taskMgmt, s
        * Now search for still active cmds, if there are any, we need to do an
        * NVM reset to clear them
        */
-      VMK_LIST_FORALL(&qinfo->cmdActive, itemPtr) {
+      LOCK_FUNC(qinfo);
+
+      NvmeCore_QueryActiveCommands(qinfo, &cmdActive);
+      VMK_LIST_FORALL(&cmdActive, itemPtr) {
          cmdInfo = VMK_LIST_ENTRY(itemPtr, struct NvmeCmdInfo, list);
          vmkCmd  = NvmeCore_CmdInfoToScsiCmd(cmdInfo);
 
@@ -2529,7 +2801,7 @@ NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr, vmk_ScsiTaskMgmt *taskMgmt, s
     * Finally, if we found commands to be aborted, issue NVM reset to clear them
     */
    if (cmdsFound) {
-      DPRINT_CMD("scan %s completed, %d found, %d impacted.",
+      WPRINT("scan %s completed, %d found, %d impacted, resetting controller.",
          vmk_ScsiGetTaskMgmtTypeName(taskMgmt->type), cmdsFound, cmdsImpacted);
 
       NvmeCtrlr_HwReset(ctrlr, ns, NVME_STATUS_ABORTED, VMK_FALSE);
@@ -2545,7 +2817,7 @@ NvmeCtrlr_DoTaskMgmtAbort(struct NvmeCtrlr *ctrlr, vmk_ScsiTaskMgmt *taskMgmt, s
 
       NvmeCtrlr_ResumeIoQueues(ctrlr);
 
-      NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_OPERATIONAL, VMK_TRUE);
+      NvmeState_SetCtrlrState(ctrlr, NVME_CTRLR_STATE_OPERATIONAL);
    }
 
 
@@ -2578,22 +2850,23 @@ NvmeCtrlr_Timeout (struct NvmeCtrlr *ctrlr, vmk_uint32 * sleepTime)
    int len = 0;
 #endif
 
-   DPRINT_CMD("In Timer %d", ctrlr->timeoutId);
+   DPRINT_TIMEOUT("In Timer %d", ctrlr->timeoutId);
+
    /**
     * Search all IO queues for staled request.
     */
    vmk_SpinlockLock (ctrlr->lock);
    newId = ctrlr->timeoutId + 1;
-   if (newId >= io_timeout)
+   if (newId >= ctrlr->ioTimeout)
       newId = 0;
 
-   ctrlrState = NvmeState_GetCtrlrState (ctrlr, VMK_FALSE);
+   ctrlrState = NvmeState_GetCtrlrState(ctrlr);
    /**
     * Timer is only valid in OPERATIONAL state.
     */
    if (NVME_CTRLR_STATE_OPERATIONAL != ctrlrState)
    {
-      DPRINT_CMD("Controller not in OPERATIONAL state: %s.",
+      DPRINT_TIMEOUT("Controller not in OPERATIONAL state: %s.",
             NvmeState_GetCtrlrStateString (ctrlrState));
       goto skip_timer;
    }
@@ -2604,13 +2877,22 @@ NvmeCtrlr_Timeout (struct NvmeCtrlr *ctrlr, vmk_uint32 * sleepTime)
       qinfo = ctrlr->queueList[i];
       if (!qinfo)
       {
-         DPRINT_CMD("Qinfo %p\n", qinfo);
          continue;
       }
+
+      /**
+       * Update first the counter with the value from completion.
+       * the operation atomically resets the completion counter
+       * the submission lock is assumed held here
+       */
+      LOCK_FUNC(qinfo);
+      qinfo->timeoutCount[newId] -=
+            (int)vmk_AtomicReadWrite32(&qinfo->timeoutComplCount[newId], 0);
+      UNLOCK_FUNC(qinfo);
+
 #if NVME_DEBUG
       if (nvme_dbg & NVME_DEBUG_DUMP_TIMEOUT)
       {
-         DPRINT_CMD("timeoutId %d\n", newId);
          NvmeDebug_DumpTimeoutInfo(qinfo);
       }
 #endif
@@ -2619,8 +2901,8 @@ NvmeCtrlr_Timeout (struct NvmeCtrlr *ctrlr, vmk_uint32 * sleepTime)
        */
       if (qinfo->flags & QUEUE_SUSPEND)
       {
-         DPRINT_CMD("qinfo %p [%d] suspended, skipping ...\n",
-               qinfo, qinfo->id);
+         DPRINT_TIMEOUT("qinfo %p [%d] suspended, skipping ...\n",
+                qinfo, qinfo->id);
          continue;
       }
 
@@ -2629,23 +2911,24 @@ NvmeCtrlr_Timeout (struct NvmeCtrlr *ctrlr, vmk_uint32 * sleepTime)
        * Check next timer slot and see if there are currently commands
        * pending on this slot. Any commands with matching timeout Ids
        * must be aborted.
+       * Update first the counter with the value from completion
        */
-      if (qinfo->timeout[newId])
+      if (qinfo->timeoutCount[newId])
       {
          ctrlr->timeoutId = newId;
-         DPRINT_CMD("qinfo %p, timeout[%d]= %d\n", qinfo, newId,
-               qinfo->timeout[newId]);
+         DPRINT_TIMEOUT("qinfo %p, timeout[%d]= %d\n", qinfo, newId,
+               qinfo->timeoutCount[newId]);
          ret = VMK_TRUE;
          break;
       }
    }
-   ctrlrState = NvmeState_GetCtrlrState (ctrlr, VMK_FALSE);
-   DPRINT_CMD("TimeoutId %d, ctrlrState [%d]: %s",
-                             ctrlr->timeoutId, ctrlrState, NvmeState_GetCtrlrStateString(ctrlrState));
+   ctrlrState = NvmeState_GetCtrlrState(ctrlr);
+   DPRINT_TIMEOUT("TimeoutId %d, ctrlrState [%d]: %s",
+              ctrlr->timeoutId, ctrlrState, NvmeState_GetCtrlrStateString(ctrlrState));
    if (ctrlrState <= NVME_CTRLR_STATE_OPERATIONAL)
    {
       ctrlr->timeoutId = newId;
-      DPRINT_CMD("new timeout_id %d\n", newId);
+      DPRINT_TIMEOUT("new timeout_id %d\n", newId);
    }
 skip_timer:
    vmk_SpinlockUnlock (ctrlr->lock);
@@ -2683,54 +2966,49 @@ NvmeCtrlr_GetErrorStatusString (int errorStatus)
  * @param cmdInfo
  */
 static void
-AsyncEventReportComplete (struct NvmeQueueInfo *qinfo,
-      struct NvmeCmdInfo *cmdInfo)
+AsyncEventReportComplete (struct NvmeQueueInfo *qinfo, struct NvmeCmdInfo *cmdInfo)
 {
    struct NvmeCtrlr *ctrlr = qinfo->ctrlr;
 
-   if (cmdInfo->cmdStatus == NVME_STATUS_IN_RESET) {
-      /* Not an event when async event cmd is completed by hw reset. */
+   if (cmdInfo->cmdStatus != NVME_STATUS_SUCCESS) {
+      /* Not a valid event when async event cmd is completed with error. */
+      if (cmdInfo->cqEntry.SCT == 0x1 && cmdInfo->cqEntry.SC == 0x05) {
+         EPRINT("Asynchronous event limit exceeded.");
+      }
       goto out;
    }
 
    /**
     * Three types of event reported -
-    * 	1)Error event - general error not associated with a command. To clear this event,
-    * 	host uses Get Log Page to read error information log.
+    *   1)Error event - general error not associated with a command. To clear this event,
+    *   host uses Get Log Page to read error information log.
     *
-    * 	2)SMART/Health event - configured via Set Features. To clear this event, signal
-    * 	exception handler to issue Het Log Page to read the SMART/Health information log.
+    *   2)SMART/Health event - configured via Set Features. To clear this event, signal
+    *   exception handler to issue Het Log Page to read the SMART/Health information log.
     *
-    * 	3) Vendor-Specific event - P600XC IAS does not describe any event in this category.
+    *   3) Vendor-Specific event - ignore.
     */
    ctrlr->asyncEventData.eventType = cmdInfo->cqEntry.param.cmdSpecific & 0x07;
-
    ctrlr->asyncEventData.eventInfo = (cmdInfo->cqEntry.param.cmdSpecific >> 8) & 0xff;
-
    ctrlr->asyncEventData.logPage   = (cmdInfo->cqEntry.param.cmdSpecific >> 16) & 0xff;
 
-   VPRINT("Asynchronous event type=%x event Info = %x received\n",
+   WPRINT("Asynchronous event type=%x event Info = %x received\n",
          ctrlr->asyncEventData.eventType, ctrlr->asyncEventData.eventInfo);
-   if (cmdInfo->cqEntry.SC == 0x05)
+   switch (ctrlr->asyncEventData.eventType)
    {
-      EPRINT("Asynchronous event limit exceeded\n");
-   }
-   else
-   {
-      switch (ctrlr->asyncEventData.eventType)
-      {
-         case AER_ERR_STATUS:
-            VPRINT ("Error information : %s\n",
-                  NvmeCtrlr_GetErrorStatusString (ctrlr->asyncEventData.eventInfo));
-            NvmeExc_SignalException (ctrlr, NVME_EXCEPTION_ERROR_CHECK);
-            break;
-         case AER_SMART_HEALTH_STATUS:
-	    VPRINT("Smart health event : %s\n", NvmeCtrlr_GetAsyncEventHealthStatusString(ctrlr->asyncEventData.eventInfo));
-            NvmeExc_SignalException (ctrlr, NVME_EXCEPTION_HEALTH_CHECK);
-            break;
-         default:
-            break;
-      }
+      case AER_ERR_STATUS:
+         EPRINT("Error information: %s",
+                NvmeCtrlr_GetErrorStatusString (ctrlr->asyncEventData.eventInfo));
+         NvmeExc_SignalException (ctrlr, NVME_EXCEPTION_ERROR_CHECK);
+         break;
+      case AER_SMART_HEALTH_STATUS:
+         EPRINT("Smart health event: %s",
+                NvmeCtrlr_GetAsyncEventHealthStatusString(
+                ctrlr->asyncEventData.eventInfo));
+         NvmeExc_SignalException (ctrlr, NVME_EXCEPTION_HEALTH_CHECK);
+         break;
+      default:
+         break;
    }
 
 out:
@@ -2748,23 +3026,22 @@ out:
  *
  * @return
  */
-VMK_ReturnStatus NvmeCtrlr_ConfigAsyncEvents(struct NvmeCtrlr *ctrlr, vmk_uint16 eventConfig)
+VMK_ReturnStatus
+NvmeCtrlr_ConfigAsyncEvents(struct NvmeCtrlr *ctrlr, vmk_uint16 eventConfig)
 {
 
    VMK_ReturnStatus vmkStatus = VMK_OK;
    struct cq_entry cqEntry;
 
-   vmkStatus = NvmeCtrlrCmd_SetFeature(ctrlr, FTR_ID_ASYN_EVENT_CONFIG,
-         (eventConfig & 0xff),
-         NULL, &cqEntry);
+   vmkStatus = NvmeCtrlrCmd_SetFeature(ctrlr, 0, FTR_ID_ASYN_EVENT_CONFIG,
+                                       (eventConfig & 0xff), NULL, 0, &cqEntry);
 
-   if (vmkStatus != VMK_OK)
-   {
-      Nvme_LogWarning("Async event config failed");
+   if (vmkStatus != VMK_OK) {
+      WPRINT("Async event config failed");
    }
 
-   vmkStatus = NvmeCtrlrCmd_GetFeature(ctrlr, 0xffffffff, FTR_ID_ASYN_EVENT_CONFIG, 0,
-         NULL, &cqEntry);
+   vmkStatus = NvmeCtrlrCmd_GetFeature(ctrlr, 0, FTR_ID_ASYN_EVENT_CONFIG, 0, NULL, 0,
+                                       &cqEntry);
 
 
    VPRINT("Async event config is 0x%x", cqEntry.param.cmdSpecific & 0xff);
@@ -2785,65 +3062,9 @@ VMK_ReturnStatus
 NvmeCtrlrCmd_AsyncEventRequest (struct NvmeCtrlr * ctrlr)
 {
    struct nvme_cmd entry;
-   struct nvme_cmd *cmd;
-   struct NvmeQueueInfo *qinfo;
-   struct NvmeCmdInfo *cmdInfo;
-   Nvme_Status nvmeStatus;
-
    Nvme_Memset64 (&entry, 0LL, sizeof (entry) / sizeof (vmk_uint64));
    entry.header.opCode = NVM_ADMIN_CMD_ASYNC_EVENT_REQ;
-
-   qinfo = &ctrlr->adminq;
-   qinfo->lockFunc (qinfo->lock);
-
-   cmdInfo = NvmeCore_GetCmdInfo (qinfo);
-   if (!cmdInfo)
-   {
-      qinfo->unlockFunc (qinfo->lock);
-      return VMK_NO_MEMORY;
-   }
-   qinfo->unlockFunc (qinfo->lock);
-
-   cmdInfo->type = EVENT_CONTEXT;
-   entry.header.cmdID = cmdInfo->cmdId;
-   cmd = &cmdInfo->nvmeCmd;
-   Nvme_Memcpy64 (&cmdInfo->nvmeCmd, &entry,
-         sizeof (entry) / sizeof (vmk_uint64));
-
-   qinfo->lockFunc (qinfo->lock);
-   nvmeStatus =
-      NvmeCore_SubmitCommandAsync (qinfo, cmdInfo, AsyncEventReportComplete);
-   if (nvmeStatus != NVME_STATUS_SUCCESS)
-   {
-      /**
-       * Failed to submit the command to the hardware.
-       */
-      NvmeCore_PutCmdInfo (qinfo, cmdInfo);
-   }
-
-   if (SUCCEEDED (nvmeStatus))
-   {
-      /**
-       * Return WOULD_BLOCK indicating the command will be completed in
-       * completion context.
-       */
-      nvmeStatus = NVME_STATUS_WOULD_BLOCK;
-   }
-
-   /**
-    * Accounting for the number of IO requests to the queue
-    */
-   if (nvmeStatus == NVME_STATUS_WOULD_BLOCK)
-   {
-      qinfo->nrReq++;
-      if (qinfo->maxReq < qinfo->nrReq)
-      {
-         qinfo->maxReq = qinfo->nrReq;
-      }
-   }
-
-   qinfo->unlockFunc (qinfo->lock);
-
-   return VMK_OK;
+   return NvmeCtrlrCmd_SendAdminAsync(ctrlr, &entry, NULL, 0, AsyncEventReportComplete,
+                                      NULL);
 }
 #endif

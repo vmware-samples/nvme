@@ -12,6 +12,14 @@
  * Command timeout in microseconds
  */
 #define ADMIN_TIMEOUT (2 * 1000 * 1000)   /* 2 seconds */
+#define FORMAT_TIMEOUT (30 * 60 * 1000 * 1000)   /* 30 minutes */
+#define FIRMWARE_DOWNLOAD_TIMEOUT (30 * 60 * 1000 * 1000)   /* 30 minutes */
+#define FIRMWARE_ACTIVATE_TIMEOUT (30 * 60 * 1000 * 1000)   /* 30 minutes */
+
+/**
+ * maximum number of namespaces supported per controller
+ */
+#define NVME_MAX_NAMESPACE_PER_CONTROLLER (1024)
 
 /**
  * for firmware download
@@ -26,15 +34,19 @@
 /**
  * firmware activate action code
  */
-#define NVME_FIRMWARE_ACTIVATE_ACTION_NOACT     0
-#define NVME_FIRMWARE_ACTIVATE_ACTION_DLACT     1
-#define NVME_FIRMWARE_ACTIVATE_ACTION_ACTIVATE  2
-#define NVME_FIRMWARE_ACTIVATE_ACTION_RESERVED  3
+#define NVME_FIRMWARE_ACTIVATE_ACTION_NOACT        0
+#define NVME_FIRMWARE_ACTIVATE_ACTION_DLACT        1
+#define NVME_FIRMWARE_ACTIVATE_ACTION_ACTIVATE     2
+#define NVME_FIRMWARE_ACTIVATE_ACTION_ACT_NORESET  3
+#define NVME_FIRMWARE_ACTIVATE_ACTION_RESERVED     4
 
-/**
- * firmware activate successful but need reboot
- */
-#define NVME_NEED_COLD_REBOOT  0x1
+#define NS_OFFLINE     0x0
+#define NS_ONLINE      0x1
+
+#define NS_UNALLOCATED 0x0
+#define NS_ALLOCATED   0x1
+#define NS_INACTIVE    0x2
+#define NS_ACTIVE      0x3
 
 /**
  * Adapter instance list
@@ -98,28 +110,107 @@ extern struct nvme_adapter_list adapterList;
 /**
  * NVMe management interfaces
  */
-struct nvme_handle * Nvme_Open(struct nvme_adapter_list *adapters, const char *name);
-void Nvme_Close(struct nvme_handle *handle);
-int Nvme_GetAdapterList(struct nvme_adapter_list *list);
-int Nvme_AdminPassthru(struct nvme_handle *handle, struct usr_io *uio);
-int Nvme_AdminPassthru_error(struct nvme_handle *handle, int cmd, struct usr_io *uio);
-int Nvme_Identify(struct nvme_handle *handle, int ns, void *id);
-int Nvme_Ioctl(struct nvme_handle *handle, int cmd, struct usr_io *uio);
-int Nvme_FormatNvm(struct nvme_handle *handle, int ses, int pil, int pi, int ms, int lbaf, int ns);
-int Nvme_SetLogLevel(int loglevel, int debuglevel);
+struct
+nvme_handle * Nvme_Open(struct nvme_adapter_list *adapters, const char *name);
+
+void
+Nvme_Close(struct nvme_handle *handle);
+
+int
+Nvme_GetAdapterList(struct nvme_adapter_list *list);
+
+int
+Nvme_AdminPassthru(struct nvme_handle *handle, struct usr_io *uio);
+
+int
+Nvme_AdminPassthru_error(struct nvme_handle *handle, int cmd, struct usr_io *uio);
+
+int
+Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, int nsId, void *id);
+
+int
+Nvme_Ioctl(struct nvme_handle *handle, int cmd, struct usr_io *uio);
+
+int Nvme_FormatNvm(struct nvme_handle *handle,
+                   int ses,
+                   int pil,
+                   int pi,
+                   int ms,
+                   int lbaf,
+                   int ns);
+
+int
+Nvme_SetLogLevel(int loglevel, int debuglevel);
+
+int
+Nvme_SetTimeout(struct nvme_handle *handle, int timeout);
+
+int
+Nvme_GetTimeout(struct nvme_handle *handle, int *timeout);
+
+int
+Nvme_NsMgmtAttachSupport(struct nvme_handle *handle);
+
+int
+Nvme_ValidNsId(struct nvme_handle *handle, int nsId);
+
+int
+Nvme_AllocatedNsId(struct nvme_handle *handle, int nsId);
+
+int
+Nvme_AttachedNsId(struct nvme_handle *handle, int nsId);
+
+int
+Nvme_NsMgmtCreate(struct nvme_handle *handle, struct iden_namespace *idNs, int *cmdStatus);
+
+int
+Nvme_NsMgmtDelete(struct nvme_handle *handle, int nsId);
 
 /**
  * NVMe management interfaces, IDT specific
  */
-int Nvme_CreateNamespace_IDT(struct nvme_handle *handle, int ns, vmk_uint32 snu, vmk_uint32 nnu);
-int Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, int ns);
+int
+Nvme_CreateNamespace_IDT(struct nvme_handle *handle,
+                         int ns,
+                         vmk_uint32 snu,
+                         vmk_uint32 nnu);
+
+int
+Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, int ns);
+
+int
+Nvme_NsAttach(struct nvme_handle *handle,
+              int sel,
+              int nsId,
+              struct ctrlr_list *ctrlrList,
+              int *cmdStatus);
+
+int
+Nvme_NsUpdate(struct nvme_handle *handle, int nsId);
+
+int
+Nvme_NsListUpdate(struct nvme_handle *handle, int sel, int nsId);
+int
+Nvme_NsGetStatus(struct nvme_handle *handle, int nsId, int *status);
+
+int
+Nvme_NsSetStatus(struct nvme_handle *handle, int nsId, int status);
 
 /**
   * NVMe firmware operation interfaces
   */
-int Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size);
-int Nvme_FWDownload(struct nvme_handle *handle, int slot,  unsigned char *rom_buf, int rom_size);
-int Nvme_FWFindSlot(struct nvme_handle *handle, int *slot);
-int Nvme_FWActivate(struct nvme_handle *handle, int slot, int action);
+int
+Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size);
+
+int
+Nvme_FWDownload(struct nvme_handle *handle,
+                unsigned char *rom_buf,
+                int rom_size);
+
+int
+Nvme_FWFindSlot(struct nvme_handle *handle, int *slot);
+
+int
+Nvme_FWActivate(struct nvme_handle *handle, int slot, int action, int *cmdStatus);
 
 #endif /* _NVME_LIB_H */

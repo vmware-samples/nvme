@@ -237,7 +237,7 @@ Nvme_AdminPassthru_error(struct nvme_handle *handle,int cmd, struct usr_io *uio)
  * @return 0 if successful
  */
 int
-Nvme_Identify(struct nvme_handle *handle, int ns, void *id)
+Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, int nsId, void *id)
 {
    int rc = 0;
    struct usr_io uio;
@@ -245,23 +245,372 @@ Nvme_Identify(struct nvme_handle *handle, int ns, void *id)
    memset(&uio, 0, sizeof(uio));
 
    uio.cmd.header.opCode = NVM_ADMIN_CMD_IDENTIFY;
+   uio.cmd.cmd.identify.controllerStructure = cns;
+   uio.cmd.cmd.identify.cntId = cntId;
+   uio.cmd.header.namespaceID = nsId;
 
-   if (ns < 0) {
-      uio.cmd.cmd.identify.controllerStructure = IDENTIFY_CONTROLLER;
-   } else {
-      uio.cmd.cmd.identify.controllerStructure = IDENTIFY_NAMESPACE;
-      uio.cmd.header.namespaceID = ns;
-   }
-
-   uio.namespaceID = 0xff;
+   uio.namespaceID = nsId;
    uio.direction = XFER_FROM_DEV;
 
    uio.timeoutUs = ADMIN_TIMEOUT;
 #define PAGE_SIZE 4096
    uio.length = PAGE_SIZE;
-   uio.addr = (vmk_uint32)id;
+   uio.addr = (vmk_uintptr_t)id;
 
    rc = Nvme_AdminPassthru(handle, &uio);
+
+   return rc;
+}
+
+/**
+ * Check if nvme controller supports namespace management and attachment commands
+ *
+ * @param [in] handle handle to a device
+ *
+ * @return 0  if not support
+ * @return 1  if support
+ * @return -1 if fail to check
+ */
+int
+Nvme_NsMgmtAttachSupport(struct nvme_handle *handle)
+{
+   int rc;
+   struct iden_controller  *id;
+
+   id = malloc(sizeof(*id));
+   if (id == NULL) {
+      return -1;
+   }
+
+   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, id);
+   if (rc != 0) {
+      rc = -1;
+      goto out;
+   }
+
+   rc = (id->adminCmdSup & 0x8) ? 1 : 0;
+
+out:
+   free(id);
+   return rc;
+}
+
+/**
+ * Check if nsId is valid.
+ *
+ * @param [in] handle handle to a device
+ * @param [in] nsId   nsId to be validated
+ *
+ * @retval return 1 if nsId is valid.
+ *         return 0 if nsId is invalid.
+ *         return -1 if check failure.
+ */
+int
+Nvme_ValidNsId(struct nvme_handle *handle, int nsId)
+{
+   int                       rc = 0;
+   int                       numNs = 0;
+   struct iden_controller   *idCtrlr;
+
+   idCtrlr = malloc(sizeof(*idCtrlr));
+   if (idCtrlr == NULL) {
+      return -1;
+   }
+
+   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
+   if (rc != 0) {
+      rc = -1;
+      goto free_id;
+   }
+
+   numNs = (int)idCtrlr->numNmspc;
+
+   rc =  (nsId > numNs || nsId > NVME_MAX_NAMESPACE_PER_CONTROLLER || nsId < 1) ? 0 : 1;
+
+free_id:
+   free(idCtrlr);
+   return rc;
+}
+
+/**
+ * Check if namespace is created.
+ *
+ * @retval return 1 if nsId is allocated.
+ *         return 0 if nsId is not allocated.
+ *         return -1 if check failure.
+ * @Note   Assume nsId is valid
+ */
+int
+Nvme_AllocatedNsId(struct nvme_handle *handle, int nsId)
+{
+   int                       i = 0;
+   int                       rc = 0;
+   int                       entryNum = 0;
+   struct ns_list           *nsList;
+
+   rc = Nvme_NsMgmtAttachSupport(handle);
+   if (rc == -1) {
+      goto out;
+   }
+   if (rc == 0) {
+      /**
+       * Assume valid namespace is allocated automatically on controller not supporting
+       * namespace mgmt and attachment.
+       */
+      rc = 1;
+      goto out;
+   }
+
+   nsList = malloc(sizeof(*nsList));
+   if (nsList == NULL) {
+      rc = -1;
+      goto out;
+   }
+
+   rc = Nvme_Identify(handle, ALLOCATED_NAMESPACE_LIST, 0, 0, nsList);
+   if (rc != 0) {
+      rc = -1;
+      goto free_nsList;
+   }
+
+   entryNum = sizeof(*nsList)/sizeof(nsList->nsId[0]);
+   while (nsId > nsList->nsId[i] && nsList->nsId[i] && i < entryNum) {
+      i++;
+   }
+   if (nsId == nsList->nsId[i]) {
+      rc = 1;
+   } else {
+      rc = 0;
+   }
+
+free_nsList:
+   free(nsList);
+out:
+   return rc;
+}
+
+/**
+ * Check if namespace is attached.
+ *
+ * @retval return 1 if nsId is attached.
+ *         return 0 if nsId is not attached.
+ *         return -1 if check failure.
+ * @Note   Assume nsId is valid
+ */
+int
+Nvme_AttachedNsId(struct nvme_handle *handle, int nsId)
+{
+   int                       i = 0;
+   int                       rc = 0;
+   int                       entryNum = 0;
+   struct ns_list           *nsList;
+
+   rc = Nvme_NsMgmtAttachSupport(handle);
+   if (rc == -1) {
+      goto out;
+   }
+   if (rc == 0) {
+      /**
+       * Assume valid namespace is attached automatically on controller not supporting
+       * namespace mgmt and attachment.
+       */
+      rc = 1;
+      goto out;
+   }
+
+   nsList = malloc(sizeof(*nsList));
+   if (nsList == NULL) {
+      rc = -1;
+      goto out;
+   }
+
+   rc = Nvme_Identify(handle, ACTIVE_NAMESPACE_LIST, 0, 0, nsList);
+   if (rc != 0) {
+      rc = -1;
+      goto free_nsList;
+   }
+
+   entryNum = sizeof(*nsList)/sizeof(nsList->nsId[0]);
+   while (nsId > nsList->nsId[i] && nsList->nsId[i] && i < entryNum) {
+      i++;
+   }
+   if (nsId == nsList->nsId[i]) {
+      rc = 1;
+   } else {
+      rc = 0;
+   }
+
+free_nsList:
+   free(nsList);
+out:
+   return rc;
+}
+
+/**
+  * Namespace Management Create
+  *
+  * @param [in] handle handle to a device
+  * @param [in] idNs   attributes for the namespace to be created
+  *
+  * @return nsId if creating namespace successfully, otherwise return -1
+  */
+int
+Nvme_NsMgmtCreate(struct nvme_handle *handle, struct iden_namespace *idNs, int *cmdStatus)
+{
+   int rc = 0;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+
+   uio.cmd.header.opCode = NVM_ADMIN_CMD_NS_MGMT;
+   uio.direction = XFER_TO_DEV;
+   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.cmd.cmd.nsMgmt.sel = 0;
+   uio.addr = (vmk_uintptr_t)idNs;
+   uio.length = sizeof(*idNs);
+
+   rc = Nvme_AdminPassthru(handle, &uio);
+   if (cmdStatus) {
+      *cmdStatus = (uio.comp.SCT << 8) | uio.comp.SC;
+   }
+   if (rc != 0) {
+      return -1;
+   }
+
+   return (int)uio.comp.param.cmdSpecific;
+}
+
+/**
+  * Namespace Management Delete
+  *
+  * @param [in] handle handle to a device
+  * @param [in] nsId   namespace id to be deleted
+  *
+  * @return 0 if successful
+  * TODO: Return status code to indicate the failure reason
+  */
+int
+Nvme_NsMgmtDelete(struct nvme_handle *handle, int nsId)
+{
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+
+   uio.cmd.header.opCode = NVM_ADMIN_CMD_NS_MGMT;
+   uio.cmd.header.namespaceID = nsId;
+   uio.direction = XFER_NO_DATA;
+   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.cmd.cmd.nsMgmt.sel = 1;
+
+   return Nvme_AdminPassthru(handle, &uio);
+}
+
+/**
+  * Namespace Attach
+  *
+  * @param [in] handle     handle to a device
+  * @param [in] sel        operation: attach or detach
+  * @param [in] nsId       namespace id to be deleted
+  * @param [in] ctrlrList  ctrlr list for this operation
+  *
+  * @return 0 if successful
+  */
+int
+Nvme_NsAttach(struct nvme_handle *handle, int sel, int nsId,
+              struct ctrlr_list *ctrlrList, int *cmdStatus)
+{
+   struct usr_io uio;
+   int rc;
+
+   memset(&uio, 0, sizeof(uio));
+
+   uio.cmd.header.opCode = NVM_ADMIN_CMD_NS_ATTACH;
+   uio.cmd.header.namespaceID = nsId;
+   uio.direction = XFER_TO_DEV;
+   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.cmd.cmd.nsAttach.sel = sel;
+   uio.addr = (vmk_uintptr_t)ctrlrList;
+   uio.length = sizeof(*ctrlrList);
+
+   rc = Nvme_AdminPassthru(handle, &uio);
+   if (cmdStatus) {
+      *cmdStatus = (uio.comp.SCT << 8) | uio.comp.SC;
+   }
+   return rc;
+}
+
+int
+Nvme_NsUpdate(struct nvme_handle *handle, int nsId)
+{
+   int rc = 0;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+   uio.namespaceID = nsId;
+
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_UPDATE_NS, &uio);
+   if (!rc) {
+      rc = uio.status;
+   }
+
+   return rc;
+}
+
+int
+Nvme_NsListUpdate(struct nvme_handle *handle, int sel, int nsId)
+{
+   int rc = 0;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+   uio.namespaceID = nsId;
+   uio.cmd.cmd.nsAttach.sel = sel;
+
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_UPDATE_NS_LIST, &uio);
+   if (!rc) {
+      rc = uio.status;
+   }
+
+   return rc;
+}
+
+int
+Nvme_NsGetStatus(struct nvme_handle *handle, int nsId, int *status)
+{
+   int rc = 0;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+   uio.namespaceID = nsId;
+
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_NS_STATUS, &uio);
+   if (!rc) {
+      *status = uio.status;
+   }
+
+   return rc;
+}
+
+int
+Nvme_NsSetStatus(struct nvme_handle *handle, int nsId, int status)
+{
+   int rc = 0;
+   int cmd;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+   uio.namespaceID = nsId;
+
+   if (status == NS_ONLINE) {
+     cmd = NVME_IOCTL_SET_NS_ONLINE;
+   } else {
+     cmd = NVME_IOCTL_SET_NS_OFFLINE;
+   }
+
+   rc = Nvme_Ioctl(handle, cmd, &uio);
+   if (!rc) {
+      rc = uio.status;
+   }
 
    return rc;
 }
@@ -393,7 +742,7 @@ int Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size)
    return 0;
 }
 
-int Nvme_FWDownload(struct nvme_handle *handle, int slot,  unsigned char *rom_buf, int rom_size)
+int Nvme_FWDownload(struct nvme_handle *handle, unsigned char *rom_buf, int rom_size)
 {
    struct usr_io uio;
    int offset, size;
@@ -412,12 +761,12 @@ int Nvme_FWDownload(struct nvme_handle *handle, int slot,  unsigned char *rom_bu
 
       memset(&uio, 0, sizeof(uio));
       uio.cmd.header.opCode = NVM_ADMIN_CMD_FIRMWARE_DOWNLOAD;
-      uio.cmd.header.namespaceID = -1;
+      uio.cmd.header.namespaceID = 0;
       uio.direction = XFER_TO_DEV;
-      uio.timeoutUs = ADMIN_TIMEOUT;
+      uio.timeoutUs = FIRMWARE_DOWNLOAD_TIMEOUT;
       uio.cmd.cmd.firmwareDownload.numDW = (size / sizeof(vmk_uint32)) - 1;
       uio.cmd.cmd.firmwareDownload.offset = offset / sizeof(vmk_uint32);
-      uio.addr = (vmk_uint32)chunk;
+      uio.addr = (vmk_uintptr_t)chunk;
       uio.length = size;
 
       rc = Nvme_AdminPassthru(handle, &uio);
@@ -456,7 +805,7 @@ int Nvme_FWFindSlot(struct nvme_handle *handle, int *slot)
    uio.cmd.cmd.getLogPage.LogPageID = GLP_ID_FIRMWARE_SLOT_INFO;
    uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
    uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
-   uio.addr = (vmk_uint32)&log.fwSlotLog;
+   uio.addr = (vmk_uintptr_t)&log.fwSlotLog;
    rc = Nvme_AdminPassthru(handle, &uio);
 
    if (rc) {
@@ -480,38 +829,46 @@ int Nvme_FWFindSlot(struct nvme_handle *handle, int *slot)
    return 0;
 }
 
-int Nvme_FWActivate(struct nvme_handle *handle, int slot, int action)
+/**
+ * Issue firmware activate command and get the command status.
+ *
+ * @param [in]  handle    Handle to a device
+ * @param [in]  slot      Firmware slot
+ * @param [in]  action    Activate action code
+ * @param [out] cmdStatus Command execution status
+ *
+ * @return  0 if successful
+ *          others Command failed to be submitted or executed with non-zero status
+ */
+int Nvme_FWActivate(struct nvme_handle *handle, int slot, int action, int *cmdStatus)
 {
    struct usr_io uio;
    int rc = -1;
 
    assert(handle);
-   assert(slot > 0 && slot < 8);
+   assert(slot >= 0 && slot < 8);
    assert(action >= 0 && action < 4);
 
    memset(&uio, 0, sizeof(uio));
 
    uio.cmd.header.opCode = NVM_ADMIN_CMD_FIRMWARE_ACTIVATE;
-   uio.cmd.header.namespaceID = -1;
+   uio.cmd.header.namespaceID = 0;
    uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = FIRMWARE_ACTIVATE_TIMEOUT;
    uio.cmd.cmd.firmwareActivate.slot = slot;
    uio.cmd.cmd.firmwareActivate.action = action;
    rc = Nvme_AdminPassthru(handle, &uio);
-   if (rc) {
-      /* Fail to activate NVMe firmware: ioctl failed. */
-      return rc;
-   }
-   else if (uio.comp.SCT == SF_SCT_CMD_SPC_ERR &&
-       uio.comp.SC == SF_SC_FIRMWARE_REQUIRES_RESET) {
-      /* Activate NVMe firmware successful but requests server reboot. */
-      return NVME_NEED_COLD_REBOOT;
-   }
-   else {
-      return (uio.comp.SCT << 8 | uio.comp.SC);
-   }
-}
 
+   if (cmdStatus) {
+      *cmdStatus = uio.comp.SCT << 8 | uio.comp.SC;
+   }
+
+   if (uio.comp.SCT << 8 | uio.comp.SC) {
+      rc = 0xbad0001;
+   }
+
+   return rc;
+}
 
 /**
  * Issue Format NVM
@@ -544,7 +901,7 @@ int Nvme_FormatNvm(struct nvme_handle *handle, int ses, int pil, int pi, int ms,
 
    uio.namespaceID = ns;
    /* Set timeout as 30mins, we do see some devices need ~20 minutes to format. */
-   uio.timeoutUs = ADMIN_TIMEOUT * 900;
+   uio.timeoutUs = FORMAT_TIMEOUT;
    rc = Nvme_AdminPassthru(handle, &uio);
 
    if (rc) {
@@ -552,4 +909,59 @@ int Nvme_FormatNvm(struct nvme_handle *handle, int ses, int pil, int pi, int ms,
    } else {
       return (uio.comp.SCT << 8 | uio.comp.SC);
    }
+}
+
+/**
+ * Set IO timeout
+ *
+ * @param [in] handle handle to a device
+ * @param [in] timeout
+ *
+ * @return 0 if successful
+ */
+int
+Nvme_SetTimeout(struct nvme_handle *handle, int timeout)
+{
+   int rc = 0;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+
+   uio.length = timeout;
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_SET_TIMEOUT, &uio);
+
+   if (!rc) {
+      rc = uio.status;
+   }
+
+   return rc;
+}
+
+/**
+ * Get IO timeout
+ *
+ * @param [in] handle handle to a device
+ * @param [out] timeout
+ *
+ * @return 0 if successful
+ */
+int
+Nvme_GetTimeout(struct nvme_handle *handle, int *timeout)
+{
+   int rc = 0;
+   struct usr_io uio;
+
+   memset(&uio, 0, sizeof(uio));
+
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_TIMEOUT, &uio);
+
+   if (!rc) {
+      rc = uio.status;
+   }
+
+   if (!rc) {
+      *timeout = uio.length;
+   }
+
+   return rc;
 }

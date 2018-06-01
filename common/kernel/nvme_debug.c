@@ -82,26 +82,40 @@ NvmeDebug_DumpPrps(struct NvmeCmdInfo *cmdInfo)
 {
    struct NvmeCmdInfo *cmdBase = cmdInfo->cmdBase;
    vmk_ScsiCommand *vmkCmd;
-   
+   int prpNum = 0;
+   int length = 0;
+   int i;
+
    if (cmdBase == NULL) {
       cmdBase = cmdInfo;
    }
-   
-   GET_VMK_SCSI_CMD(cmdInfo->cmdPtr, vmkCmd);
-   
-   DPRINT("cmd %d info %p base %p vmkCmd %p[0x%x] lba 0x%lx lbc %d count %ld req %ld.",
-      cmdInfo->cmdId, cmdInfo, cmdBase, vmkCmd, vmkCmd->cdb[0],
-      vmkCmd->lba, vmkCmd->lbc, cmdInfo->count, cmdBase->requiredLength);
-   
-   if (cmdInfo->count < VMK_PAGE_SIZE) {
-      DPRINT("\t prp1: 0x%lx prp2: 0x%lx.", cmdInfo->nvmeCmd.header.prp[0].addr,
-   		cmdInfo->nvmeCmd.header.prp[1].addr);
+
+   GET_VMK_SCSI_CMD(cmdBase->cmdPtr, vmkCmd);
+
+   if (cmdInfo->count == 0) {
+      return;
+   }
+
+   length = VMK_PAGE_SIZE - (cmdInfo->nvmeCmd.header.prp[0].addr & VMK_PAGE_MASK);
+   if (cmdInfo->count <= length) {
+      prpNum = 1;
    } else {
-      int i;
+      length = cmdInfo->count - length;
+      prpNum = (length + VMK_PAGE_SIZE - 1) / VMK_PAGE_SIZE + 1;
+   }
+
+   DPRINT("cmd [%d] %p base %p vmkCmd %p[0x%x] lba 0x%lx lbc %d count %ld req %ld, prp %d",
+      cmdInfo->cmdId, cmdInfo, cmdBase, vmkCmd, vmkCmd->cdb[0],
+      vmkCmd->lba, vmkCmd->lbc, cmdInfo->count, cmdBase->requiredLength, prpNum);
+
+   if (prpNum <= 2) {
       DPRINT("\t prp1: 0x%lx prp2: 0x%lx.", cmdInfo->nvmeCmd.header.prp[0].addr,
-      	     cmdInfo->nvmeCmd.header.prp[1].addr);
-      for (i = 0; i < cmdInfo->count / VMK_PAGE_SIZE + 3; i += 8) {
-         DPRINT("\t 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx",
+         cmdInfo->nvmeCmd.header.prp[1].addr);
+   } else {
+      DPRINT("\t prp1: 0x%lx prp2: 0x%lx.", cmdInfo->nvmeCmd.header.prp[0].addr,
+         cmdInfo->nvmeCmd.header.prp[1].addr);
+      for (i = 0; i < prpNum - 1; i += 8) {
+         DPRINT("\t %04d: 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx", i,
                 cmdInfo->prps[i].addr, cmdInfo->prps[i+1].addr, cmdInfo->prps[i+2].addr,
                 cmdInfo->prps[i+3].addr, cmdInfo->prps[i+4].addr, cmdInfo->prps[i+5].addr,
                 cmdInfo->prps[i+6].addr, cmdInfo->prps[i+7].addr);
@@ -126,20 +140,24 @@ NvmeDebug_DumpNsInfo(struct NvmeNsInfo *ns)
 /**
  * Dump timeout info
  */
+#if USE_TIMER
 void
 NvmeDebug_DumpTimeoutInfo(struct NvmeQueueInfo *qinfo)
 {
    int i;
-   vmk_uint32 *ptr = (vmk_uint32 *) qinfo->timeout;
-   for (i = 0; i < io_timeout; i++)
+   vmk_uint32 *ptr = (vmk_uint32 *) qinfo->timeoutCount;
+   vmk_uint32 *ptrComp = (vmk_uint32 *) qinfo->timeoutComplCount;
+   int ioTimeout = qinfo->ctrlr->ioTimeout;
+   for (i = 0; i < ioTimeout; i++)
    {
-      if (ptr[i])
+      if (ptr[i] - (int)vmk_AtomicRead32(&ptrComp[i]))
       {
-         DPRINT("non-zero qinfo %p [%d] timeout IDs: %02x: %08x\n", qinfo, qinfo->id,
-                i, ptr[i]);
+         DPRINT("non-zero qinfo %p [%d] timeout IDs: %02x: %08x, in timer %d", qinfo, qinfo->id,
+                i, ptr[i] - (int)vmk_AtomicRead32(&ptrComp[i]), qinfo->ctrlr->timeoutId);
       }
    }
 }
+#endif
 
 #if NVME_DEBUG_INJECT_ERRORS
 static const struct NvmeDebug_ErrorCounterInfo errorCounters[] = {
@@ -232,15 +250,14 @@ NvmeDebug_DumpSmart(struct smart_log *smartLog)
    else {
       vmk_uint8 *smart = (vmk_uint8*)smartLog;
       int i;
-      for(i = 0; i<sizeof(struct smart_log); i+=8) {
-         DPRINT("\t 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x",
-                     smart[i],smart[i+1],smart[i+2],smart[i+3],smart[i+4],
-                     smart[i+5],smart[i+6],smart[i+7]);
+      for(i = 0; i < sizeof(struct smart_log); i+=8) {
+         DPRINT("\t %03d: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x",
+                i, smart[i],smart[i+1],smart[i+2],smart[i+3],smart[i+4],
+                smart[i+5],smart[i+6],smart[i+7]);
       }
 
    }
    DPRINT("dump smart log successfully!");
-
 }
 
 #if (NVME_ENABLE_STATISTICS == 1)
