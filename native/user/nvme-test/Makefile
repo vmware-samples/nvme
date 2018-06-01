@@ -17,6 +17,14 @@ MAKE = $(TC_ROOT)/lin32/make-3.81/bin/make
 ##
 # Calculate VMKAPI_BASE, VMKAPI_MGMTLIB_BASE, and VMKAPI_MGMTLIB_LIBS
 #
+HAS_NATIVEDDK := $(shell rpm -qa | grep vmware-esx-nativeddk-devtools)
+ifdef HAS_NATIVEDDK
+VMKAPIDDK_ROOT = $(shell rpm -q --qf '%{INSTPREFIXES}\n' vmware-esx-nativeddk-devtools)
+VMKAPI_BASE = $(dir $(shell find $(VMKAPIDDK_ROOT)/src/bora -name vmkapi.h))
+VMKAPI_MGMTLIB_BASE = -L$(VMKAPIDDK_ROOT)/lib
+VMKAPI_MGMTLIB_LIBS = -lvmkmgmt --sysroot=/build/toolchain/lin32/glibc-2.11.1-0.17.4
+
+else
 HAS_VMKAPIDDK := $(shell rpm -qa | grep vmware-esx-vmkapiddk-devtools)
 
 ifdef HAS_VMKAPIDDK
@@ -44,11 +52,12 @@ VMKAPI_MGMTLIB_LIBS += -lvmlibs
 
 VMKAPI_MGMTLIB_LIBS += --sysroot=/build/toolchain/lin32/glibc-2.11.1-0.17.4
 endif
+endif
 
 ##
 # Product include and libs
 #
-INCLUDE += -I../.. -I../../../common/kernel -I../../kernel -I../nvme-cli
+INCLUDE += -I../.. -I../../../common/kernel -I../../kernel -I../esxcli-nvme-plugin
 INCLUDE += -Ilibsgutils2/include
 LIBS += -Llibsgutils2/lib -lsgutils2
 
@@ -83,7 +92,7 @@ LIBS += -lstdc++ -lpthread
 ##
 # VPATH includes
 #
-VPATH += :$(abspath ../nvme-cli)
+VPATH += :$(abspath ../esxcli-nvme-plugin)
 VPATH += :$(abspath ../../kernel)
 
 ##

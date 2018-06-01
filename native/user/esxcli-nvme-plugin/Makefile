@@ -11,17 +11,15 @@
 #
 
 UWTOOL = esxcli-nvme-plugin
-UWTOOL_VERSION = 1.2.0.7-1vmw
+UWTOOL_VERSION = 1.2.0.10-1vmw
 
 # mgmtInterface.c is in DEV_COMMON_DIR, the build system looks
 # there for sources as well as here.
 UWTOOL_SOURCES = main.c esxcli_xml.c nvme_lib.c nvme_mgmt_common.c
-UWTOOL_INCLUDES = -I../../../common/kernel -I../../kernel -I../nvme-cli
+UWTOOL_INCLUDES = -I../../../common/kernel -I../../kernel
 DEV_COMMON_DIR = ../../kernel
 
 PLUGIN_XML = esxcli-nvme.xml
-
-VPATH += :$(abspath ../nvme-cli)
 
 DESC_VENDOR_EMAIL=nvmexpress@vmware.com
 DESC_VERSION=$(UWTOOL_VERSION)

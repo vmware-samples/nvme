@@ -255,8 +255,22 @@ NvmeScsiCmd_SetReturnStatus(void *cmdPtr, Nvme_Status nvmeStatus)
 	senseAscq     = ASCQ_WARNING_TEMP_OUT_OF_RANGE;
         senseValid   = VMK_TRUE;
         break;
-      case NVME_STATUS_CONFLICT_ATTRIBUTES:
+#if VMKAPIDDK_VERSION >= 600
+      case NVME_STATUS_GUARD_CHECK_ERROR:
+        hostStatus    = VMK_SCSI_HOST_PI_GUARD_ERROR;
+        deviceStatus  = VMK_SCSI_DEVICE_GOOD;
+        break;
+      case NVME_STATUS_REF_CHECK_ERROR:
+        hostStatus    = VMK_SCSI_HOST_PI_REF_ERROR;
+        deviceStatus  = VMK_SCSI_DEVICE_GOOD;
+        break;
+      case NVME_STATUS_APP_CHECK_ERROR:
       case NVME_STATUS_INVALID_PI:
+        hostStatus    = VMK_SCSI_HOST_PI_GENERIC_ERROR;
+        deviceStatus  = VMK_SCSI_DEVICE_GOOD;
+        break;
+#endif
+      case NVME_STATUS_CONFLICT_ATTRIBUTES:
       case NVME_STATUS_PROTOCOL_ERROR:
       case NVME_STATUS_FAILURE:
       default:
@@ -279,11 +293,22 @@ NvmeScsiCmd_SetReturnStatus(void *cmdPtr, Nvme_Status nvmeStatus)
       senseData.valid = VMK_TRUE;
 
       senseData.error = VMK_SCSI_SENSE_ERROR_CURCMD;
+
+#if VMKAPIDDK_VERSION >= 650
+      senseData.format.fixed.key   = senseKey;
+      senseData.format.fixed.asc   = senseAsc;
+      senseData.format.fixed.ascq  = senseAscq;
+      senseData.format.fixed.optLen  = 10;
+
+      ScsiCmdSetSenseData(&senseData, vmkCmd,
+                          (VMK_SCSI_SENSE_HDR_LEN+senseData.format.fixed.optLen));
+#else
       senseData.key   = senseKey;
       senseData.asc   = senseAsc;
       senseData.ascq  = senseAscq;
 
       ScsiCmdSetSenseData(&senseData, vmkCmd, sizeof(senseData));
+#endif
    }
 
    SET_SCSI_SENSE_LEGACY(&senseData, cmdPtr, sizeof(senseData));
@@ -418,7 +443,7 @@ NvmeScsiCmd_DoInquiryStd(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struc
    response_data.ansi = 0x6; /* SPC-4 */
    response_data.dataformat = 0x2; /* SPC-4 */
    response_data.optlen = 0x1f;
-   response_data.protect = END2END_DSP_TYPE(ns->dataProtSet) == 0 ? 0 : 1; /* calculated by Identify Namespace Data */
+   response_data.protect = END2END_DPS_TYPE(ns->dataProtSet) == 0 ? 0 : 1; /* calculated by Identify Namespace Data */
    vmk_Memcpy(response_data.manufacturer, "NVMe    ", sizeof(response_data.manufacturer));
    vmk_Memcpy(response_data.product, ctrlr->model, sizeof(response_data.product));
    vmk_Memcpy(response_data.revision, ctrlr->firmwareRev, sizeof(response_data.revision));
@@ -437,9 +462,9 @@ NvmeScsiCmd_DoInquiryStd(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struc
  * Currently only 00h, 80h, 83h, B0h, B1h implemented.
  */
 #if NVME_ENABLE_SCSI_DEVICEID
-#define MAX_SUPPORTED_VPD_PAGES (5)
+#define MAX_SUPPORTED_VPD_PAGES (6)
 #else
-#define MAX_SUPPORTED_VPD_PAGES (3)
+#define MAX_SUPPORTED_VPD_PAGES (4)
 #endif /* NVME_ENABLE_SCSI_DEVICEID */
 
 
@@ -483,11 +508,13 @@ NvmeScsiCmd_DoInquiryVpd00(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
 #if NVME_ENABLE_SCSI_DEVICEID
    response_data.vpdList[1] = SCSI_INQUIRY_80H;
    response_data.vpdList[2] = SCSI_INQUIRY_83H;
-   response_data.vpdList[3] = SCSI_INQUIRY_B0H;
-   response_data.vpdList[4] = SCSI_INQUIRY_B1H;
+   response_data.vpdList[3] = SCSI_INQUIRY_86H;
+   response_data.vpdList[4] = SCSI_INQUIRY_B0H;
+   response_data.vpdList[5] = SCSI_INQUIRY_B1H;
 #else
-   response_data.vpdList[1] = SCSI_INQUIRY_B0H;
-   response_data.vpdList[2] = SCSI_INQUIRY_B1H;
+   response_data.vpdList[1] = SCSI_INQUIRY_86H;
+   response_data.vpdList[2] = SCSI_INQUIRY_B0H;
+   response_data.vpdList[3] = SCSI_INQUIRY_B1H;
 #endif /* NVME_ENABLE_SCSI_DEVICEID */
 
    transferLen = (transferLen < sizeof(response_data)) ? transferLen : sizeof(response_data);
@@ -833,6 +860,94 @@ NvmeScsiCmd_DoInquiryVpd83(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
 
 #endif /* NVME_ENABLE_SCSI_DEVICEID */
 
+/**
+ * \brief Format of INQUIRY EVPD Page 86 response
+ * SPC 4 r33, Section 7.8.8 page 650
+ */
+typedef struct {
+   /** \brief see above spc section */
+   vmk_uint8  devClass      :5,
+   /** \brief see above spc section */
+              pQual         :3;
+   /** \brief see above spc section */
+   vmk_uint8  pageCode;
+   /** \brief see above spc section */
+   vmk_uint16 pageLength;
+   /** \brief see above spc section */
+   vmk_uint8  refChk        :1,
+   /** \brief see above spc section */
+              appChk        :1,
+   /** \brief see above spc section */
+              grdChk        :1,
+   /** \brief see above spc section */
+              spt           :3,
+   /** \brief see above spc section */
+              actUcode      :2;
+   /** \brief see above spc section */
+   vmk_uint8  simSup        :1,
+   /** \brief see above spc section */
+              ordSup        :1,
+   /** \brief see above spc section */
+              headSup       :1,
+   /** \brief see above spc section */
+              priorSup      :1,
+   /** \brief see above spc section */
+              groupSup      :1,
+   /** \brief see above spc section */
+              uaskSup       :1,
+   /** \brief see above spc section */
+              res1          :2;
+   /** \brief see above spc section */
+   vmk_uint8  vSup          :1,
+   /** \brief see above spc section */
+              nvSup         :1,
+   /** \brief see above spc section */
+              crdSup        :1,
+   /** \brief see above spc section */
+              wuSup         :1,
+   /** \brief see above spc section */
+              res2          :4;
+   /** \brief see above spc section */
+   vmk_uint8  luiClr        :1,
+   /** \brief see above spc section */
+              res3          :3,
+   /** \brief see above spc section */
+              piiSup        :1,
+   /** \brief see above spc section */
+              res4          :3;
+   /** \brief see above spc section */
+   vmk_uint8  cbcs          :1,
+   /** \brief see above spc section */
+              res5          :3,
+   /** \brief see above spc section */
+              rSup          :1,
+   /** \brief see above spc section */
+              res6          :3;
+   /** \brief see above spc section */
+   vmk_uint8  multiUcode    :4,
+   /** \brief see above spc section */
+              res7          :4;
+   /** \brief see above spc section */
+   vmk_uint16 extSelfTestMins;
+   /** \brief see above spc section */
+   vmk_uint8  depLU         :1,
+   /** \brief see above spc section */
+              supLU         :1,
+   /** \brief see above spc section */
+              res8          :3,
+   /** \brief see above spc section */
+              vsaSup        :1,
+   /** \brief see above spc section */
+              hraSup        :1,
+   /** \brief see above spc section */
+              poaSup        :1;
+   /** \brief see above spc section */
+   vmk_uint8  maxSenseDataLen;
+   /*
+    * Reserved bytes - 14 - 63
+    */
+   vmk_uint8  res9[50];
+} VMK_ATTRIBUTE_PACKED nvme_ScsiInquiryVPD86Response;
 
 /**
  * Handle SCSI Inquiry Extended INQUIRY Data VPD page command
@@ -844,7 +959,53 @@ NvmeScsiCmd_DoInquiryVpd83(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, str
 static Nvme_Status
 NvmeScsiCmd_DoInquiryVpd86(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, struct NvmeNsInfo *ns)
 {
-   return NVME_STATUS_INVALID_FIELD_IN_CDB;
+#if VMKAPIDDK_VERSION >= 600
+   vmk_ScsiInquiryVPD86Response response_data;
+#else
+   nvme_ScsiInquiryVPD86Response response_data;
+#endif
+   vmk_ScsiInquiryCmd *inquiryCmd = (vmk_ScsiInquiryCmd *)vmkCmd->cdb;
+   vmk_uint16 transferLen = 0;
+   vmk_uint8 protCap = 0;
+   vmk_uint8 protSet = 0;
+
+   transferLen = _lto2b_16(inquiryCmd->length);
+   vmk_Memset(&response_data, 0, sizeof(response_data));
+
+   response_data.devClass = VMK_SCSI_CLASS_DISK;
+   response_data.pQual = VMK_SCSI_PQUAL_CONNECTED;
+   response_data.pageCode = SCSI_INQUIRY_86H;
+   response_data.pageLength = vmk_CPUToBE16(0x3C);
+   response_data.actUcode = 2;
+
+   protCap = END2END_DPS_TYPE(ns->dataProtCap);
+   protSet = END2END_DPS_TYPE(ns->dataProtSet);
+   if ( protCap == 0) {
+      response_data.spt = 6;
+   } else if (protCap == 1 || protCap == 6) {
+      response_data.spt = protCap - 1;
+   } else if (protCap == 3 || protCap == 5) {
+      response_data.spt = protCap - 2;
+   } else {
+      response_data.spt = protCap;
+   }
+
+   /**
+    * Check GUARD in PI type 1, 2, 3;
+    * Not check APP tag;
+    * Check REF tag in PI type 1, 2. 
+    */
+   response_data.grdChk = protSet == 0 ? 0 : 1;
+   response_data.appChk = 0;
+   response_data.refChk = (protSet == 1 || protSet == 2) ? 1 : 0;
+
+   response_data.vSup = ctrlr->nvmCacheSupport & 0x1;
+
+   transferLen = (transferLen < sizeof(response_data)) ? transferLen : sizeof(response_data);
+   vmk_SgCopyTo(vmkCmd->sgArray, &response_data, transferLen);
+   vmkCmd->bytesXferred = transferLen;
+
+   return NVME_STATUS_SUCCESS;
 }
 
 
@@ -1222,9 +1383,9 @@ NvmeScsiCmd_DoReadCapacity16(struct NvmeCtrlr *ctrlr, vmk_ScsiCommand *vmkCmd, s
            ns->id, ns->blockCount, ns->lbaShift,
            ns->fmtLbaSize, ns->metaDataCap, ns->dataProtCap, ns->dataProtSet, ns->metasize);
 
-   response_data.protEnable = END2END_DSP_TYPE(ns->dataProtSet) == 0 ? 0 : 1;
+   response_data.protEnable = END2END_DPS_TYPE(ns->dataProtSet) == 0 ? 0 : 1;
    /* 000b -> unspecified; 001b -> 000b; 010b -> 001b; 011b -> 010b */
-   response_data.protType = END2END_DSP_TYPE(ns->dataProtSet) - 1;
+   response_data.protType = END2END_DPS_TYPE(ns->dataProtSet) - 1;
    /**
     * Note: we require lbpme to be set to 1 when device supports UNMAP/DSM.
     */
@@ -2858,7 +3019,7 @@ out_return:
       vmkStatus = NvmeScsiCmd_SetReturnStatus(cmdPtr, nvmeStatus);
       if (vmkStatus == VMK_OK) {
 #if NVME_MUL_COMPL_WORLD
-         OsLib_IOCOmpletionEnQueue(ctrlr, vmkCmd);
+         OsLib_IOCompletionEnQueue(ctrlr, vmkCmd);
 #else
          SCSI_CMD_INVOKE_COMPLETION_CB(cmdPtr);
 #endif

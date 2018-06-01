@@ -1258,7 +1258,7 @@ struct smart_log
         * represented as 255. This value shall be updated once per
         * power-on hour (when the controller is not in a sleep state).
              */
-       vmk_uint8 precentageUsed;
+       vmk_uint8 percentageUsed;
             /**
              * @brief Reserved.
         */
@@ -1331,10 +1331,42 @@ struct smart_log
         * over the life of the controller.
              */
           vmk_uint8 numberOfErrorInfoLogs[191-176+1];
+          /**
+           * @brief Warning Composite Temperature Time
+           *
+           * Contains the amount of time in minutes that the controller is operational
+           * and the Composite Temperature is greater than or equal to the Warning
+           * Composite Temperature Threshold (WCTEMP) field and less than the Critical
+           * Composite Temperature Threshold (CCTEMP) field in the Identify Controller
+           * data structure in Figure 90.
+           */
+          vmk_uint32 warningCompositeTempTime;
+          /**
+           * @brief Critical Composite Temperature Time
+           *
+           * Contains the amount of time in minutes that the controller is operational
+           * and the Composite Temperature is greater the Critical Composite Temperature
+           * Threshold (CCTEMP) field in the Identify Controller data structure in
+           * Figure 90.
+           */
+          vmk_uint32 criticalCompositeTempTime;
+          /**
+           * @brief Temperature Sensor
+           *
+           * Contains the current temperature reported by temperature sensors.
+           */
+          vmk_uint16 tempSensor1;
+          vmk_uint16 tempSensor2;
+          vmk_uint16 tempSensor3;
+          vmk_uint16 tempSensor4;
+          vmk_uint16 tempSensor5;
+          vmk_uint16 tempSensor6;
+          vmk_uint16 tempSensor7;
+          vmk_uint16 tempSensor8;
             /**
              * @brief reserved.
              */
-          vmk_uint8 reservedB[511-192+1];
+          vmk_uint8 reservedB[511-216+1];
    };
         /**
          * @brief Byte host memory buffer address.
@@ -2462,7 +2494,7 @@ struct lba_range
  * @brief Identify - Data Protection Type settings field definitions.
  */
 #define END2END_DPS_FIRST  (1 << 3)
-#define END2END_DSP_TYPE(x)   (x & 0x07)
+#define END2END_DPS_TYPE(x)   (x & 0x07)
 
 
 /**
@@ -2621,9 +2653,210 @@ struct iden_namespace
      */
     vmk_uint8 dataProtSet;
     /**
-     * @brief Reserved
+     * @brief Namespace Multi-path I/O and Namespace Sharing Capabilities
+     *
+     * This field specifies multi-path I/O and namespace sharing capabilities of the
+     * namespace.
+     *
+     * Bits 7:1 are reserved
+     * Bit 0: If set to ‘1’ then the namespace may be accessible by two or more
+     *        controllers in the NVM subsystem (i.e., may be a shared namespace). If
+     *        cleared to ‘0’ then the namespace is a private namespace and may only be
+     *        accessed by the controller that returned this namespace data structure.
      */
-    vmk_uint8 reservedA[119-30+1];
+    struct {
+       vmk_uint8 sharedNs :1;
+       vmk_uint8 reserved :7;
+    } nmic;
+    /**
+     * @brief Reservation Capabilities
+     *
+     * This field indicates the reservation capabilities of the namespace. A value of
+     * 00h in this field indicates that reservations are not supported by this namespace.
+     * Refer to section 8.8 for more details.
+     *
+     * Bit 7 is reserved
+     * Bit 6 if set to ‘1’ indicates that the namespace supports the Exclusive Access
+     *       – All Registrants reservation type. If this bit is cleared to ‘0’, then the
+     *       namespace does not support the Exclusive Access – All Registrants
+     *       reservation type.
+     * Bit 5 if set to ‘1’ indicates that the namespace supports the Write Exclusive
+     *       – All Registrants reservation type. If this bit is cleared to ‘0’, then the
+     *       namespace does not support the Write Exclusive – All Registrants reservation
+     *       type.
+     * Bit 4 if set to ‘1’ indicates that the namespace supports the Exclusive Access
+     *       – Registrants Only reservation type. If this bit is cleared to ‘0’, then the
+     *       namespace does not support the Exclusive Access – Registrants Only
+     *       reservation type.
+     * Bit 3 if set to ‘1’ indicates that the namespace supports the Write Exclusive
+     *       – Registrants Only reservation type. If this bit is cleared to ‘0’, then the
+     *       namespace does not support the Write Exclusive – Registrants Only
+     *       reservation type.
+     * Bit 2 if set to ‘1’ indicates that the namespace supports the Exclusive Access
+     *       reservation type. If this bit is cleared to ‘0’, then the namespace does not
+     *       support the Exclusive Access reservation type.
+     * Bit 1 if set to ‘1’ indicates that the namespace supports the Write Exclusive
+     *       reservation type.  If this bit is cleared to ‘0’, then the namespace does
+     *       not support the Write Exclusive reservation type.
+     * Bit 0 if set to ‘1’ indicates that the namespace supports the Persist Through
+     *       Power Loss capability. If this bit is cleared to ‘0’, then the namespace
+     *       does not support the Persist Through Power Loss Capability.
+     */
+    struct {
+       vmk_uint8 pstThruPowerLoss :1;
+       vmk_uint8 wrExcResv :1;
+       vmk_uint8 excAcsResv :1;
+       vmk_uint8 wrExcRegOnlyResv :1;
+       vmk_uint8 excAcsRegOnlyResv :1;
+       vmk_uint8 wrExcAllRegOnlyResv :1;
+       vmk_uint8 excAcsAllRegOnlyResv :1;
+       vmk_uint8 reserved :1;
+    } resCap;
+    /**
+     * @brief Format Progress Indicator
+     *
+     * If a format operation is in progress, this field indicates the percentage of the
+     * namespace that remains to be formatted.
+     *
+     * Bit 7 if set to ‘1’ indicates that the namespace supports the Format Progress
+     *       Indicator defined by bits 6:0 in this field. If this bit is cleared to ‘0’,
+     *       then the namespace does not support the Format Progress Indicator and bits
+     *       6:0 in this field shall be cleared to 0h.
+     * Bits 6:0 indicate the percentage of the namespace that remains to be formatted
+     * (e.g., a value of 25 indicates that 75% of the namespace has been formatted and
+     * 25% remains to be formatted). A value of 0 indicates that the namespace is
+     * formatted with the format specified by the FLBAS and DPS fields in this data
+     * structure.
+     */
+    struct {
+       vmk_uint8 pctRemFmt :7;
+       vmk_uint8 fmtProgIndtSup :1;
+    } fpi;
+    /**
+     * @brief reserved
+     */
+    vmk_uint8 reservedC;
+    /**
+     * @brief Namespace Atomic Write Unit Normal
+     *
+     * This field indicates the namespace specific size of the write operation
+     * guaranteed to be written atomically to the NVM during normal operation.
+     *
+     * A value of 0h indicates that the size for this namespace is the same size as that
+     * reported in the AWUN field of the Identify Controller data structure. All other
+     * values specify a size in terms of logical blocks using the same encoding as the
+     * AWUN field. Refer to section 6.4.
+     */
+    vmk_uint16 nawun;
+    /**
+     * @brief Namespace Atomic Write Unit Power Fail
+     *
+     * This field indicates the namespace specific size of the write operation
+     * guaranteed to be written atomically to the NVM during a power fail or error
+     * condition.
+     *
+     * A value of 0h indicates that the size for this namespace is the same size as that
+     * reported in the AWUPF field of the Identify Controller data structure. All other
+     * values specify a size in terms of logical blocks using the same encoding as the
+     * AWUPF field. Refer to section 6.4.
+     */
+    vmk_uint16 nawupf;
+    /**
+     * @brief Namespace Atomic Compare & Write Unit
+     *
+     * This field indicates the namespace specific size of the write operation
+     * guaranteed to be written atomically to the NVM for a Compare and Write fused
+     * command.
+     *
+     * A value of 0h indicates that the size for this namespace is the same size as that
+     * reported in the ACWU field of the Identify Controller data structure. All other
+     * values specify a size in terms of logical blocks using the same encoding as the
+     * ACWU field. Refer to section 6.4.
+     */
+    vmk_uint16 nacwu;
+    /**
+     * @brief Namespace Atomic Boundary Size Normal
+     *
+     * This field indicates the atomic boundary size for this namespace for the NAWUN
+     * value. This field is specified in logical blocks. Writes to this namespace that
+     * cross atomic boundaries are not guaranteed to be atomic to the NVM with respect to
+     * other read or write commands.
+     *
+     * A value of 0h indicates that there are no atomic boundaries for normal write
+     * operations. All other values specify a size in terms of logical blocks using the
+     * same encoding as the AWUN field. Refer to section 6.4.
+     */
+    vmk_uint16 nabsn;
+    /**
+     * @brief Namespace Atomic Boundary Offset
+     *
+     * This field indicates the LBA on this namespace where the first atomic boundary
+     * starts. If the NABSN and NABSPF fields are cleared to 0h, then the NABO field
+     * shall be cleared to 0h. NABO shall be less than or equal to NABSN and NABSPF.
+     * Refer to section 6.4.
+     */
+    vmk_uint16 nabo;
+    /**
+     * @brief Namespace Atomic Boundary Size Power Fail
+     *
+     * This field indicates the atomic boundary size for this namespace specific to the
+     * Namespace Atomic Write Unit Power Fail value. This field is specified in logical
+     * blocks. Writes to this namespace that cross atomic boundaries are not guaranteed
+     * to be atomic with respect to other read or write commands and there is no
+     * guarantee of data returned on subsequent reads of the associated logical blocks.
+     *
+     * A value of 0h indicates that there are no atomic boundaries for power fail or
+     * error conditions. All other values specify a size in terms of logical blocks
+     * using the same encoding as the AWUPF field. Refer to section 6.4.
+     */
+    vmk_uint16 nabspf;
+    /**
+     * @brief reserved
+     */
+    vmk_uint16 reservedD;
+    /**
+     * @brief NVM Capacity
+     *
+     * This field indicates the total size of the NVM allocated to this namespace. The
+     * value is in bytes. This field shall be supported if Namespace Management and
+     * Namespace Attachment commands are supported.
+     *
+     * Note: This field may not correspond to the logical block size multiplied by the
+     * Namespace Size field. Due to thin provisioning or other settings (e.g. endurance),
+     * this field may be larger or smaller than the Namespace Size reported.
+     */
+    vmk_uint8 NVMCap[16];
+    /**
+     * @brief reserved
+     */
+    vmk_uint8 reservedE[103-64+1];
+     /**
+     * @brief Namespace Globally Unique Identifier
+     * This field contains a 128-bit value that is globally unique and assigned to the
+     * namespace when the namespace is created. This field remains fixed throughout the
+     * life of the namespace and is preserved across namespace and controller operations
+     * (e.g., controller reset, namespace format, etc.).
+     *
+     * This field uses the EUI-64 based 16-byte designator format. Bytes 114:112 contain
+     * the 24- bit company_id value assigned by the IEEE Registration Authority. Bytes
+     * 119:115 contain an extension identifer assigned by the corresponding organization.
+     * Bytes 111:104 contain the vendor specific extension identifier assigned by the
+     * corresponding organization. See the IEEE EUI-64 guidelines for more information.
+     *
+     * The controller shall specify a globally unique namespace identifier in this field
+     * or the EUI64 field when the namespace is created.
+     */
+    struct {
+       vmk_uint8 vendorSpecExtId[8];
+       vmk_uint8 extId[5];
+       vmk_uint8 cmpyId[3];
+    } nguid;
+
+    /**
+     * @brief Reserved
+     * Removed it would break the compatiblity?
+     */
+//    vmk_uint8 reservedA[119-30+1];
     /**
      * @brief IEEE Extended Unique Identifier (EUI64)
      */
@@ -2705,9 +2938,106 @@ struct iden_controller
      */
     vmk_uint8 ieeeOui[3];
     /**
+     * @brief Controller Multi-Path I/O and Namespace Sharing Capabilities
+     *
+     * This field specifies multi-path I/O and namespace sharing capabilities of the
+     * controller and NVM subsystem.
+     *
+     * Bits 7:3 are reserved
+     * Bit 2: If set to ‘1’ then the controller is associated with an SR-IOV Virtual
+     *        Function. If cleared to ‘0’ then the controller is associated with a
+     *        PCI Function.
+     * Bit 1: If set to ‘1’ then the NVM subsystem may contain two or more controllers.
+     *        If cleared to ‘0’ then the NVM subsystem contains only a single controller.
+     * Bit 0: If set to ‘1’ then the NVM subsystem may contain two or more physical PCI
+     *        Express ports. If cleared to ‘0’ then the NVM subsystem contains only a
+     *        single PCI Express port.
+     */
+    struct {
+       vmk_uint8 mulPorts :1;
+       vmk_uint8 mulCtrlrs :1;
+       vmk_uint8 sriov :1;
+       vmk_uint8 reserved :5;
+    } cmic;
+    /**
+     * @brief Maximum Data Transfer Size
+     *
+     * This field indicates the maximum data transfer size between the host and the
+     * controller. The host should not submit a command that exceeds this transfer size.
+     * If a command is submitted that exceeds the transfer size, then the command is
+     * aborted with a status of Invalid Field in Command. The value is in units of the
+     * minimum memory page size (CAP.MPSMIN) and is reported as a power of two (2^n).
+     * A value of 0h indicates no restrictions on transfer size. The restriction
+     * includes metadata if it is interleaved with the logical block data.
+     *
+     * If SGL Bit Bucket descriptors are supported, their lengths shall be included in
+     * determining if a command exceeds the Maximum Data Transfer Size for destination
+     * data buffers. Their length in a source data buffer is not included for a Maximum
+     * Data Transfer Size calculation.
+     */
+    vmk_uint8 mdts;
+    /**
+     * @brief Controller ID
+     *
+     * Contains the NVM subsystem unique controller identifier associated with the
+     * controller. Refer to section 7.9 for unique identifier requirements.
+     *
+     */
+    vmk_uint16 cntlId;
+    /**
+     * @brief Version
+     *
+     * This field contains the value reported in the Version register defined in
+     * section 3.1.2. Implementations compliant to revision 1.2 or later of this
+     * specification shall report a non-zero value in this field.
+     */
+    struct {
+       vmk_uint32 reserved :8;
+       vmk_uint32 mnr :8;
+       vmk_uint32 mjr :16;
+    } ver;
+     /**
+     * @brief RTD3 Resume Latency
+     *
+     * This field indicates the typical latency in microseconds resuming from Runtime
+     * D3 (RTD3). Refer to section 8.4.4 for test conditions. Implementations compliant
+     * to revision 1.2 or later of this specification shall report a non-zero value in
+     * this field.
+     */
+    vmk_uint32 rtd3r;
+     /**
+     * @brief RTD3 Entry Latency
+     *
+     * This field indicates the typical latency in microseconds to enter Runtime D3
+     * (RTD3). Refer to section 8.4.4 for test conditions.  Implementations compliant to
+     * revision 1.2 or later of this specification shall report a non-zero value in this
+     * field.
+     */
+    vmk_uint32 rtd3e;
+     /**
+     * @brief Optional Asynchronouos Events Supported
+     *
+     * This field indicates the optional asynchronous events supported by the controller.
+     * A controller shall not send optional asynchronous events before they are enabled
+     * by host software.
+     *
+     * Bits 31:9 are reserved.
+     *
+     * Bit 8 is set to ‘1’ if the controller supports sending the Namespace Attribute
+     *       Changed event. If cleared to ‘0’ then the controller does not support the
+     *       Namespace Attribute Changed event.
+     *
+     * Bits 7:0 are reserved.
+     */
+    struct {
+       vmk_uint32 reserved1 :8;
+       vmk_uint32 nsChgEvent :1;
+       vmk_uint32 reserved2 :23;
+    } oaes;
+    /**
      * @brief Reserved
      */
-    vmk_uint8 reservedA[255-76+1];
+    vmk_uint8 reservedA[255-96+1];
     /**
      * @brief Optional Admin Command Support
      *
@@ -2807,9 +3137,111 @@ struct iden_controller
      */
     vmk_uint8 admVendCmdCfg;
     /**
+     * @brief Autonomous Power State Transition Attributes
+     *
+     * This field indicates the attributes of the autonomous power state transition
+     * feature. Refer to section 8.4.2.
+     *
+     * Bits 7:1 are reserved.
+     * Bit 0 if set to ‘1’ then the controller supports autonomous power state
+     *       transitions. If cleared to ‘0’ then the controller does not support
+     *       autonomous power state transitions.
+     */
+    struct {
+       vmk_uint8 autoPowerStX :1;
+       vmk_uint8 reserved :7;
+    } apsta;
+    /**
+     * @brief Warning Composite Temperature Threshold
+     *
+     * This field indicates the minimum Composite Temperature field value (reported
+     * in the SMART / Health Information log in Figure 79) that indicates an overheating
+     * condition during which controller operation continues. Immediate remediation is
+     * recommended (e.g., additional cooling or workload reduction). The platfom should
+     * strive to maintain a composite temperature below this value.
+     *
+     * A value of 0h in this field indicates that no warning temperature threshold value
+     * is reported by the controller. Implementations compliant to revision 1.2 or later
+     * of this specification shall report a non-zero value in this field.
+     *
+     * It is recommended that implementations report a value of 0157h in this field.
+     */
+    vmk_uint16 wcTemp;
+    /**
+     * @brief Critical Composite Temperature Threshold
+     *
+     * This field indicates the minimum Composite Temperature field value (reported in
+     * the SMART / Health Information log in Figure 79) that indicates a critical
+     * overheating condition (e.g., may prevent continued normal operation, possibility
+     * of data loss, automatic device shutdown, extreme peformance throttling, or
+     * permanent damage).
+
+     * A value of 0h in this field indicates that no critical temperature threshold
+     * value is reported by the controller. Implementations compliant to revision 1.2 or
+     * later of this specification shall report a non-zero value in this field.
+     */
+    vmk_uint16 ccTemp;
+    /**
+     * @brief Maximum Time for Firmware Activation
+     *
+     * Indicates the maximum time the controller temporarily stops processing commands
+     * to activate the firmware image.  This field shall be valid if the controller
+     * supports firmware activation without a reset. This field is specified in 100
+     * millisecond units. A value of 0h indicates that the maximum time is undefined.
+     */
+    vmk_uint16 mtfa;
+    /**
+     * @brief Host Memory Buffer Preferred Size
+     *
+     * This field indicates the preferred size that the host is requested to allocate
+     * for the Host Memory Buffer feature in 4KB units. This value shall be larger than
+     * or equal to the Host Memory Buffer Minimum Size. If this field is non-zero, then
+     * the Host Memory Buffer feature is supported. If this field is cleared to 0h, then
+     * the Host Memory Buffer feature is not supported.
+     */
+    vmk_uint32 hmPre;
+    /**
+     * @brief Host Memory Buffer Minimum Size
+     *
+     * This field indicates the minimum size that the host is requested to allocate for
+     * the Host Memory Buffer feature in 4KB units. If this field is cleared to 0h, then
+     * the host is requested to allocate any amount of host memory possible up to the
+     * HMPRE value.
+     */
+    vmk_uint32 hmMin;
+    /**
+     * @brief Total NVM Capacity
+     *
+     * This field indicates the total NVM capacity in the NVM subsystem. The value is in
+     * bytes. This field shall be supported if Namespace Management and Namespace
+     * Attachment commands are supported.
+     */
+    vmk_uint8 tNVMCap[16];
+    /**
+     * @brief Unallocated NVM Capacity
+     *
+     * This field indicates the unallocated NVM capacity in the NVM subsystem. The value
+     * is in bytes. This field shall be supported if Namespace Management and Namespace
+     * Attachment commands are supported.
+     */
+    vmk_uint8 uNVMCap[16];
+    /**
+     * @brief Replay Protected Memory Block Support
+     *
+     * This field indicates if the controller supports one or more Replay Protected
+     * Memory Blocks (RPMBs) and the capabilities. Refer to section 8.10.
+     */
+    struct {
+       vmk_uint32 rpmbUnitsNum :3;
+       vmk_uint32 authMethod :3;
+       vmk_uint32 reserved :10;
+       vmk_uint32 totalSize :8;
+       vmk_uint32 accessSize :8;
+    } rpmbs;
+    /**
      * @brief Reserved
      */
-    vmk_uint8 reservedB[511-265+1];
+    vmk_uint8 reservedB[511-316+1];
     /**
      * @brief Submission Queue Entry Size
      *
@@ -2958,7 +3390,48 @@ struct iden_controller
     /**
      * @brief Reserved
      */
-    vmk_uint8 reservedE[2047-531+1];
+    vmk_uint8 reservedG;
+     /**
+     * @brief Atomic Compare & Write Unit
+     *
+     * This field indicates the size of the write operation guaranteed to be written
+     * atomically to the NVM across all namespaces with any supported namespace format
+     * for a Compare and Write fused operation.
+     *
+     * If a specific namespace guarantees a larger size than is reported in this field,
+     * then this namespace specific size is reported in the NACWU field in the Identify
+     * Namespace data structure. Refer to section 6.4.
+     *
+     * This field shall be supported if the Compare and Write fused command is supported.
+     * This field is specified in logical blocks and is a 0’s based value. If a Compare
+     * and Write is submitted that requests a transfer size larger than this value, then
+     * the controller may fail the command with a status code of Invalid Field in
+     * Command. If Compare and Write is not a supported fused command, then this field
+     * shall be 0h.
+     */
+    vmk_uint16 acwu;
+     /**
+     * @brief Reserved
+     */
+    vmk_uint16 reservedH;
+     /**
+     * @brief SGL Support
+     *
+     * This field indicates if SGLs are supported for the NVM Command Set and the
+     * particular SGL types supported. Refer to section 4.4.
+     */
+    struct {
+       vmk_uint32 sglsSup :1;
+       vmk_uint32 reserved1 :15;
+       vmk_uint32 sglsBitBuckDescSup :1;
+       vmk_uint32 byteAlignedContPhyBufSup :1;
+       vmk_uint32 sglsLargerThanData :1;
+       vmk_uint32 reserved2 :13;
+    } sgls;
+    /**
+     * @brief Reserved
+     */
+    vmk_uint8 reservedE[2047-540+1];
     /**
      * @brief Power State Descriptors
      *

@@ -7,25 +7,64 @@
          <description>VMware NVMe driver esxcli extensions</description>
       </namespace>
       <namespace path="nvme.device">
-      	<description>NVMe devices operations</description>
+         <description>NVMe devices operations</description>
       </namespace>
       <namespace path="nvme.device.namespace">
-      	<description>NVMe namespaces operations</description>
+         <description>NVMe namespaces operations</description>
       </namespace>
-      <namespace path="nvme.device.feature">
-      	<description>NVMe features operations</description>
+       <namespace path="nvme.device.feature">
+         <description>NVMe features operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature.ar">
+         <description>NVMe feature arbitration operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature.pm">
+         <description>NVMe feature power management operations</description>
+      </namespace>
+       <namespace path="nvme.device.feature.tt">
+         <description>NVMe feature temperature threshold operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature.er">
+         <description>NVMe feature error recovery operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature.vwc">
+         <description>NVMe feature volatile write cache operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature.nq">
+         <description>NVMe feature number of queue operations</description>
+      </namespace>
+       <namespace path="nvme.device.feature.ic">
+         <description>NVMe feature interrupt coalescing operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature.ivc">
+         <description>NVMe feature interrupt vector configuration operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature.wa">
+         <description>NVMe feature write atomicity operations</description>
+      </namespace>
+      <namespace path="nvme.device.feature.aec">
+         <description>NVMe feature async event configuration operations</description>
       </namespace>
       <namespace path="nvme.device.log">
-      	<description>NVMe log page operations</description>
+         <description>NVMe log page operations</description>
+      </namespace>
+      <namespace path="nvme.device.log.error">
+         <description>NVMe error log page operations</description>
+      </namespace>
+      <namespace path="nvme.device.log.smart">
+         <description>NVMe SMART log page operations</description>
+      </namespace>
+       <namespace path="nvme.device.log.fwslot">
+         <description>NVMe firmware slot log page operations</description>
       </namespace>
       <namespace path="nvme.device.firmware">
-      	<description>NVMe firmware operations</description>
+         <description>NVMe firmware operations</description>
       </namespace>
       <namespace path="nvme.driver">
-      	<description>NVMe driver operations</description>
+         <description>NVMe driver operations</description>
       </namespace>
       <namespace path="nvme.driver.loglevel">
-      	<description>NVMe driver log level operations</description>
+         <description>NVMe driver log level operations</description>
       </namespace>
    </namespaces>
 
@@ -35,10 +74,18 @@
          <description>List NVMe devices registered to VMware NVMe driver</description>
          <input-spec />
          <output-spec>
-            <list type="string" />
+            <list type="structure">
+               <structure typeName="DeviceList">
+                  <field name="HBA Name"> <string/> </field>
+                  <field name="Status"> <string/> </field>
+                  <field name="Signature"> <string/> </field>
+               </structure>
+            </list>
          </output-spec>
          <format-parameters>
-            <formatter>simple</formatter>
+            <formatter>table</formatter>
+            <format-parameter name="fields:DeviceList">HBA Name,Status,Signature</format-parameter>
+            <format-parameter name="show-header:DeviceList">true</format-parameter>
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.list</execute>
       </command>
@@ -50,10 +97,101 @@
             </parameter>
          </input-spec>
          <output-spec>
-            <list type="string" />
+            <structure typeName="DeviceInfo">
+               <field name="PCIVID"> <string/> </field>
+               <field name="PCISSVID"> <string/> </field>
+               <field name="Serial Number"> <string/> </field>
+               <field name="Model Number"> <string/> </field>
+               <field name="Firmware Revision"> <string/> </field>
+               <field name="Recommended Arbitration Burst"> <int/> </field>
+               <field name="IEEE OUI Identifier"> <string/> </field>
+               <field name="Controller Associated with an SR-IOV Virtual Function"> <bool/> </field>
+               <field name="Controller Associated with a PCI Function"> <bool/> </field>
+               <field name="NVM Subsystem May Contain Two or More Controllers"> <bool/> </field>
+               <field name="NVM Subsystem Contains Only One Controller"> <bool/> </field>
+               <field name="NVM Subsystem May Contain Two or More PCIe Ports"> <bool/> </field>
+               <field name="NVM Subsystem Contains Only One PCIe Port"> <bool/> </field>
+               <field name="Max Data Transfer Size"> <int/> </field>
+               <field name="Controller ID"> <int/> </field>
+               <field name="Version"> <string/> </field>
+               <field name="RTD3 Resume Latency"> <int/> </field>
+               <field name="RTD3 Entry Latency"> <int/> </field>
+               <field name="Optional Namespace Attribute Changed Event Support"> <bool/> </field>
+               <field name="Namespace Management and Attachment Support"> <bool/> </field>
+               <field name="Firmware Activate and Download Support"> <bool/> </field>
+               <field name="Format NVM Support"> <bool/> </field>
+               <field name="Security Send and Receive Support"> <bool/> </field>
+               <field name="Abort Command Limit"> <int/> </field>
+               <field name="Async Event Request Limit"> <int/> </field>
+               <field name="Firmware Activate Without Reset Support"> <bool/> </field>
+               <field name="Firmware Slot Number"> <int/> </field>
+               <field name="The First Slot Is Read-only"> <bool/> </field>
+               <field name="Command Effects Log Page Support"> <bool/> </field>
+               <field name="SMART/Health Information Log Page per Namespace Support"> <bool/> </field>
+               <field name="Error Log Page Entries"> <int/> </field>
+               <field name="Number of Power States Support"> <int/> </field>
+               <field name="Format of Admin Vendor Specific Commands Is Same"> <bool/> </field>
+               <field name="Format of Admin Vendor Specific Commands Is Vendor Specific"> <bool/> </field>
+               <field name="Autonomous Power State Transitions Support"> <bool/> </field>
+               <field name="Warning Composite Temperature Threshold"> <int/> </field>
+               <field name="Critical Composite Temperature Threshold"> <int/> </field>
+               <field name="Max Time for Firmware Activation"> <int/> </field>
+               <field name="Host Memory Buffer Preferred Size"> <int/> </field>
+               <field name="Host Memory Buffer Min Size"> <int/> </field>
+               <field name="Total NVM Capacity"> <string/> </field>
+               <field name="Unallocated NVM Capacity"> <string/> </field>
+               <field name="Access Size"> <int/> </field>
+               <field name="Total Size"> <int/> </field>
+               <field name="Authentication Method"> <int/> </field>
+               <field name="Number of RPMB Units"> <int/> </field>
+               <field name="Max Submission Queue Entry Size"> <int/> </field>
+               <field name="Required Submission Queue Entry Size"> <int/> </field>
+               <field name="Max Completion Queue Entry Size"> <int/> </field>
+               <field name="Required Completion Queue Entry Size"> <int/> </field>
+               <field name="Number of Namespaces"> <int/> </field>
+               <field name="Reservation Support"> <bool/> </field>
+               <field name="Save/Select Field in Set/Get Feature Support"> <bool/> </field>
+               <field name="Write Zeroes Command Support"> <bool/> </field>
+               <field name="Dataset Management Command Support"> <bool/> </field>
+               <field name="Write Uncorrectable Command Support"> <bool/> </field>
+               <field name="Compare Command Support"> <bool/> </field>
+               <field name="Fused Operation Support"> <bool/> </field>
+               <field name="Cryptographic Erase as Part of Secure Erase Support"> <bool/> </field>
+               <field name="Cryptographic Erase and User Data Erase to All Namespaces"> <bool/> </field>
+               <field name="Cryptographic Erase and User Data Erase to One Particular Namespace"> <bool/> </field>
+               <field name="Format Operation to All Namespaces"> <bool/> </field>
+               <field name="Format Opertaion to One Particular Namespace"> <bool/> </field>
+               <field name="Volatile Write Cache Is Present"> <bool/> </field>
+               <field name="Atomic Write Unit Normal"> <int/> </field>
+               <field name="Atomic Write Unit Power Fail"> <int/> </field>
+               <field name="Format of All NVM Vendor Specific Commands Is Same"> <bool/> </field>
+               <field name="Format of All NVM Vendor Specific Commands Is Vendor Specific"> <bool/> </field>
+               <field name="Atomic Compare and Write Unit"> <int/> </field>
+               <field name="SGL Length Able to Larger than Data Amount"> <bool/> </field>
+               <field name="SGL Length Shall Be Equal to Data Amount"> <bool/> </field>
+               <field name="Byte Aligned Contiguous Physical Buffer of Metadata Support"> <bool/> </field>
+               <field name="SGL Bit Bucket Descriptor Support"> <bool/> </field>
+               <field name="SGL for NVM Command Set Support"> <bool/> </field>
+            </structure>
          </output-spec>
          <format-parameters>
             <formatter>simple</formatter>
+            <format-parameter name="header:DeviceInfo">Controller Identify Info:</format-parameter>
+            <format-parameter name="fields:DeviceInfo">PCIVID,PCISSVID,Serial Number,Model Number,Firmware Revision,Recommended Arbitration Burst,IEEE OUI Identifier,Controller Associated with an SR-IOV Virtual Function,Controller Associated with a PCI Function,NVM Subsystem May Contain Two or More Controllers,NVM Subsystem Contains Only One Controller,NVM Subsystem May Contain Two or More PCIe Ports,NVM Subsystem Contains Only One PCIe Port,Max Data Transfer Size,Controller ID,Version,RTD3 Resume Latency,RTD3 Entry Latency,Optional Namespace Attribute Changed Event Support,Namespace Management and Attachment Support,Firmware Activate and Download Support,Format NVM Support,Security Send and Receive Support,Abort Command Limit,Async Event Request Limit,Firmware Activate Without Reset Support,Firmware Slot Number,The First Slot Is Read-only,Command Effects Log Page Support,SMART/Health Information Log Page per Namespace Support,Error Log Page Entries,Number of Power States Support,Format of Admin Vendor Specific Commands Is Same,Format of Admin Vendor Specific Commands Is Vendor Specific,Autonomous Power State Transitions Support,Warning Composite Temperature Threshold,Critical Composite Temperature Threshold,Max Time for Firmware Activation,Host Memory Buffer Preferred Size,Host Memory Buffer Min Size,Total NVM Capacity,Unallocated NVM Capacity,Access Size,Total Size,Authentication Method,Number of RPMB Units,Max Submission Queue Entry Size,Required Submission Queue Entry Size,Max Completion Queue Entry Size,Required Completion Queue Entry Size,Number of Namespaces,Reservation Support,Save/Select Field in Set/Get Feature Support,Write Zeroes Command Support,Dataset Management Command Support,Write Uncorrectable Command Support,Compare Command Support,Fused Operation Support,Cryptographic Erase as Part of Secure Erase Support,Cryptographic Erase and User Data Erase to All Namespaces,Cryptographic Erase and User Data Erase to One Particular Namespace,Format Operation to All Namespaces,Format Opertaion to One Particular Namespace,Volatile Write Cache Is Present,Atomic Write Unit Normal,Atomic Write Unit Power Fail,Format of All NVM Vendor Specific Commands Is Same,Format of All NVM Vendor Specific Commands Is Vendor Specific,Atomic Compare and Write Unit,SGL Length Able to Larger than Data Amount,SGL Length Shall Be Equal to Data Amount,Byte Aligned Contiguous Physical Buffer of Metadata Support,SGL Bit Bucket Descriptor Support,SGL for NVM Command Set Support</format-parameter>
+            <format-parameter name="units:DeviceInfo.Total Size">* 128KB</format-parameter>
+            <format-parameter name="units:DeviceInfo.Access Size">* 512B</format-parameter>
+            <format-parameter name="units:DeviceInfo.RTD3 Resume Latency">us</format-parameter>
+            <format-parameter name="units:DeviceInfo.RTD3 Entry Latency">us</format-parameter>
+            <format-parameter name="units:DeviceInfo.Max Time for Firmware Activation">* 100ms</format-parameter>
+            <format-parameter name="units:DeviceInfo.Host Memory Buffer Preferred Size">* 4KB</format-parameter>
+            <format-parameter name="units:DeviceInfo.Host Memory Buffer Min Size">* 4KB</format-parameter>
+            <format-parameter name="units:DeviceInfo.Max Submission Queue Entry Size">Bytes</format-parameter>
+            <format-parameter name="units:DeviceInfo.Required Submission Queue Entry Size">Bytes</format-parameter>
+            <format-parameter name="units:DeviceInfo.Max Completion Queue Entry Size">Bytes</format-parameter>
+            <format-parameter name="units:DeviceInfo.Required Completion Queue Entry Size">Bytes</format-parameter>
+            <format-parameter name="units:DeviceInfo.Atomic Write Unit Normal">Logical Blocks</format-parameter>
+            <format-parameter name="units:DeviceInfo.Atomic Write Unit Power Fail">Logical Blocks</format-parameter>
+            <format-parameter name="units:DeviceInfo.Atomic Compare And Write Unit">Logical Blocks</format-parameter>
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.get -A $val{adapter}</execute>
       </command>
@@ -66,14 +204,22 @@
             </parameter>
          </input-spec>
          <output-spec>
-            <list type="string" />
+            <list type="structure">
+               <structure typeName="NamespaceList">
+                  <field name="Namespace ID"> <int/> </field>
+                  <field name="Status"> <string/> </field>
+                  <field name="Device Name"> <string/> </field>
+               </structure>
+            </list>
          </output-spec>
          <format-parameters>
-            <formatter>simple</formatter>
+            <formatter>table</formatter>
+            <format-parameter name="fields:NamespaceList">Namespace ID,Status,Device Name</format-parameter>
+            <format-parameter name="show-header:NamespaceList">true</format-parameter>
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.list -A $val{adapter}</execute>
       </command>
- 
+
       <command path="nvme.device.namespace.get">
          <description>Get nvme namespace information</description>
          <input-spec>
@@ -81,14 +227,68 @@
                <description>Adapter to operate on</description>
             </parameter>
             <parameter name="namespace" type="string" required="true" shortname="n">
-               <description>ID of namespace to get information from. ID starts from 1, "-n 0" prints all namespaces' info</description>
+               <description>ID of namespace to get information from. ID starts from 1</description>
             </parameter>
          </input-spec>
          <output-spec>
-            <list type="string" />
+            <structure typeName="NamespaceInfo">
+               <field name="Namespace Size"> <string/> </field>
+               <field name="Namespace Capacity"> <string/> </field>
+               <field name="Namespace Utilization"> <string/> </field>
+               <field name="Thin Provisioning Support"> <bool/> </field>
+               <field name="Namespace Atomic Support"> <bool/> </field>
+               <field name="Deallocated or Unwritten Logical Block Error Support"> <bool/> </field>
+               <field name="Number of LBA Formats"> <int/> </field>
+               <field name="LBA Format"> <int/> </field>
+               <field name="Extended Metadata"> <bool/> </field>
+               <field name="Metadata as Seperate Buffer Support"> <bool/> </field>
+               <field name="Metadata as Extended Buffer Support"> <bool/> </field>
+               <field name="PI Type 1 Support"> <bool/> </field>
+               <field name="PI Type 2 Support"> <bool/> </field>
+               <field name="PI Type 3 Support"> <bool/> </field>
+               <field name="PI in First Eight Bytes of Metadata Support"> <bool/> </field>
+               <field name="PI in Last Eight Bytes of Metadata Support"> <bool/> </field>
+               <field name="PI Enabled Type"> <int/> </field>
+               <field name="MetaData Location"> <string/> </field>
+               <field name="Namespace Shared by Multiple Controllers"> <bool/> </field>
+               <field name="Persist Through Power Loss Support"> <bool/> </field>
+               <field name="Write Exclusive Reservation Type Support"> <bool/> </field>
+               <field name="Exclusive Access Reservation Type Support"> <bool/> </field>
+               <field name="Write Exclusive Registrants Only Reservation Type Support"> <bool/> </field>
+               <field name="Exclusive Access Registrants Only Reservation Type Support"> <bool/> </field>
+               <field name="Write Exclusive All Registrants Reservation Type Support"> <bool/> </field>
+               <field name="Exclusive Access All Registrants Reservation Type Support"> <bool/> </field>
+               <field name="Format Progress Indicator Support"> <bool/> </field>
+               <field name="Percentage Remains to Be Formatted"> <int/> </field>
+               <field name="Namespace Atomic Write Unit Normal"> <int/> </field>
+               <field name="Namespace Atomic Write Unit Power Fail"> <int/> </field>
+               <field name="Namespace Atomic Compare and Write Unit"> <int/> </field>
+               <field name="Namespace Atomic Boundary Size Normal"> <int/> </field>
+               <field name="Namespace Atomic Boundary Offset"> <int/> </field>
+               <field name="Namespace Atomic Boundary Size Power Fail"> <int/> </field>
+               <field name="NVM Capacity"> <string/> </field>
+               <field name="Namespace Globally Unique Identifier"> <string/> </field>
+               <field name="IEEE Extended Unique Identifier"> <string/> </field>
+               <field name="LBA Format Support">
+                  <list type="structure">
+                     <structure typeName="LBAFormatSupport">
+                        <field name="Format ID"> <int/> </field>
+                        <field name="Metadata Size"> <int/> </field>
+                        <field name="LBA Data Size"> <int/> </field>
+                        <field name="Relative Performance"> <string/> </field>
+                     </structure>
+                  </list>
+               </field>
+            </structure>
          </output-spec>
          <format-parameters>
             <formatter>simple</formatter>
+            <format-parameter name="header:NamespaceInfo">Namespace Identify Info:</format-parameter>
+	    <format-parameter name="fields:NamespaceInfo">Namespace Size,Namespace Capacity,Namespace Utilization,Thin Provisioning Support,Namespace Atomic Support,Deallocated or Unwritten Logical Block Error Support,Number of LBA Formats,LBA Format,Extended Metadata,Metadata as Seperate Buffer Support,Metadata as Extended Buffer Support,PI Type 1 Support,PI Type 2 Support,PI Type 3 Support,PI in First Eight Bytes of Metadata Support,PI in Last Eight Bytes of Metadata Support,PI Enabled Type,MetaData Location,Namespace Shared by Multiple Controllers,Persist Through Power Loss Support,Write Exclusive Reservation Type Support,Exclusive Access Reservation Type Support,Write Exclusive Registrants Only Reservation Type Support,Exclusive Access Registrants Only Reservation Type Support,Write Exclusive All Registrants Reservation Type Support,Exclusive Access All Registrants Reservation Type Support,Format Progress Indicator Support,Percentage Remains to Be Formatted,Namespace Atomic Write Unit Normal,Namespace Atomic Write Unit Power Fail,Namespace Atomic Compare and Write Unit,Namespace Atomic Boundary Size Normal,Namespace Atomic Boundary Offset,Namespace Atomic Boundary Size Power Fail,NVM Capacity,Namespace Globally Unique Identifier,IEEE Extended Unique Identifier,LBA Format Support</format-parameter>
+            <format-parameter name="units:NamespaceInfo.Namespace Size">Logical Blocks</format-parameter>
+            <format-parameter name="units:NamespaceInfo.Namespace Capacity">Logical Blocks</format-parameter>
+            <format-parameter name="units:NamespaceInfo.Namespace Utilization">Logical Blocks</format-parameter>
+            <format-parameter name="units:NamespaceInfo.Percentage Remains to Be Formatted">%</format-parameter>
          </format-parameters>
 	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.get -A $val{adapter} -n $val{namespace}</execute>
       </command>
@@ -125,128 +325,172 @@
          </format-parameters>
 	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.format -A $val{adapter} -n $val{namespace} -f $val{format} -s $val{ses} -p $val{pi} -l $val{pil} -m $val{ms}</execute>
       </command>
-      <command path="nvme.device.log.get">
-         <description>Get NVMe device log information</description>
+      <command path="nvme.device.log.error.get">
+         <description>Get NVMe device error log information</description>
          <input-spec>
             <parameter name="adapter" type="string" required="true" shortname="A">
                <description>Adapter to operate on</description>
             </parameter>
-            <parameter name="logpage" type="int" required="true" shortname="l">
-	       <description>Log page identifier. 1: Error information (gloabal basis). 2: SMART/Health information (global or namespace basis). 3: Firmware Slot Information (global basis).</description>
+            <parameter name="elpe" type="int" required="true" shortname="e">
+               <description>Error log page entries. This value indicates the number of log entries you wish to get. The maximum number of entries supported is device-specific.</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="structure">
+               <structure typeName="ErrorInfo">
+                  <field name="Error Count"> <string/> </field>
+                  <field name="Submission Queue ID"> <int/> </field>
+                  <field name="Command ID"> <int/> </field>
+                  <field name="Status Field"> <int/> </field>
+                  <field name="Byte in Command That Contained the Error"> <int/> </field>
+                  <field name="Bit in Command That Contained the Error"> <int/> </field>
+                  <field name="LBA"> <string/> </field>
+                  <field name="Namespace"> <int/> </field>
+                  <field name="Vendor Specific Information Available"> <int/> </field>
+               </structure>
+            </list>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:ErrorInfo">Error Info:</format-parameter>
+            <format-parameter name="fields:ErrorInfo">Error Count,Submission Queue ID,Command ID,Status Field,Byte in Command That Contained the Error,Bit in Command That Contained the Error,LBA,Namespace,Vendor Specific Information Available</format-parameter>
+         </format-parameters>
+            <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 1 -e $val{elpe}</execute>
+      </command>
+      <command path="nvme.device.log.smart.get">
+         <description>Get NVMe device SMART log information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
             </parameter>
             <parameter name="namespace" type="int" required="false" shortname="n">
                <description>Namespace ID. If log page is supported on a per namespace basis this value indicates the ID of namespace you wish to get log from. This parameter can be omitted to request global log page.</description>
             </parameter>
-            <parameter name="elpe" type="int" required="false" shortname="e">
-	       <description>Error log page entries. If -l parameter is 1(error information) this value indicates the number of log entries you wish to get. The maximum number of entries supported is device-specific.</description>
-            </parameter>
          </input-spec>
          <output-spec>
-            <list type="string" />
+            <structure typeName="SMARTInfo">
+               <field name="Available Spare Space Below Threshold"> <bool/> </field>
+               <field name="Temperature Warning"> <bool/> </field>
+               <field name="NVM Subsystem Reliability Degradation"> <bool/> </field>
+               <field name="Read Only Mode"> <bool/> </field>
+               <field name="Volatile Memory Backup Device Failure"> <bool/> </field>
+               <field name="Composite Temperature"> <int/> </field>
+               <field name="Available Spare"> <int/> </field>
+               <field name="Available Spare Threshold"> <int/> </field>
+               <field name="Percentage Used"> <int/> </field>
+               <field name="Data Units Read"> <string/> </field>
+               <field name="Data Units Written"> <string/> </field>
+               <field name="Host Read Commands"> <string/> </field>
+               <field name="Host Write Commands"> <string/> </field>
+               <field name="Controller Busy Time"> <string/> </field>
+               <field name="Power Cycles"> <string/> </field>
+               <field name="Power On Hours"> <string/> </field>
+               <field name="Unsafe Shutdowns"> <string/> </field>
+               <field name="Media Errors"> <string/> </field>
+               <field name="Number of Error Info Log Entries"> <string/> </field>
+               <field name="Warning Composite Temperature Time"> <int/> </field>
+               <field name="Critical Composite Temperature Time"> <int/> </field>
+               <field name="Temperature Sensor 1"> <int/> </field>
+               <field name="Temperature Sensor 2"> <int/> </field>
+               <field name="Temperature Sensor 3"> <int/> </field>
+               <field name="Temperature Sensor 4"> <int/> </field>
+               <field name="Temperature Sensor 5"> <int/> </field>
+               <field name="Temperature Sensor 6"> <int/> </field>
+               <field name="Temperature Sensor 7"> <int/> </field>
+               <field name="Temperature Sensor 8"> <int/> </field>
+            </structure>
          </output-spec>
          <format-parameters>
             <formatter>simple</formatter>
+            <format-parameter name="header:SMARTInfo">SMART And Health Info:</format-parameter>
+            <format-parameter name="fields:SMARTInfo">Available Spare Space Below Threshold,Temperature Warning,NVM Subsystem Reliability Degradation,Read Only Mode,Volatile Memory Backup Device Failure,Composite Temperature,Available Spare,Available Spare Threshold,Percentage Used,Data Units Read,Data Units Written,Host Read Commands,Host Write Commands,Controller Busy Time,Power Cycles,Power On Hours,Unsafe Shutdowns,Media Errors,Number of Error Info Log Entries,Warning Composite Temperature Time,Critical Composite Temperature Time,Temperature Sensor 1,Temperature Sensor 2,Temperature Sensor 3,Temperature Sensor 4,Temperature Sensor 5,Temperature Sensor 6,Temperature Sensor 7,Temperature Sensor 8</format-parameter>
+            <format-parameter name="units:SMARTInfo.Available Spare">%</format-parameter>
+            <format-parameter name="units:SMARTInfo.Available Spare Threshold">%</format-parameter>
+            <format-parameter name="units:SMARTInfo.Percentage Used">%</format-parameter>
+            <format-parameter name="units:SMARTInfo.Composite Temperature">K</format-parameter>
+            <format-parameter name="units:SMARTInfo.Warning Composite Temperature Time">Mins</format-parameter>
+            <format-parameter name="units:SMARTInfo.Critical Composite Temperature Time">Mins</format-parameter>
+            <format-parameter name="units:SMARTInfo.Temperature Sensor 1">K</format-parameter>
+            <format-parameter name="units:SMARTInfo.Temperature Sensor 2">K</format-parameter>
+            <format-parameter name="units:SMARTInfo.Temperature Sensor 3">K</format-parameter>
+            <format-parameter name="units:SMARTInfo.Temperature Sensor 4">K</format-parameter>
+            <format-parameter name="units:SMARTInfo.Temperature Sensor 5">K</format-parameter>
+            <format-parameter name="units:SMARTInfo.Temperature Sensor 6">K</format-parameter>
+            <format-parameter name="units:SMARTInfo.Temperature Sensor 7">K</format-parameter>
+            <format-parameter name="units:SMARTInfo.Temperature Sensor 8">K</format-parameter>
          </format-parameters>
-	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l $val{logpage} $if{namespace,-n $val{namespace}} $if{elpe,-e $val{elpe}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 2 $if{namespace,-n $val{namespace}}</execute>
       </command>
-      <command path="nvme.device.feature.list">
-         <description>List all NVMe device feature information</description>
+      <command path="nvme.device.log.fwslot.get">
+         <description>Get NVMe device firmware slot log information</description>
          <input-spec>
             <parameter name="adapter" type="string" required="true" shortname="A">
                <description>Adapter to operate on</description>
             </parameter>
          </input-spec>
          <output-spec>
-            <list type="string" />
+            <structure typeName="FirmwareSlotInfo">
+               <field name="Firmware Slot to Be Activated at Next Controller Reset"> <int/> </field>
+               <field name="Firmware Slot Being Activated"> <int/> </field>
+               <field name="Firmware Revision for Slot 1"> <string/> </field>
+               <field name="Firmware Revision for Slot 2"> <string/> </field>
+               <field name="Firmware Revision for Slot 3"> <string/> </field>
+               <field name="Firmware Revision for Slot 4"> <string/> </field>
+               <field name="Firmware Revision for Slot 5"> <string/> </field>
+               <field name="Firmware Revision for Slot 6"> <string/> </field>
+               <field name="Firmware Revision for Slot 7"> <string/> </field>
+            </structure>
          </output-spec>
          <format-parameters>
             <formatter>simple</formatter>
+            <format-parameter name="header:FirmwareSlotInfo">Firmware Slot Info:</format-parameter>
+            <format-parameter name="fields:FirmwareSlotInfo">Firmware Slot to Be Activated at Next Controller Reset,Firmware Slot Being Activated,Firmware Revision for Slot 1,Firmware Revision for Slot 2,Firmware Revision for Slot 3,Firmware Revision for Slot 4,Firmware Revision for Slot 5,Firmware Revision for Slot 6,Firmware Revision for Slot 7</format-parameter>
          </format-parameters>
-	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.list -A $val{adapter}</execute>
+            <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 3</execute>
       </command>
-      <command path="nvme.device.feature.get">
-         <description>Get NVMe device feature information</description>
+      <command path="nvme.device.feature.ar.get">
+         <description>Get NVMe device feature arbitration information</description>
          <input-spec>
             <parameter name="adapter" type="string" required="true" shortname="A">
                <description>Adapter to operate on</description>
-            </parameter>
-            <parameter name="feature" type="string" required="true" shortname="f">
-               <description>
-Feature name to get:
-   arbitration
-   pwr_management
-   lba_range_type
-   temp_threshold
-   err_recovery
-   write_cache
-   num_queue
-   int_coalescing
-   int_vector_config
-   write_atomicity
-   asyn_event_config
-   sw_progress_marker
-</description>
             </parameter>
          </input-spec>
          <output-spec>
-            <list type="string" />
+            <structure typeName="Arbitration">
+               <field name="Arbitration Burst"> <int/> </field>
+               <field name="Low Priority Weight"> <int/> </field>
+               <field name="Medium Priority Weight"> <int/> </field>
+               <field name="High Priority Weight"> <int/> </field>
+            </structure>
          </output-spec>
          <format-parameters>
             <formatter>simple</formatter>
+            <format-parameter name="header:Arbitration">Arbitration Info:</format-parameter>
+            <format-parameter name="fields:Arbitration">Arbitration Burst,Low Priority Weight,Medium Priority Weight,High Priority Weight</format-parameter>
          </format-parameters>
-	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f $val{feature}</execute>
+	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f arbitration</execute>
       </command>
-      <command path="nvme.device.feature.set">
-         <description>Set NVMe device feature information</description>
+      <command path="nvme.device.feature.ar.set">
+         <description>Set NVMe device feature arbitration information</description>
          <input-spec>
             <parameter name="adapter" type="string" required="true" shortname="A">
                <description>Adapter to operate on</description>
-            </parameter>
-            <parameter name="feature" type="string" required="true" shortname="f">
-               <description>
-Feature name to set
-   arbitration
-      -v ArbitrationBurst            [0, 7]
-      -x LowPriorityWeight           [0, 255]
-      -y MediumPriorityWeight        [0, 255]
-      -z HighPriorityWeight          [0, 255]
-   pwr_management
-      -v PowerState                  [0, NumPowerState]
-   lba_range_type
-      Not Supported
-   temp_threshold
-      -v TemperatureThreshold        [0, 65535 K]
-   err_recovery
-      -v TimeLimitedErrorRecovery    [0, 65535]
-   write_cache
-      -v VolitileWriteCacheEnabled   [0, 1]
-   num_queue
-      Not Supported
-   int_coalescing
-      -v AggregationThreshold        [0, 255]
-      -x AggregationTime             [0, 255]
-   int_vector_config
-      -v IntterupVector              [0, NumIntVector]
-      -x CoalescingDisable           [0, 1]
-   write_atomicity
-      -v DisableNormal               [0, 1]
-   asyn_event_config
-      -v SMARTHealthCriticalWarnings [0, 255]
-   sw_progress_marker
-      Not Supported
-</description>
             </parameter>
             <parameter name="value" type="int" required="true" shortname="v">
-               <description>First value to be set</description>
+               <description>Arbitration Burst value to be set</description>
+               <constraint type="range"> <range min="0" max="7"/> </constraint>
             </parameter>
-             <parameter name="value2" type="int" required="false" shortname="x">
-               <description>Second value to be set</description>
+             <parameter name="value2" type="int" required="true" shortname="x">
+               <description>Low Priority Weight value to be set</description>
+               <constraint type="range"> <range min="0" max="255"/> </constraint>
             </parameter>
-             <parameter name="value3" type="int" required="false" shortname="y">
-               <description>Third value to be set</description>
+             <parameter name="value3" type="int" required="true" shortname="y">
+               <description>Medium Priority Weight value to be set</description>
+               <constraint type="range"> <range min="0" max="255"/> </constraint>
             </parameter>
-             <parameter name="value4" type="int" required="false" shortname="z">
-               <description>Forth value to be set</description>
+             <parameter name="value4" type="int" required="true" shortname="z">
+               <description>High Priority Weight value to be set</description>
+               <constraint type="range"> <range min="0" max="255"/> </constraint>
             </parameter>
          </input-spec>
          <output-spec>
@@ -255,7 +499,342 @@ Feature name to set
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f $val{feature} -v $val{value} $if{value2, -x $val{value2}} $if{value3, -y $val{value3}} $if{value4, -z $val{value4}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f arbitration -v $val{value} $if{value2, -x $val{value2}} $if{value3, -y $val{value3}} $if{value4, -z $val{value4}}</execute>
+      </command>
+      <command path="nvme.device.feature.pm.get">
+         <description>Get NVMe device feature power management information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="PowerManagement">
+               <field name="Power State"> <int/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:PowerManagement">Power Management:</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f pwr_management</execute>
+      </command>
+      <command path="nvme.device.feature.pm.set">
+         <description>Set NVMe device feature power management information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>Power state value to be set</description>
+               <constraint type="range"> <range min="0" max="31"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f pwr_management -v $val{value}</execute>
+      </command>
+      <command path="nvme.device.feature.tt.get">
+         <description>Get NVMe device feature temperature threshold information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="TemperatureThreshold">
+               <field name="Temperature Threshold"> <int/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:TemperatureThreshold">Temperature Threshold Info:</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f temp_threshold</execute>
+      </command>
+      <command path="nvme.device.feature.tt.set">
+         <description>Set NVMe device feature temperature threshold information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>Temperature threshold value to be set</description>
+               <constraint type="range"> <range min="0" max="65535"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f temp_threshold -v $val{value}</execute>
+      </command>
+      <command path="nvme.device.feature.er.get">
+         <description>Get NVMe device feature error recovery information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="ErrorRecovery">
+               <field name="Time Limited Error Recovery"> <int/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:ErrorRecovery">Error Recovery Info:</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f err_recovery</execute>
+      </command>
+      <command path="nvme.device.feature.er.set">
+         <description>Set NVMe device feature error recovery information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>Time limited error recovery value to be set</description>
+               <constraint type="range"> <range min="0" max="65535"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f err_recovery -v $val{value}</execute>
+      </command>
+      <command path="nvme.device.feature.vwc.get">
+         <description>Get NVMe device feature volatile write cache information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="VolatileWriteCache">
+               <field name="Volatile Write Cache Enabled"> <bool/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:VolatileWriteCache">Volatile Write Cache Info:</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f write_cache</execute>
+      </command>
+      <command path="nvme.device.feature.vwc.set">
+         <description>Set NVMe device feature volatile write cache information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>Volitale write cache enable value to be set, 0 for false (disable), 1 for true (enable)</description>
+               <constraint type="range"> <range min="0" max="1"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f write_cache -v $val{value}</execute>
+      </command>
+      <command path="nvme.device.feature.nq.get">
+         <description>Get NVMe device feature number of queue information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="NumberOfQueue">
+               <field name="Number of Submission Queues Allocated"> <int/> </field>
+               <field name="Number of Completion Queues Allocated"> <int/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:NumberOfQueue">Number of Queue Info:</format-parameter>
+            <format-parameter name="fields:NumberOfQueue">Number of Submission Queues Allocated,Number of Completion Queues Allocated</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f num_queue</execute>
+      </command>
+      <command path="nvme.device.feature.ic.get">
+         <description>Get NVMe device feature interrupt coalescing information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="InterruptCoalescing">
+               <field name="Aggregation Threshold"> <int/> </field>
+               <field name="Aggregation Time"> <int/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:InterruptCoalescing">InterruptCoalescing Info:</format-parameter>
+            <format-parameter name="fields:InterruptCoalescing">Aggregation Threshold,Aggregation Time</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f int_coalescing</execute>
+      </command>
+      <command path="nvme.device.feature.ic.set">
+         <description>Set NVMe device feature interrupt coalescing information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>Aggregation threshold value to be set</description>
+               <constraint type="range"> <range min="0" max="255"/> </constraint>
+            </parameter>
+             <parameter name="value2" type="int" required="true" shortname="x">
+               <description>Aggregation time value to be set</description>
+               <constraint type="range"> <range min="0" max="255"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f int_coalescing -v $val{value} -x $val{value2}</execute>
+      </command>
+      <command path="nvme.device.feature.ivc.get">
+         <description>Get NVMe device feature interrupt vector configuration information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="structure">
+               <structure typeName="InterruptVectorConfiguration">
+                  <field name="Interrupt Vector"> <int/> </field>
+                  <field name="Coalescing Disable"> <bool/> </field>
+               </structure>
+            </list>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:InterruptVectorConfiguration">Interrupt Vector Configuration Info:</format-parameter>
+            <format-parameter name="fields:InterruptVectorConfiguration">Interrupt Vector,Coalescing Disable</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f int_vector_config</execute>
+      </command>
+      <command path="nvme.device.feature.ivc.set">
+         <description>Set NVMe device feature interrupt vector configuration information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>Interrupt vector value to be set</description>
+               <constraint type="range"> <range min="0" max="65535"/> </constraint>
+            </parameter>
+             <parameter name="value2" type="int" required="true" shortname="x">
+               <description>Coalescing disable value to be set, 0 for false (enable), 1 for true (disable)</description>
+               <constraint type="range"> <range min="0" max="1"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f int_vector_config -v $val{value} -x $val{value2}</execute>
+      </command>
+      <command path="nvme.device.feature.wa.get">
+         <description>Get NVMe device feature write atomicity information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="WriteAtomicity">
+               <field name="Disable Normal"> <bool/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:WriteAtomicity">Write Atomicity Info:</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f write_atomicity</execute>
+      </command>
+      <command path="nvme.device.feature.wa.set">
+         <description>Set NVMe device feature write atomicity information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>Disable Normal value to be set, 0 for false (enable), 1 for true (disable)</description>
+               <constraint type="range"> <range min="0" max="1"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f write_atomicity -v $val{value}</execute>
+      </command>
+      <command path="nvme.device.feature.aec.get">
+         <description>Get NVMe device feature async event configuration information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="AsyncEventConfiguration">
+               <field name="Available Spare Space"> <bool/> </field>
+               <field name="Temperature"> <bool/> </field>
+               <field name="Media Error"> <bool/> </field>
+               <field name="Read Only Mode"> <bool/> </field>
+               <field name="Backup Device Fail"> <bool/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+            <format-parameter name="header:AsyncEventConfiguration">Async Event Configuration Info:</format-parameter>
+            <format-parameter name="fields:AsyncEventConfiguration">Available Spare Space,Temperature,Media Error,Read Only Mode,Backup Device Fail</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f asyn_event_config</execute>
+      </command>
+      <command path="nvme.device.feature.aec.set">
+         <description>Set NVMe device feature async event configuration information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="value" type="int" required="true" shortname="v">
+               <description>SMART health critical warnings bitmap to be set, refer to Figure 79, NVMe 1.2 SPEC</description>
+               <constraint type="range"> <range min="0" max="255"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f asyn_event_config -v $val{value}</execute>
       </command>
       <command path="nvme.device.firmware.download">
          <description>Download firmware image to a specific slot</description>
@@ -276,7 +855,7 @@ Feature name to set
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.download -A $val{adapter} -f $val{firmware} -s $val{slot}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.download -A $val{adapter} -f $val{firmware} -s $val{slot}</execute>
       </command>
       <command path="nvme.device.firmware.activate">
          <description>Activate firmware image in a specific slot</description>
@@ -294,7 +873,7 @@ Feature name to set
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.activate -A $val{adapter} -s $val{slot}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.activate -A $val{adapter} -s $val{slot}</execute>
       </command>
       <command path="nvme.driver.loglevel.set">
          <description>Set NVMe driver log level and debug level</description>
@@ -339,7 +918,7 @@ Debug level(hex int format). When log level is 5, this value is used to manupula
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.driver.loglevel.set -l $val{loglevel} $if{debuglevel, -d $val{debuglevel}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.driver.loglevel.set -l $val{loglevel} $if{debuglevel, -d $val{debuglevel}}</execute>
       </command>
    </commands>
 </plugin>

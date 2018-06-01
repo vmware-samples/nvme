@@ -193,7 +193,7 @@ MapUserPages(struct NvmeCtrlr *ctrlr, struct usr_io *uio,
 {
    VMK_ReturnStatus vmkStatus;
 
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, uio->length, dmaEntry);
+   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, uio->length, dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus) {
       DPRINT_ADMIN("Failed to allocate dma buffer for uio, 0x%x.", vmkStatus);
       return vmkStatus;
@@ -539,7 +539,7 @@ nvmeMgmtUpdateNs(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
    struct NvmeNsInfo *ns;
    vmk_uint32 lba_format;
 
-   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry);
+   vmkStatus = OsLib_DmaAlloc(&ctrlr->ctrlOsResources, VMK_PAGE_SIZE, &dmaEntry, VMK_TIMEOUT_UNLIMITED_MS);
    if (vmkStatus != VMK_OK) {
       EPRINT("Failed to alloc dma.");
       return vmkStatus;
@@ -563,6 +563,7 @@ nvmeMgmtUpdateNs(struct NvmeCtrlr *ctrlr, struct usr_io *uio)
          ns->blockCount  = ident->size;
          ns->lbaShift    = (lba_format >> 16) & 0x0F;
          ns->feature     = ident->feat;
+         ns->metaDataCap = ident->metaDataCap;
          ns->metasize    = lba_format & 0x0FFFF;
          ns->fmtLbaSize  = ident->fmtLbaSize;
          ns->dataProtCap = ident->dataProtCap;

@@ -27,18 +27,18 @@
 /**
  * Driver name. This should be the name of the SC file.
  */
-#define NVME_DRIVER_NAME "nvme "
+#define NVME_DRIVER_NAME "nvme"
 
 
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_DRIVER_VERSION "1.2.0.27"
+#define NVME_DRIVER_VERSION "1.2.0.32"
 
 /**
  * Driver release number. This should always in sync with .sc file.
  */
-#define NVME_DRIVER_RELEASE "4"
+#define NVME_DRIVER_RELEASE "2"
 
 
 /**
@@ -48,6 +48,7 @@
 
 #define NVME_MUL_COMPL_WORLD              1
 #define ALLOW_IOS_IN_QUIESCED_STATE       1
+#define NVME_PROTECTION                   1
 
 /*****************************************************************************
  Exported Symbols
@@ -356,6 +357,11 @@ struct NvmeCmdInfo {
    void *cleanupData;
    /** is core dump command */
    int isDumpCmd;
+ 
+   /* whether using bounce buffer for protection data, for base request only */
+   int useProtBounceBuffer;
+   /* protection data bounce buffer, for base request only */
+   struct NvmeDmaEntry protDmaEntry;
 };
 
 struct NvmeSubQueueInfo {
@@ -631,14 +637,22 @@ struct NvmeCtrlr {
    #endif
 
 #if NVME_MUL_COMPL_WORLD
+#if VMKAPIDDK_VERSION < 650
    /* slab ID for IO completion */
    vmk_SlabID complWorldsSlabID;
+#endif
    /* IO completion queues */
    NvmeIoCompletionQueue IOCompletionQueue[NVME_MAX_COMPL_WORLDS];
    /* Flag of NVMe controller shutting down */
    vmk_Bool shuttingDown;
    /* Number of completion worlds*/
    vmk_uint32 numComplWorlds;
+#if VMKAPIDDK_VERSION >= 650
+   /* Schedule the IOs according to the affinity instead of round-robin */
+   vmk_Bool   useQueueAffinityHint;
+   /* The bitmask to map many affinity hints to a lower number of queues */
+   vmk_uint32 affinityMask;
+#endif
 #endif
 
    #if (NVME_ENABLE_STATISTICS == 1)
@@ -839,7 +853,7 @@ VMK_ReturnStatus NvmeCtrlr_Detach(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus NvmeCtrlr_Start(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus NvmeCtrlr_Stop(struct NvmeCtrlr *ctrlr);
 VMK_ReturnStatus NvmeCtrlr_Quiesce(struct NvmeCtrlr *ctrlr);
-VMK_ReturnStatus NvmeCtrlr_Remove(struct NvmeCtrlr *ctrlr);
+VMK_ReturnStatus NvmeCtrlr_Remove(struct NvmeCtrlr *ctrlr);	
 
 void NvmeCtrlr_SetMissing(struct NvmeCtrlr *ctrlr);
 

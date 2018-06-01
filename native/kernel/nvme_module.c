@@ -199,6 +199,10 @@ init_module(void)
 
    Nvme_ValidateModuleParams();
 
+#if VMKAPIDDK_VERSION >= 650
+   VMK_ASSERT(sizeof(NvmeIoRequest) <= vmk_ScsiCmdGetDriverFrameSize());
+#endif
+
    /* Always initialize heap in the first place. */
    vmkStatus = HeapCreate();
    if (vmkStatus != VMK_OK) {
