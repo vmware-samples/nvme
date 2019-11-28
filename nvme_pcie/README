@@ -1,0 +1,55 @@
+= VMware Native NVMe PCIe Driver for NVMe Next Generation Driver Framework =
+
+== Description ==
+
+This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
+
+== Change Log ==
+
+2019/3/1 1.2.2.11-1vmw
+
+   Fix a cmdInfo not being released issue in sync command submission.
+
+2019/2/25 1.2.2.10-1vmw
+
+   Avoid to log QFULL message by default.
+
+2019/2/20 1.2.2.9-1vmw
+
+   Implement queryAdapter callback.
+
+2019/2/18 1.2.2.8-1vmw
+
+   Avoid to start admin queue in resetAdminQueue when PCIe device is hot removed.
+
+2018/12/18 1.2.2.7-1vmw
+
+   Set flag VMK_DMA_ENGINE_FLAGS_COHERENT for DMA engine.
+
+2018/9/12 1.2.2.6-1vmw
+
+   Add customization change for AWS local device
+
+2018/7/4 1.2.2.5-1vmw
+
+   Add customization change for AWS EBS
+
+2018/6/29 1.2.2.4-1vmw
+
+   Add a check of sq head in cq entry returned by firmware.
+
+2018/6/11 1.2.2.3-1vmw
+
+   Skip deleting HW queues when the device is already removed.
+
+2018/4/23 1.2.2.2-1vmw
+
+   Fix PR #2100916: Return error code when it fails to allocate queue list in attachDevice().
+
+2018/3/22 1.2.2.1-1vmw
+
+   Change nvme_pcie driver claiming priority from "ihv" to "oem" temporarily.
+
+2018/3/21 1.2.2.0-1vmw
+
+   Initial version of VMware NVMe PCIe driver for NVMe Next Generation Driver Framework.
