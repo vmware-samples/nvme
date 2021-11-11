@@ -1666,6 +1666,11 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
          goto out_free_active;
       }
 
+      if (status == VMK_NOT_FOUND && nsStatus == VMK_NOT_FOUND) {
+         /* Mark statusFlags as NS_UNALLOCATED if namespace is not created */
+         statusFlags[i-1] = NS_UNALLOCATED;
+      }
+
       if (status == VMK_NOT_FOUND && nsStatus == NS_ONLINE) {
          /* The path is unclaimed by upper layer.*/
          snprintf(devNames[i-1], MAX_DEV_NAME_LEN, "N/A (Unclaimed)");

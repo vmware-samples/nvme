@@ -6,6 +6,9 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2020/9/24 1.2.0.41-1vmw
+   Fix PR #2625463: Mark statusFlags as NS_UNALLOCATED if namespace is not found.
+
 2020/9/10 1.2.0.40-1vmw
    Fix PR #2634978: Increase default timeout to 60 seconds.
 
