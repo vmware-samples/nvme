@@ -389,13 +389,30 @@ GetStripeSize(vmk_NvmeController controller)
    vmk_PCIDeviceID *pciId = &ctrlr->osRes.pciId;
    vmk_uint32 stripeSize = 0;
    vmk_NvmeRegCap cap = {0};
+   VMK_ReturnStatus vmkStatus;
+   vmk_ConfigParamHandle configParam;
+   vmk_uint32 forceStripe = 0;
+
+   vmkStatus = vmk_ConfigParamOpen(VMK_CONFIG_GROUP_MISC, "nvmePCIEForceStripe", &configParam);
+   if (vmkStatus != VMK_OK) {
+      WPRINT(ctrlr, "Failed to open config param, 0x%x", vmkStatus);
+   } else {
+      vmkStatus = vmk_ConfigParamGetUint(configParam, &forceStripe);
+      if (vmkStatus != VMK_OK) {
+         WPRINT(ctrlr, "Failed to get config param, 0x%x", vmkStatus);
+         forceStripe = 0;
+      }
+      vmk_ConfigParamClose(configParam);
+   }
+
 
    // So far, we only know the following Intel devices have stripe limitation.
-   if (pciId->vendorID == 0x8086 && (pciId->deviceID == 0x0953 ||
+   if ((pciId->vendorID == 0x8086 && (pciId->deviceID == 0x0953 ||
                                      pciId->deviceID == 0x0a53 ||
                                      pciId->deviceID == 0x0a54 ||
                                      pciId->deviceID == 0x0a55 ||
-                                     pciId->deviceID == 0x0b60)) {
+                                     pciId->deviceID == 0x0b60)) ||
+       forceStripe) {
       ReadRegister64(controller, VMK_NVME_REG_CAP, (vmk_uint64 *)&cap);
       if (identData->mdts != 0) {
          stripeSize = (1 << identData->mdts) << (cap.mpsmin + 12);
