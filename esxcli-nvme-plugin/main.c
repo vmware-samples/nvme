@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2014-2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2014-2021 VMware, Inc. All rights reserved.
  *****************************************************************************/
 
 /**
@@ -183,6 +183,8 @@ PrintIdentifyCtrlr(vmk_NvmeIdentifyController *id)
    PINT("Firmware Slot Number", (id->frmw & 0xe) >> 1);
    PBOOL("The First Slot Is Read-only",
          id->frmw & VMK_NVME_CTLR_IDENT_FRMW_SLOT_1_RO);
+   PBOOL("Telemetry Log Page Support",
+         id->lpa & VMK_NVME_CTLR_IDENT_LPA_TELEMETRY);
    PBOOL("Command Effects Log Page Support",
          id->lpa & VMK_NVME_CTLR_IDENT_LPA_CMD_EFFECTS);
    PBOOL("SMART/Health Information Log Page per Namespace Support",
@@ -2199,11 +2201,15 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
 {
    int ch;
    char *vmhba = NULL;
+   char *telemetryPath = NULL;
    int  lid = -1;
    int  nsId = -1;
    int  elpe = -1;
+   int  dataArea = -1;
    BOOL setNsid = 0;
    BOOL setElpe = 0;
+   BOOL setDataarea = 0;
+   BOOL setTelemetrypath = 0;
    int  i, rc;
    struct nvme_adapter_list    list;
    struct nvme_handle          *handle;
@@ -2214,9 +2220,10 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       vmk_NvmeErrorInfoLogEntry errLog[MAX_ERROR_LOG_ENTRIES];
       vmk_NvmeSmartInfoEntry smartLog;
       vmk_NvmeFirmwareSlotInfo fwSlotLog;
+      vmk_NvmeTelemetryEntry telemetryLog;
    } log;
 
-   while ((ch = getopt(argc, (char *const*)argv, "A:l:n:e:")) != -1) {
+   while ((ch = getopt(argc, (char *const*)argv, "A:l:n:e:t:d")) != -1) {
       switch (ch) {
          case 'A':
             vmhba = optarg;
@@ -2232,17 +2239,35 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
             elpe = atoi(optarg);
             setElpe = 1;
             break;
+         case 't':
+            telemetryPath = optarg;
+            setTelemetrypath = 1;
+            break;
+         case 'd':
+            dataArea = atoi(optarg);
+            setDataarea = 1;
+            break;
          default:
             Error("Invalid parameter.");
             return;
       }
    }
 
-   if (vmhba == NULL      ||
-       (lid < 1 || lid > 3))
-   {
-      Error("Invalid parameter.");
+   if (vmhba == NULL) {
+      Error("Adapter is NULL.");
       return;
+   }
+
+   switch (lid) {
+      case VMK_NVME_LID_ERROR_INFO:
+      case VMK_NVME_LID_SMART_HEALTH:
+      case VMK_NVME_LID_FW_SLOT:
+      case VMK_NVME_LID_TELEMETRY_HOST_INITIATED:
+      case VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED:
+         break;
+      default:
+         Error("Not supported log type %d.", lid);
+         return;
    }
 
    rc = Nvme_GetAdapterList(&list);
@@ -2273,7 +2298,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       maxErrorLogEntries = MAX_ERROR_LOG_ENTRIES;
    }
 
-   /* Check the optional parameters: nsId and eple.*/
+  /* Check the optional parameters: nsId, eple, telemetryPath and dataArea. */
   if (setNsid) {
       if (lid == VMK_NVME_LID_SMART_HEALTH &&
           (idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_SMART_PER_NS)) {
@@ -2319,6 +2344,48 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
          Error("Missing required parameter -e when using -l 1");
          goto out_free;
       }
+   }
+
+   if (setTelemetrypath || setDataarea) {
+      if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
+          lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
+         if (!(idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_TELEMETRY)) {
+            Error("Telemetry log page is not supported.");
+            goto out_free;
+         } else {
+            if (!setTelemetrypath) {
+               Error("Missing required parameter -t when using -l %d", lid);
+               goto out_free;
+            } else if (!setDataarea) {
+               /* Choose data area 3 if not set */
+               dataArea = 3;
+            }
+         }
+      } else {
+         Error("Invalid parameter.");
+         goto out_free;
+      }
+   } else {
+      if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
+          lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
+         Error("Missing required parameter -t when using -l %d", lid);
+         goto out_free;
+      }
+   }
+
+   if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
+       lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
+      rc = Nvme_GetTelemetryData(handle, telemetryPath, lid, dataArea);
+      if (rc) {
+         Error("Failed to get telemetry data, %s.", strerror(rc));
+      } else {
+         esxcli_xml_begin_output();
+         xml_list_begin("string");
+         printf("<string>Download telemetry data successfully.</string>");
+         xml_list_end();
+         esxcli_xml_end_output();
+      }
+      goto out_free;
    }
 
    memset(&uio, 0, sizeof(uio));

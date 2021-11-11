@@ -5,6 +5,9 @@
 This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
+2021/3/1 1.2.0.43-1vmw
+   Fix PR #2717569: Add telemetry support for nvme pcie
+
 2020/9/29 1.2.0.42-1vmw
    Fix PR #2638853: remove dependency on old nvme driver.
 

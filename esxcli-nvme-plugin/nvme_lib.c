@@ -1,5 +1,5 @@
 /*********************************************************************************
- * Copyright (c) 2013-2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2013-2021 VMware, Inc. All rights reserved.
  * ******************************************************************************/
 
 #include <assert.h>
@@ -14,6 +14,7 @@
 #include <stdio.h>
 
 #include "nvme_lib.h"
+#include "str.h"
 
 
 /*****************************************************************************
@@ -831,6 +832,7 @@ int Nvme_FWFindSlot(struct nvme_handle *handle, int *slot)
       vmk_NvmeErrorInfoLogEntry errLog;
       vmk_NvmeSmartInfoEntry smartLog;
       vmk_NvmeFirmwareSlotInfo fwSlotLog;
+      vmk_NvmeTelemetryEntry telemetryLog;
    } log;
    unsigned char fw_rev_slot[MAX_FW_SLOT][FW_REV_LEN];
    int rc = -1;
@@ -1021,4 +1023,211 @@ Nvme_GetTimeout(struct nvme_handle *handle, int *timeout)
    }
 
    return rc;
+}
+
+/**
+ * Download Telemetry Data to specified path
+ *
+ * @param [in] handle handle to a device
+ * @param [in] telemetryPath path to download the telemetry data
+ * @param [in] lid log page identifier
+ * @param [in] dataArea data area to get telemetry data
+ *
+ * @return 0 if successful
+ */
+int
+Nvme_GetTelemetryData(struct nvme_handle *handle,
+                      char *telemetryPath,
+                      int lid,
+                      int dataArea)
+{
+
+   int fd;
+   int rc = -1;
+   vmk_uint16 data1LB, data2LB, data3LB, dataLB;
+   int offset, size, maxXferSize, xferSize;
+   int ctrlRetry = 0;
+   int genNumStart = -1;
+   int genNumEnd = -1;
+
+   NvmeUserIo uio;
+   NvmeUserIo uioXferSize;
+   union {
+      vmk_NvmeErrorInfoLogEntry errLog;
+      vmk_NvmeSmartInfoEntry smartLog;
+      vmk_NvmeFirmwareSlotInfo fwSlotLog;
+      vmk_NvmeTelemetryEntry telemetryLog;
+   } log;
+   vmk_NvmeTelemetryEntry *telemetryLog;
+
+   assert(telemetryPath);
+   assert(lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
+          lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED);
+
+retry:
+   if (lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED &&
+       ctrlRetry > 3) {
+      fprintf(stderr, "ERROR: Telemetry Controller-Initiated data is not"
+                      " stable, please try later.\n");
+      return -1;
+   }
+
+   /**
+    * Create Telemetry data for Host-Initiated request
+    * Get Generation Number for Controller-Initiated request
+    */
+   memset(&uio, 0, sizeof(uio));
+   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
+   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
+   uio.direction = XFER_FROM_DEV;
+   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.cmd.getLogPage.cdw10.lid = lid;
+   uio.cmd.getLogPage.cdw10.numdl = sizeof(vmk_NvmeTelemetryEntry) / 4 - 1;
+   if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED) {
+      uio.cmd.getLogPage.cdw10.lsp = 1;
+   }
+   uio.cmd.getLogPage.cdw10.rae = 1;
+   uio.cmd.getLogPage.lpo = 0;
+   uio.length = sizeof(vmk_NvmeTelemetryEntry);
+   uio.addr = (vmk_uintptr_t)&log.telemetryLog;
+   rc = Nvme_AdminPassthru(handle, &uio);
+   if (rc) {
+      if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED) {
+         fprintf (stderr, "Failed to create Telemetry Host-Initiated data.\n");
+      } else {
+         fprintf (stderr,
+                  "Failed to get Telemetry Controller-Initiated log header.\n");
+      }
+      return rc;
+   }
+
+   genNumStart = log.telemetryLog.dataGenNum;
+
+   data1LB = log.telemetryLog.dataArea1LB;
+   data2LB = log.telemetryLog.dataArea2LB;
+   data3LB = log.telemetryLog.dataArea3LB;
+   assert(data3LB >= data2LB && data2LB >= data1LB);
+   switch (dataArea) {
+      case 1:
+         dataLB = data1LB;
+         break;
+      case 2:
+         dataLB = data2LB;
+         break;
+      case 3:
+         dataLB = data3LB;
+         break;
+      default:
+         return -1;
+   }
+
+   fd = open(telemetryPath, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+   if (fd == -1) {
+      fprintf (stderr, "ERROR: Failed to open telemetry path.\n");
+      return -ENOENT;
+   }
+   /* Write telemetry log header */
+   if (write(fd, (void *)&log.telemetryLog, sizeof(vmk_NvmeTelemetryEntry)) !=
+       sizeof(vmk_NvmeTelemetryEntry)) {
+      fprintf(stderr, "ERROR: Failed to write telemetry log header.\n");
+      close(fd);
+      return -1;
+   }
+
+   size = dataLB * NVME_TELEMETRY_DATA_BLK_SIZE;
+   if (size == 0) {
+      close(fd);
+      return 0;
+   }
+
+   /* Get controller max transfer size */
+   memset(&uioXferSize, 0, sizeof(uioXferSize));
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_MAX_XFER_LEN, &uioXferSize);
+   if (rc) {
+      fprintf (stderr, "Failed to get max transfer size.\n");
+      rc = uioXferSize.status;
+      close(fd);
+      return rc;
+   }
+   maxXferSize = (uioXferSize.length / NVME_TELEMETRY_DATA_BLK_SIZE) *
+                  NVME_TELEMETRY_DATA_BLK_SIZE;
+
+   if ((telemetryLog = (vmk_NvmeTelemetryEntry *)malloc(
+                        sizeof(vmk_NvmeTelemetryEntry) + size)) == NULL) {
+      fprintf(stderr, "ERROR: Failed to malloc %d bytes.\n", size);
+      if (close (fd) == -1) {
+         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         return -EBADF;
+      }
+      return -ENOMEM;
+   }
+
+   for (offset = 0; offset < size; offset += maxXferSize) {
+      xferSize = ((size-offset) >= maxXferSize) ? maxXferSize : (size-offset);
+
+      memset(&uio, 0, sizeof(uio));
+      uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
+      uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
+      uio.direction = XFER_FROM_DEV;
+      uio.timeoutUs = ADMIN_TIMEOUT;
+      uio.cmd.getLogPage.cdw10.lid = lid;
+      uio.cmd.getLogPage.cdw10.rae = 1;
+      uio.cmd.getLogPage.cdw10.numdl = (xferSize / sizeof(vmk_uint32)) - 1;
+      uio.cmd.getLogPage.lpo = offset + sizeof(vmk_NvmeTelemetryEntry);
+      uio.addr = (vmk_uintptr_t)(&telemetryLog->dataBlocks[offset]);
+      uio.length = xferSize;
+
+      rc = Nvme_AdminPassthru(handle, &uio);
+      if (rc) {
+         /* Failed to execute get telemetry log command. */
+         free(telemetryLog);
+         close(fd);
+         return rc;
+      }
+   }
+
+   if (write(fd, (void *)telemetryLog->dataBlocks, size) != size) {
+      fprintf(stderr, "ERROR: Failed to write telemetry log to file.\n");
+      free(telemetryLog);
+      close(fd);
+      return -1;
+   }
+
+   free(telemetryLog);
+   if (close (fd) == -1) {
+      fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+      return -EBADF;
+   }
+
+   /**
+    * For Telemetry Controller-Initiated, ensure Data Generation Number
+    * matches the original value read.
+    */
+   if (lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
+      memset(&uio, 0, sizeof(uio));
+      uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
+      uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
+      uio.direction = XFER_FROM_DEV;
+      uio.timeoutUs = ADMIN_TIMEOUT;
+      uio.cmd.getLogPage.cdw10.lid = lid;
+      uio.cmd.getLogPage.cdw10.numdl = sizeof(vmk_NvmeTelemetryEntry) / 4 - 1;
+      uio.cmd.getLogPage.cdw10.rae = 1;
+      uio.cmd.getLogPage.lpo = 0;
+      uio.length = sizeof(vmk_NvmeTelemetryEntry);
+      uio.addr = (vmk_uintptr_t)&log.telemetryLog;
+      rc = Nvme_AdminPassthru(handle, &uio);
+      if (rc) {
+         fprintf (stderr, "Failed to get"
+                  " Data Generation Number after data collection is done.\n");
+         return rc;
+      }
+      genNumEnd = log.telemetryLog.dataGenNum;
+      if (genNumEnd != genNumStart) {
+         fprintf(stderr, "Telemetry Controller-Initiated is not stable.\n");
+         ctrlRetry ++;
+         goto retry;
+      }
+   }
+
+   return 0;
 }

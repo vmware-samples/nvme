@@ -1,5 +1,5 @@
 /*********************************************************************************
- * Copyright (c) 2013-2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2013-2021 VMware, Inc. All rights reserved.
  * ******************************************************************************/
 
 #ifndef _NVME_LIB_H
@@ -38,6 +38,11 @@
 #define NVME_FIRMWARE_ACTIVATE_ACTION_ACTIVATE     2
 #define NVME_FIRMWARE_ACTIVATE_ACTION_ACT_NORESET  3
 #define NVME_FIRMWARE_ACTIVATE_ACTION_RESERVED     4
+
+/**
+ * for download telemetry data
+ */
+#define NVME_TELEMETRY_DATA_BLK_SIZE 512
 
 #define NS_UNALLOCATED 0x0
 #define NS_ALLOCATED   0x1
@@ -217,5 +222,8 @@ Nvme_FWFindSlot(struct nvme_handle *handle, int *slot);
 
 int
 Nvme_FWActivate(struct nvme_handle *handle, int slot, int action, int *cmdStatus);
+
+int Nvme_GetTelemetryData(struct nvme_handle *handle, char *telemetryPath,
+                          int lid, int dataArea);
 
 #endif /* _NVME_LIB_H */
