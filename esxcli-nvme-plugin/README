@@ -5,6 +5,8 @@
 This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
+2021/9/07 1.2.0.46-1vmw
+   Remove example placeholder URLs in .sc file
 
 2021/7/29 1.2.0.45-1vmw
    Fix PR #2809120: Add a command to retrieve an arbitrary NVMe log page.
