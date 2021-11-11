@@ -134,7 +134,8 @@ nvme_pcie_bulletin_def = {
       #'releaseType' : 'extension',
       #'urgency'     : 'important',
 
-      'kbUrl'       : 'http://kb.vmware.com/kb/example.html',
+      # If a Knowledge Base (KB) article is needed for this component set it below.
+      #'kbUrl'       : 'http://kb.vmware.com/kb/example.html',
 
       'componentNameSpec' : { 'name' : 'VMware-NVMe-PCIe',
                               'uistring' : 'VMware NVMe PCI Express '
