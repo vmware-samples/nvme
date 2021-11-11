@@ -43,12 +43,12 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.15"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.16"
 
 /**
  * Driver release number. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_RELEASE "2"
+#define NVME_PCIE_DRIVER_RELEASE "1"
 
 /**
  * Driver identifier, concatenation of driver name, version, and release
