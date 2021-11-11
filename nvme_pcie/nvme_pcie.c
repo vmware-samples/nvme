@@ -465,6 +465,40 @@ CmdInfoListDestroy(NVMEPCIEQueueInfo *qinfo)
    return VMK_OK;
 }
 
+#ifdef NVME_STATS
+/**
+ * Allocate and initialize object of NVMEPCIEQueueStats for queue
+ *
+ * @param[in] qinfo  Queue instance
+ *
+ * @return VMK_OK on success, error code otherwise
+ */
+static VMK_ReturnStatus
+QueueStatsContruct(NVMEPCIEQueueInfo *qinfo)
+{
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   qinfo->stats = NVMEPCIEAlloc(sizeof(NVMEPCIEQueueStats), 0);
+   if (NULL == qinfo->stats) {
+      EPRINT(ctrlr, "Failed to allocate stats for queue %d", qinfo->id);
+      return VMK_NO_MEMORY;
+   }
+   qinfo->stats->cqHead = 0;
+   qinfo->stats->cqePhase = 1;
+   qinfo->stats->intrCount = 0;
+   return VMK_OK;
+}
+
+static VMK_ReturnStatus
+QueueStatsDestroy(NVMEPCIEQueueInfo *qinfo)
+{
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   NVMEPCIEFree(qinfo->stats);
+   qinfo->stats = NULL;
+   DPRINT_Q(ctrlr, "Free stats for queue %d", qinfo->id);
+   return VMK_OK;
+}
+#endif
+
 /**
  * Allocate queue resources
  *
@@ -512,7 +546,17 @@ QueueConstruct(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo,
       goto destroy_sq;
    }
 
+#ifdef NVME_STATS
+   vmkStatus = QueueStatsContruct(qinfo);
+   if (vmkStatus != VMK_OK) {
+      EPRINT(ctrlr, "Failed to contruct object of statistics %d, 0x%0x", qid, vmkStatus);
+      goto destroy_cmdinfolist;
+   }
+#endif
    return VMK_OK;
+
+destroy_cmdinfolist:
+   CmdInfoListDestroy(qinfo);
 
 destroy_sq:
    SubQueueDestroy(qinfo);
@@ -547,6 +591,13 @@ QueueDestroy(NVMEPCIEQueueInfo *qinfo)
       WPRINT(ctrlr, "Wait for queue refcount to be zero");
       vmk_WorldSleep(1000);
    }
+#ifdef NVME_STATS
+   vmkStatus = QueueStatsDestroy(qinfo);
+   if (vmkStatus != VMK_OK) {
+      EPRINT(ctrlr, "Failed to destroy object of statistics %d, 0x%x.",
+             qinfo->id, vmkStatus);
+   }
+#endif
 
    vmkStatus = CmdInfoListDestroy(qinfo);
    if (vmkStatus != VMK_OK) {
@@ -602,6 +653,55 @@ NVMEPCIECtrlMsiHandler(void *handlerData, vmk_IntrCookie intrCookie)
 VMK_ReturnStatus
 NVMEPCIEQueueIntrAck(void *handlerData, vmk_IntrCookie intrCookie)
 {
+#ifdef NVME_STATS
+   NVMEPCIEQueueInfo *qinfo = (NVMEPCIEQueueInfo *)handlerData;
+   NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   vmk_NvmeCompletionQueueEntry *cqEntry;
+   NVMEPCIEQueueStats *stats;
+   vmk_uint16 head, phase;
+   NVMEPCIECmdInfo *cmdInfo;
+   NVMEPCIECmdInfoList *cmdList;
+   vmk_TimerCycles ts;
+
+   if (!ctrlr->statsEnabled) {
+      return VMK_OK;
+   }
+   stats = qinfo->stats;
+   cmdList = qinfo->cmdList;
+   /**
+    * Walk through CQ, collect time stamp of arrival of entries.
+    * Iteration should soon be done as it's simple memory accessing.
+    * Take time stamp of very begining of iteration as precise
+    * value for all CQ entries to save calling of vmk_GetTimerCycles.
+    **/
+   head = stats->cqHead;
+   phase = stats->cqePhase;
+   ts = vmk_GetTimerCycles();
+   stats->intrCount ++;
+
+   while (1) {
+      cqEntry = &cqInfo->compq[head];
+      if (cqEntry->dw3.p != phase) {
+         break;
+      }
+      if (ctrlr->abortEnabled) {
+         cmdInfo = &cmdList->list[cqEntry->dw3.cid];
+      } else {
+         cmdInfo = &cmdList->list[cqEntry->dw3.cid - 1];
+      }
+      cmdInfo->doneByHwTs = ts;
+
+      if (++head >= cqInfo->qsize) {
+         head = 0;
+         phase = !phase;
+      }
+   }
+   if (!((head == stats->cqHead) && (stats->cqePhase == phase))) {
+      stats->cqHead = head;
+      stats->cqePhase = phase;
+   }
+#endif
    return VMK_OK;
 }
 
@@ -668,6 +768,11 @@ NVMEPCIEGetCmdInfo(NVMEPCIEQueueInfo *qinfo, vmk_uint16 cid)
          return NULL;
       }
    }
+#ifdef NVME_STATS
+   cmdInfo->sendToHwTs = 0;
+   cmdInfo->doneByHwTs = 0;
+   cmdInfo->statsOn = VMK_FALSE;
+#endif
    DPRINT_CMD(ctrlr, "Get cmd info [%d] %p from queue [%d].",
               cmdInfo->cmdId, cmdInfo, qinfo->id);
 
@@ -713,7 +818,11 @@ NVMEPCIEGetCmdInfoLegacy(NVMEPCIEQueueInfo *qinfo)
    vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_PCIE_CMD_STATUS_ACTIVE);
 
    vmk_SpinlockUnlock(cmdList->lock);
-
+#ifdef NVME_STATS
+   cmdInfo->sendToHwTs = 0;
+   cmdInfo->doneByHwTs = 0;
+   cmdInfo->statsOn = VMK_FALSE;
+#endif
    DPRINT_CMD(ctrlr, "Get cmd info [%d] %p from queue [%d].",
               cmdInfo->cmdId, cmdInfo, qinfo->id);
 
@@ -946,7 +1055,7 @@ NVMEPCIESubmitSyncCommand(NVMEPCIEController *ctrlr,
       if (dmaEntry != NULL) {
          NVMEPCIEDmaFree(&ctrlr->osRes, dmaEntry);
          NVMEPCIEFree(dmaEntry);
-	 cmdInfo->doneData = NULL;
+	      cmdInfo->doneData = NULL;
       }
       NVMEPCIEPutCmdInfo(qinfo, cmdInfo);
       vmk_AtomicDec32(&qinfo->refCount);
@@ -1102,6 +1211,12 @@ NVMEPCIEIssueCommandToHw(NVMEPCIEQueueInfo *qinfo,
       tail = 0;
    }
 
+#ifdef NVME_STATS
+   if (qinfo->ctrlr->statsEnabled) {
+      cmdInfo->sendToHwTs = vmk_GetTimerCycles();
+      cmdInfo->statsOn = VMK_TRUE;
+   }
+#endif
    NVMEPCIEWritel(tail, sqInfo->doorbell);
    sqInfo->tail = tail;
    vmk_SpinlockUnlock(sqInfo->lock);
@@ -1124,6 +1239,10 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
    NVMEPCIECmdInfo *cmdInfo;
    vmk_NvmeCompletionQueueEntry *cqEntry;
    vmk_uint16 head, phase, sqHead;
+#ifdef NVME_STATS
+   vmk_TimerRelCycles latency = 0;
+   vmk_TimerCycles lastValidTs = 0;
+#endif
 
    head = cqInfo->head;
    phase = cqInfo->phase;
@@ -1155,6 +1274,33 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
          cmdInfo->vmkCmd->cqEntry.dw3.cid = cmdInfo->vmkCmd->nvmeCmd.cdw0.cid;
       }
       cmdInfo->vmkCmd->nvmeStatus = GetCommandStatus(cqEntry);
+#ifdef NVME_STATS
+      /**
+       * For corner case where CQ entries had been written to CQ but interrupt
+       * is not generated yet. These arrived entries might be processed in
+       * this loop before being processed by IntrAck that fill doneByHwTs for entries.
+       * If so, the doneByHwTs of these entries are empty.
+       * To cover this corner case, use the latest valid doneByHwTs as real doneByHwTs
+       * of above stated case. Which is a simple way. Let's make a compromise on
+       * preciseness.
+       */
+      if (cmdInfo->statsOn) {
+         if (cmdInfo->doneByHwTs) {
+            latency = (cmdInfo->doneByHwTs - cmdInfo->sendToHwTs);
+            if (VMK_UNLIKELY(latency <= 0)) {
+               latency = 0;
+            }
+            cmdInfo->vmkCmd->deviceLatency = latency;
+            lastValidTs = cmdInfo->doneByHwTs;
+         } else {
+            latency = (lastValidTs - cmdInfo->sendToHwTs);
+            if (VMK_UNLIKELY(latency <= 0)) {
+               latency = 0;
+            }
+            cmdInfo->vmkCmd->deviceLatency = latency;
+         }
+      }
+#endif
       if (cmdInfo->done) {
          cmdInfo->done(qinfo, cmdInfo);
       }

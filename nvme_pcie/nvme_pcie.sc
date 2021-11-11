@@ -33,7 +33,7 @@ nvme_pcie_identification = {
    "summary"         : "Non-Volatile memory controller driver",
    "description"     : "Non-Volatile memory controller driver",
    "version"         : "1.2.3.15",
-   "version_bump"    : 1,
+   "version_bump"    : 2,
    "license"         : VMK_MODULE_LICENSE_BSD,
    "vendor"          : "VMware",
    "vendor_code"     : "VMW",

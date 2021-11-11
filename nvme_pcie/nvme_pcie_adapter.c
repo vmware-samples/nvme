@@ -462,6 +462,66 @@ vmk_NvmeControllerOps nvmePCIEControllerOps = {
    .getIntrCookie = GetIntrCookie,
 };
 
+#ifdef NVME_STATS
+
+/**
+ * Get statistics of given queue of given controller..
+ *
+ * @param[in]  controller  Controller instance.
+ * @param[in]  qid         Queue ID. Specify which queue get stats from.
+ * @param[in]  cat         Statistics category to get.
+ * @param[out] stats       Return statistic wantted.
+ *
+ * @return VMK_OK on success, error code otherwise
+ */
+VMK_ReturnStatus
+GetStatistics(vmk_NvmeController controller,
+             vmk_NvmeQueueID qid,
+             vmk_NvmeStatisticsCategory cat,
+             vmk_NvmeStatistics* stats)
+{
+   VMK_ReturnStatus vmkStatus = VMK_FAILURE;
+   NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
+   NVMEPCIEQueueInfo *qinfo = &ctrlr->queueList[qid];
+
+   if (VMK_NVME_STATS_CAT_PCIE) {
+      stats->pcie.intrCount = qinfo->stats->intrCount;
+      vmkStatus = VMK_OK;
+   }
+   return vmkStatus;
+}
+
+/**
+ * Set statistics configuraton for given controller
+ *
+ * @param[in] controller  Controller instance.
+ * @param[in] cat         Statistic category to set.
+ * @param[in] config      Statistics to set.
+ *
+ * @return VMK_OK on success, error code otherwise
+ */
+VMK_ReturnStatus
+SetStatistics(vmk_NvmeController controller,
+            vmk_NvmeStatisticsCategory cat,
+            vmk_NvmeStatistics* config)
+{
+   VMK_ReturnStatus vmkStatus = VMK_OK;
+   NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
+
+   ctrlr->statsEnabled = config->config.enabled;
+   return vmkStatus;
+}
+
+/**
+ * Adapter's capability
+ */
+vmk_NvmeAdapterCapOptStats nvmePCIEAdapterCapOptStats = {
+   .getStats = GetStatistics,
+   .setStats = SetStatistics,
+};
+
+#endif
+
 /**
  * Allocate and register vmk_NvmeAdapter
  *
@@ -546,6 +606,22 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
       vmkStatus = VMK_OK;
    } else {
       EPRINT(ctrlr, "Failed to register abort capability,0x%x.", vmkStatus);
+      vmk_NvmeFreeAdapter(vmkAdapter);
+      vmk_DMAEngineDestroy(ctrlr->osRes.IODmaEngine);
+      return vmkStatus;
+   }
+#endif
+
+#ifdef NVME_STATS
+   vmkStatus = vmk_NvmeRegisterAdapterCapability(
+                  vmkAdapter,
+                  VMK_NVME_ADAPTER_CAP_STATS,
+                  (vmk_NvmeAdapterCapOpt*)(&nvmePCIEAdapterCapOptStats));
+   ctrlr->statsEnabled = VMK_FALSE;
+   if (vmkStatus == VMK_IS_DISABLED || vmkStatus == VMK_OK) {
+      vmkStatus = VMK_OK;
+   } else {
+      EPRINT(ctrlr, "Failed to register nvme-stats capability, 0x%x.", vmkStatus);
       vmk_NvmeFreeAdapter(vmkAdapter);
       vmk_DMAEngineDestroy(ctrlr->osRes.IODmaEngine);
       return vmkStatus;

@@ -33,6 +33,7 @@
 #include "nvme_pcie_debug.h"
 
 #define NVME_ABORT 1
+#define NVME_STATS 1
 
 /**
  * Driver name. This should be the name of the SC file.
@@ -47,7 +48,7 @@
 /**
  * Driver release number. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_RELEASE "1"
+#define NVME_PCIE_DRIVER_RELEASE "2"
 
 /**
  * Driver identifier, concatenation of driver name, version, and release
@@ -157,6 +158,11 @@ typedef struct NVMEPCIECmdInfo {
    vmk_atomic32 atomicStatus;
    /** point to next free cmdInfo */
    vmk_uint32 freeLink;
+#ifdef NVME_STATS
+   vmk_TimerCycles sendToHwTs;
+   vmk_TimerCycles doneByHwTs;
+   vmk_Bool statsOn;
+#endif
 } NVMEPCIECmdInfo;
 
 typedef union NVMEPCIEPendingCmdInfo {
@@ -185,6 +191,13 @@ typedef enum NVMEPCIEQueueState {
    NVME_PCIE_QUEUE_ACTIVE,
 } NVMEPCIEQueueState;
 
+typedef struct NVMEPCIEQueueStats {
+   vmk_uint64 intrCount;
+   /* Additional tracker for CQ entries. */
+   vmk_uint16 cqHead;
+   vmk_uint16 cqePhase;
+} NVMEPCIEQueueStats;
+
 /**
  * Queue info
  */
@@ -196,6 +209,7 @@ typedef struct NVMEPCIEQueueInfo {
    NVMEPCIESubQueueInfo *sqInfo;
    NVMEPCIECompQueueInfo *cqInfo;
    NVMEPCIECmdInfoList *cmdList;
+   NVMEPCIEQueueStats *stats;
 } NVMEPCIEQueueInfo;
 
 /* to mark the special device needs some workaround */
@@ -220,6 +234,7 @@ typedef struct NVMEPCIEController {
    vmk_Bool abortEnabled;
    NVMEPCIEWorkaround workaround;
    vmk_uint32 dstrd;
+   vmk_Bool statsEnabled;
 } NVMEPCIEController;
 
 /**
@@ -398,8 +413,9 @@ VMK_ReturnStatus NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
 void NVMEPCIEIntrFree(NVMEPCIEController *ctrlr);
 
 VMK_ReturnStatus NVMEPCIECtrlMsiAck(void *handlerData,
-                                    vmk_IntrCookie intrCookie);
-void NVMEPCIECtrlMsiHandler(void *handlerData, vmk_IntrCookie intrCookie);
+                                     vmk_IntrCookie intrCookie);
+void NVMEPCIECtrlMsiHandler(void *handlerData,
+                              vmk_IntrCookie intrCookie);
 
 VMK_ReturnStatus NVMEPCIEQueueIntrAck(void *handlerData,
                                       vmk_IntrCookie intrCookie);
