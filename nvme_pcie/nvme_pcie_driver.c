@@ -98,6 +98,20 @@ NVMEPCIEHwStop(NVMEPCIEController *ctrlr)
    return vmkStatus;
 }
 
+VMK_ReturnStatus
+NVMEPCIEGetCtrlrCap(NVMEPCIEController *ctrlr)
+{
+   vmk_uint64 cap;
+
+   cap = NVMEPCIEReadq(ctrlr->regs + VMK_NVME_REG_CAP);
+   ctrlr->dstrd = ((vmk_NvmeRegCap *)&cap)->dstrd;
+   if (ctrlr->dstrd != 0) {
+      IPRINT(ctrlr, "Controller doorbell stride %d", ctrlr->dstrd);
+   }
+
+   return VMK_OK;
+}
+
 /**
  * attachDevice callback of driver ops
  */
@@ -129,6 +143,8 @@ AttachDevice(vmk_Device device)
    /** Generate a unique name for this controller */
    vmk_NameFormat(&ctrlr->name, "nvme_pcie%02d%02d%02d%02d", ctrlr->osRes.sbdf.seg,
                   ctrlr->osRes.sbdf.bus, ctrlr->osRes.sbdf.dev, ctrlr->osRes.sbdf.fn);
+
+   NVMEPCIEGetCtrlrCap(ctrlr);
 
    /** Initialize DMA facilities (dma engine, sg handle, etc.) */
    vmkStatus = DmaInit(ctrlr);

@@ -187,7 +187,7 @@ CompQueueConstruct(NVMEPCIEQueueInfo *qinfo, int qid, int qsize, int intrIndex)
    }
    cqInfo->compq = (vmk_NvmeCompletionQueueEntry *) cqInfo->dmaEntry.va;
    cqInfo->compqPhy = cqInfo->dmaEntry.ioa;
-   cqInfo->doorbell = ctrlr->regs + VMK_NVME_REG_CQHDBL(qid, 0);
+   cqInfo->doorbell = ctrlr->regs + VMK_NVME_REG_CQHDBL(qid, ctrlr->dstrd);
    cqInfo->phase = 1;
    cqInfo->head = 0;
    cqInfo->tail = 0;
@@ -314,7 +314,7 @@ VMK_ReturnStatus SubQueueConstruct(NVMEPCIEQueueInfo *qinfo, int qid, int qsize)
 
    sqInfo->subq = (vmk_NvmeSubmissionQueueEntry *) sqInfo->dmaEntry.va;
    sqInfo->subqPhy = sqInfo->dmaEntry.ioa;
-   sqInfo->doorbell = ctrlr->regs + VMK_NVME_REG_SQTDBL(qid, 0);
+   sqInfo->doorbell = ctrlr->regs + VMK_NVME_REG_SQTDBL(qid, ctrlr->dstrd);
 
    return VMK_OK;
 
@@ -495,6 +495,9 @@ QueueConstruct(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo,
       EPRINT(ctrlr, "Failed to construct submission queue %d, 0x%x.", qid, vmkStatus);
       goto destroy_cq;
    }
+
+   VPRINT(ctrlr, "sq[%d].doorbell: 0x%lx, cq[%d].doorbell: 0x%lx",
+             qid, qinfo->sqInfo->doorbell, qid, qinfo->cqInfo->doorbell);
 
    vmkStatus = CmdInfoListConstruct(qinfo, sqsize - 1);
    if (vmkStatus != VMK_OK) {
