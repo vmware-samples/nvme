@@ -1,0 +1,195 @@
+= Plugin of esxcli for NVMe device Management =
+
+== Description ==
+
+This is the plugin of esxcli for NVMe device management.
+
+== Change Log ==
+
+2018/6/6 1.2.0.34-1vmw
+
+   Fix PR #2132998: NGUID is reported incorrectly.
+
+2018/5/4 1.2.0.33-1vmw
+
+   Fix PR #2101840: Set CDW1.NSID to 0h for features that are not namespace specific.
+
+2017/11/30 1.2.0.32-1vmw
+
+   Fix PR #2010390: Disable Namespace Multi-path I/O and Namespace Sharing Capabilities.
+
+2017/11/3 1.2.0.31-1vmw
+
+   Fix PR #1991128: Modify firmware download and activate functions to follow NVMe spec.
+
+2017/9/5 1.2.0.30-1vmw
+
+   Fix PR #1949338: Enhance the error message of feature get/set.
+
+2017/7/12 1.2.0.29-1vmw
+
+   Fix PR #1912914: Correct the namespace mapping in namespace format and detach functions.
+
+2017/6/8 1.2.0.28-1vmw
+
+   Fix PR #1893469：Failure when get feature er for nvme controller.
+
+2017/6/8 1.2.0.27-1vmw
+
+   Fix PR #1888583: Some issues in 'esxcli nvme device feature'.
+   1. Fix a bug that the behavior of gettting/setting feature tt(Temperature Threshold)
+      is not proper for some controllers.
+   2. Checking if Keep Alive is supported before issuing associated Admin commands.
+   3. Fix a bug that 'esxcli nvme device feature hi get' gets the wrong data.
+
+2017/6/5 1.2.0.26-1vmw
+
+   Unify the namespace status displayed in nvme.device.namespace.list
+
+2017/5/26 1.2.0.25-1vmw
+
+   1. Output 1.2.1 SPEC Added fields in controller identify.
+   2. Hide nvme.device.namespace.{online,offline} which is for internal use.
+   3. Unify the output for "Invalid parameter".
+   4. Output nothing instead of error message when no controller attached to namespace.
+
+2017/5/26 1.2.0.24-1vmw
+
+   Enhance feature get and set admin commands implementation based on NVMe 1.2
+
+2017/5/24 1.2.0.23-1vmw
+
+   Disable Namespace Multi-path I/O and Namespace Sharing Capabilities (NMIC).
+
+2017/5/23 1.2.0.22-1vmw
+
+   Fix PR #1864018: List detail failure reasons if namespace management/attachment fails.
+
+2017/5/22 1.2.0.21-1vmw
+
+   Implement unified commands for listing namespace and controller.
+
+   * Replace nvme.device.namespace.{listall, listattach} with nvme.device.namespace.list
+   * Replace nvme.device.{listall, listattach} with nvme.device.controller.list
+
+2017/5/18 1.2.0.20-1vmw
+
+   Fix PR #1853896: Enhance parameter check for namespace format command.
+
+2017/5/14 1.2.0.19-1vmw
+
+   Implement feature switch for namespace management commands.
+
+2017/5/4 1.2.0.18-1vmw
+
+   Re-checkin the functionalities implemented in 1.2.0.13-1vmw.
+
+2017/4/27 1.2.0.17-1vmw
+
+   Fix PR #1840297: Not print error message in nvme.device.list if nvme driver is not loaded.
+
+2017/4/20 1.2.0.16-1vmw
+
+   Backout the functionalities implemented in 1.2.0.13-1vmw.
+
+2017/4/17 1.2.0.15-1vmw
+
+   Fix PR #1850319: Check write cache exist before sending get vwc feature admin command
+
+   If controller doesn't have a write cache, return error message directly and don't
+   send get vwc feature admin command.
+
+2017/4/14 1.2.0.14-1vmw
+
+   Fix PR #1799210: remove check of "Arbitration Burst" value when setting this feature.
+
+2017/4/6 1.2.0.13-1vmw
+
+   Implement the following functionalities:
+      * nvme.device.listall
+      * nvme.device.listattach
+      * nvme.device.namespace.listall
+      * nvme.device.namespace.listattach
+      * nvme.device.namespace.create
+      * nvme.device.namespace.delete
+      * nvme.device.namespace.attach
+      * nvme.device.namespace.detach
+      * nvme.device.namespace.online
+      * nvme.device.namespace.offline
+
+2016/11/25 1.2.0.12-1vmw
+
+   1. Implement nvme.device.timeout.get functionality.
+   2. Implement nvme.device.timeout.set functionality.
+
+2016/11/6 1.2.0.11-1vmw
+
+   Implement nvme.device.register.get functionality.
+
+2016/2/1 1.2.0.10-1vmw
+
+   1. Put the field names into one line in xml to make localcli work.
+   2. Fix several typos.
+   3. Unify the capitalization styles.
+
+2015/12/8 1.2.0.9-1vmw
+
+   1. Use string type as PCIVID & PCISSVID instead of int type.
+   2. Enhance the prompt of feature aec, ivc, vwc and wa.
+   3. Move nvme_lib.c and nvme_lib.h from nvme-cli to esxcli-nvme-plugin.
+   4. Unify log messages in function Nvme_FWLoadImage to align with the esxcli
+      output standard.
+   5. Fix the missing close file descriptor in function Nvme_FWLoadImage.
+
+2015/11/13 1.2.0.8-1vmw
+
+   1. Format the output of esxcli plugin.
+   2. Output fields in identify and smart log page defined in NVMe 1.2 SPEC which is
+      compatiable with 1.0e.
+
+2015/9/7 1.2.0.7-1vmw
+
+   1. Set format timeout value as 30mins, some devices really need a long time to format.
+   2. Fix several typos in esxcli set/get feature.
+
+2015/7/1 1.2.0.6-1vmw
+
+   1. Unify the code convention of this plugin.
+   2. Enhance the process when namespace is already offline.
+   3. Fix several bugs:
+      a) Correct the right nsId instead of numNs in NvmePlugin_DeviceNsGet.
+      b) Fix the printing info in PirntErrorLog function.
+      c) Show other namespaces info when it fails to get device name of one namespace.
+
+2015/6/12 1.2.0.5-1vmw
+
+   Implement nvme.driver.loglevel.set functionality.
+
+2015/6/5 1.2.0.4-1vmw
+
+   Implement nvme.device.firmware.download/activate functionality.
+
+2015/5/29 1.2.0.3-1vmw
+
+   1. Implement nvme.device.feature.set/get/list functionality.
+   2. Implement nvme.device.log.get functionality.
+
+2015/5/15 1.2.0.2-1vmw
+
+   1. Implement nvme.device.namespace.format functionality.
+   2. Implement nvme.device.namespace.list functionality.
+
+2015/4/27 1.2.0.1-1vmw
+
+   Implement nvme.device.namespace.get functionality.
+
+2015/1/22 1.2.0.0-1vmw
+
+   Initial cut of esxcli plugin for NVMe devcie management. Implement build
+   infrastructure and stubs for NVMe esxcli extension.
+
+   This change adds the build support and stubs for the nvme esxcli extension.
+   The nvme esxcli extension is packaged as a standalone vib that includes an
+   XML document for providing the "nvme" esxcli namespace, and a binary named
+   esxcli-nvme-plugin under /opt/vmware/nvme/ for executing the esxcli
+   operations.
