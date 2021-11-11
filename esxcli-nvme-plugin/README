@@ -6,6 +6,14 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2019/3/11 1.2.0.37-1vmw
+
+   Merge 'esxcli {nvme,nvme2}' commands into one namespace 'esxcli nvme'.
+   1. Don't register 'nvme' namespace to esxcli root node. Assume 'esxcli nvme' namespace
+      already exists. Because we let the native esxcli nvme plugin register it.
+   2. Modify the description of 'esxcli nvme {device,driver}' namespaces. Mark them as
+      "Legacy".
+
 2018/12/6 1.2.0.36-1vmw
 
    Fix PR #2231620: Remove unnecessary checks for namespace format command.
