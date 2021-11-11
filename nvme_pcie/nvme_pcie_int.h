@@ -40,7 +40,7 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.8"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.9"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -72,6 +72,8 @@
 #define NVME_PCIE_PRP_ENTRY_SIZE sizeof(vmk_uint64)
 #define NVME_PCIE_MAX_PRPS (VMK_PAGE_SIZE/NVME_PCIE_PRP_ENTRY_SIZE)
 #define NVME_PCIE_MAX_TRANSFER_SIZE (NVME_PCIE_MAX_PRPS * VMK_PAGE_SIZE)
+
+#define NVME_PCIE_SG_MAX_ENTRIES 32
 
 typedef struct NVMEPCIEController NVMEPCIEController;
 typedef struct NVMEPCIECmdInfo NVMEPCIECmdInfo;
@@ -316,6 +318,21 @@ NVMEPCIEIsAWSLocalDevice(NVMEPCIEController *ctrlr)
            /* AWS EC2 */
            (pciId->vendorID == 0x1d0f && pciId->deviceID == 0xcd00)
           );
+}
+
+/**
+ * Return true if controller mqes is smaller than 32.
+ *
+ * Add this special case to customize DMA constraints
+ * sgElemAlignment & sgElemSizeMult to avoid io split number
+ * greater than controller queue size.
+ */
+static inline vmk_Bool
+NVMEPCIEIsSmallQsize(NVMEPCIEController *ctrlr)
+{
+   vmk_uint64 cap = NVMEPCIEReadq(ctrlr->regs + VMK_NVME_REG_CAP);
+
+   return (((vmk_NvmeRegCap *)&cap)->mqes < NVME_PCIE_SG_MAX_ENTRIES);
 }
 
 static inline void

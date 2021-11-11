@@ -462,14 +462,15 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
     * The constraints should be provided by nvme core. Temporally set
     * them with the values used in native nvme driver.
     */
-   constraints.sgMaxEntries = 32;
+   constraints.sgMaxEntries = NVME_PCIE_SG_MAX_ENTRIES;
    constraints.sgElemMaxSize = 0;
    constraints.sgElemSizeMult = 512;
    constraints.sgElemAlignment = 4;
    constraints.sgElemStraddle = VMK_ADDRESS_MASK_32BIT + 1;
 
    // Customize for AWS EBS and local device, refer to PR #2126797 & PR #2196444.
-   if (NVMEPCIEIsEBSCustomDevice(ctrlr) || NVMEPCIEIsAWSLocalDevice(ctrlr) || nvmePCIEDma4KSwitch) {
+   if (NVMEPCIEIsEBSCustomDevice(ctrlr) || NVMEPCIEIsAWSLocalDevice(ctrlr) ||
+       NVMEPCIEIsSmallQsize(ctrlr) || nvmePCIEDma4KSwitch) {
       constraints.sgElemSizeMult = VMK_PAGE_SIZE;
       constraints.sgElemAlignment = VMK_PAGE_SIZE;
       WPRINT(ctrlr, "sgElemSizeMult: %d, sgElemAlignment: %d",

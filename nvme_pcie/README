@@ -5,6 +5,10 @@
 This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
+2020/6/24 1.2.3.9-1vmw
+
+   Set DMA constraint to 4k-alignment for controller with small queue size.
+
 2020/6/22 1.2.3.8-1vmw
 
    Add Intel P5500/5600 device into stripe limitation list.
