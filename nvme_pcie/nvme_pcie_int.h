@@ -39,7 +39,7 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.2.11"
+#define NVME_PCIE_DRIVER_VERSION "1.2.2.12"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -168,6 +168,7 @@ typedef struct NVMEPCIECmdInfoList {
    NVMEPCIEPendingCmdInfo pendingFreeCmdList;
    vmk_uint32 freeCmdList;
    NVMEPCIECmdInfo *list;
+   int idCount;
 } NVMEPCIECmdInfoList;
 
 typedef enum NVMEPCIEQueueState {

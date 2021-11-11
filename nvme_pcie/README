@@ -6,6 +6,13 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2019/12/23 1.2.2.12-1vmw
+
+   Eliminate queue full issue by following changes:
+   1. Set cmdInfo list size as sqsize-1.
+   2. Update sqHead in each command completion instead of at the end of loop of processCq.
+   3. Free cmdInfo before invoking vmkCmd->done.
+
 2019/3/1 1.2.2.11-1vmw
 
    Fix a cmdInfo not being released issue in sync command submission.

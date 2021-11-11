@@ -410,6 +410,7 @@ CmdInfoListConstruct(NVMEPCIEQueueInfo *qinfo, int qsize)
    }
 
    cmdList->list = cmdInfo;
+   cmdList->idCount = qsize;
    for (i = 1; i <= qsize; i++) {
       cmdInfo->cmdId = i;
       cmdInfo ++;
@@ -495,7 +496,7 @@ QueueConstruct(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo,
       goto destroy_cq;
    }
 
-   vmkStatus = CmdInfoListConstruct(qinfo, cqsize);
+   vmkStatus = CmdInfoListConstruct(qinfo, sqsize - 1);
    if (vmkStatus != VMK_OK) {
       EPRINT(ctrlr, "Failed to constrct command list %d, 0x%x.", qid, vmkStatus);
       goto destroy_sq;
@@ -629,8 +630,11 @@ NVMEPCIEGetCmdInfo(NVMEPCIEQueueInfo *qinfo)
    if (VMK_UNLIKELY(cmdList->freeCmdList == 0)) {
       cmdList->freeCmdList = NVMEPCIEFlushFreeCmdInfo(qinfo);
       if (VMK_UNLIKELY(cmdList->freeCmdList == 0)) {
-         /** No need to log QFULL error by default as it is recorded in vmknvme */
-         VPRINT(ctrlr, "Queue[%d] command list empty.", qinfo->id);
+         /**
+          * There shouldn't be queue full errors as vmknvme knows the number of
+          * active commands and won't issue commands when there is no free slot.
+          */
+         WPRINT(ctrlr, "Queue[%d] command list empty. %d", qinfo->id, cmdList->nrAct);
          vmk_SpinlockUnlock(cmdList->lock);
          return NULL;
       }
@@ -723,13 +727,9 @@ NVMEPCIESubmitAsyncCommand(NVMEPCIEController *ctrlr,
 
    nvmeStatus = NVMEPCIEIssueCommandToHw(qinfo, cmdInfo, NVMEPCIECompleteAsyncCommand);
 
-   if (nvmeStatus != VMK_NVME_STATUS_VMW_WOULD_BLOCK) {
+   if (VMK_UNLIKELY(nvmeStatus != VMK_NVME_STATUS_VMW_WOULD_BLOCK)) {
       vmkCmd->nvmeStatus = nvmeStatus;
-      if (nvmeStatus == VMK_NVME_STATUS_VMW_QUEUE_FULL) {
-         VPRINT(ctrlr, "Failed to issue command %d, 0x%x", cmdInfo->cmdId, nvmeStatus);
-      } else {
-         EPRINT(ctrlr, "Failed to issue command %d, 0x%x", cmdInfo->cmdId, nvmeStatus);
-      }
+      WPRINT(ctrlr, "Failed to issue command %d, 0x%x", cmdInfo->cmdId, nvmeStatus);
       NVMEPCIEPutCmdInfo(qinfo, cmdInfo);
       vmk_AtomicDec32(&qinfo->refCount);
       return VMK_FAILURE;
@@ -906,9 +906,10 @@ static void
 NVMEPCIECompleteAsyncCommand(NVMEPCIEQueueInfo *qinfo,
                              NVMEPCIECmdInfo *cmdInfo)
 {
-   NVMEPCIEDumpCommand(qinfo->ctrlr, cmdInfo->vmkCmd);
-   cmdInfo->vmkCmd->done(cmdInfo->vmkCmd);
+   vmk_NvmeCommand *vmkCmd = cmdInfo->vmkCmd;
+   NVMEPCIEDumpCommand(qinfo->ctrlr, vmkCmd);
    NVMEPCIEPutCmdInfo(qinfo, cmdInfo);
+   vmkCmd->done(vmkCmd);
 }
 
 /**
@@ -1042,6 +1043,8 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
          EPRINT(ctrlr, "Invalid sqhd 0x%x returned from controller for qid %d, cid 0x%x",
                 sqHead, qinfo->id, cmdInfo->vmkCmd->nvmeCmd.cdw0.cid);
          VMK_ASSERT(0);
+      } else {
+         vmk_AtomicWrite32(&sqInfo->pendingHead, (vmk_uint32)sqHead);
       }
       VMK_ASSERT(cmdInfo->vmkCmd != NULL);
       vmk_Memcpy(&cmdInfo->vmkCmd->cqEntry,
@@ -1062,13 +1065,6 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
       cqInfo->head = head;
       cqInfo->phase = phase;
       NVMEPCIEWritel(head, cqInfo->doorbell);
-
-      if (sqHead >= (vmk_uint16)sqInfo->qsize) {
-         EPRINT(ctrlr, "Invalid sqHead 0x%x, qid %d", sqHead, qinfo->id);
-         VMK_ASSERT(0);
-      } else {
-         vmk_AtomicWrite32(&sqInfo->pendingHead, (vmk_uint32)sqHead);
-      }
    }
 }
 
@@ -1297,7 +1293,7 @@ NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
    NVMEPCIEProcessCq(qinfo);
    vmk_SpinlockUnlock(qinfo->cqInfo->lock);
 
-   for (i = 1; i <= qinfo->sqInfo->qsize; i++) {
+   for (i = 1; i <= qinfo->cmdList->idCount; i++) {
       atomicStatus = vmk_AtomicRead32(&cmdInfo->atomicStatus);
       if (atomicStatus == NVME_PCIE_CMD_STATUS_ACTIVE ||
           atomicStatus == NVME_PCIE_CMD_STATUS_FREE_ON_COMPLETE) {
@@ -1375,8 +1371,8 @@ NVMEPCIEInitQueue(NVMEPCIEQueueInfo *qinfo)
    cmdList->nrAct = 0;
    cmdList->freeCmdList = 0;
    vmk_AtomicWrite64(&cmdList->pendingFreeCmdList.atomicComposite, 0);
-   cmdInfo = qinfo->cmdList->list;
-   for (i = 1; i <= qinfo->sqInfo->qsize; i++) {
+   cmdInfo = cmdList->list;
+   for (i = 1; i <= cmdList->idCount; i++) {
       cmdInfo->cmdId = i;
       vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_PCIE_CMD_STATUS_FREE);
       cmdInfo->freeLink = cmdList->freeCmdList;
