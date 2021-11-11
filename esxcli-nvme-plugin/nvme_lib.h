@@ -251,7 +251,12 @@ Nvme_FWActivate(struct nvme_handle *handle, int slot, int action, int *cmdStatus
 int Nvme_GetTelemetryData(struct nvme_handle *handle, char *telemetryPath,
                           int lid, int dataArea);
 
+int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid,
+                    void *logData, int dataLen, vmk_uint64 offset, int rae,
+                    int lsp, int lsi, int uuid);
+
 int Nvme_GetPersistentEventLog(struct nvme_handle *handle, char *logPath,
                                int action);
+int Nvme_WriteRawDataToFile(void *data, int len, char *path);
 
 #endif /* _NVME_LIB_H */

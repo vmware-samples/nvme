@@ -143,6 +143,26 @@ Nvme_Close(struct nvme_handle *handle)
    free(handle);
 }
 
+int
+Nvme_WriteRawDataToFile(void *data, int len, char* path)
+{
+   int fd;
+   if (data == NULL || path == NULL) {
+      return -EINVAL;
+   }
+   fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+   if (fd == -1) {
+      fprintf (stderr, "ERROR: Failed to open path.\n");
+      return -ENOENT;
+   }
+   if (write(fd, data, len) != len) {
+      fprintf(stderr, "ERROR: Failed to write data.\n");
+      close(fd);
+      return -EIO;
+   }
+   close(fd);
+   return 0;
+}
 
 /**
  * Get device management signature
@@ -827,13 +847,7 @@ Nvme_FWDownload(struct nvme_handle *handle,
 
 int Nvme_FWFindSlot(struct nvme_handle *handle, int *slot)
 {
-   NvmeUserIo uio;
-   union {
-      vmk_NvmeErrorInfoLogEntry errLog;
-      vmk_NvmeSmartInfoEntry smartLog;
-      vmk_NvmeFirmwareSlotInfo fwSlotLog;
-      vmk_NvmeTelemetryEntry telemetryLog;
-   } log;
+   vmk_NvmeFirmwareSlotInfo fwSlotLog;
    unsigned char fw_rev_slot[MAX_FW_SLOT][FW_REV_LEN];
    int rc = -1;
    int i;
@@ -841,24 +855,15 @@ int Nvme_FWFindSlot(struct nvme_handle *handle, int *slot)
    assert(handle && slot);
    assert(*slot > 0 && *slot < 8);
 
-   memset(&uio, 0, sizeof(uio));
-
-   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
-   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getLogPage.cdw10.lid = VMK_NVME_LID_FW_SLOT;
-   uio.cmd.getLogPage.cdw10.numdl = sizeof(vmk_NvmeFirmwareSlotInfo) / 4 - 1;
-   uio.length = sizeof(vmk_NvmeFirmwareSlotInfo);
-   uio.addr = (vmk_uintptr_t)&log.fwSlotLog;
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetLogPage(handle, VMK_NVME_LID_FW_SLOT, VMK_NVME_DEFAULT_NSID,
+                        &fwSlotLog, sizeof(vmk_NvmeFirmwareSlotInfo),
+                        0, 0, 0, 0, 0);
    if (rc) {
       return -EIO;
    }
 
    /* copy firmware revision info from log.fwSlotLog.frs. */
-   memcpy(fw_rev_slot, log.fwSlotLog.frs, sizeof(fw_rev_slot));
+   memcpy(fw_rev_slot, fwSlotLog.frs, sizeof(fw_rev_slot));
 
    /* search for first available slot */
    for(i=0; i<MAX_FW_SLOT; i++) {
@@ -1045,12 +1050,11 @@ Nvme_GetTelemetryData(struct nvme_handle *handle,
    int fd;
    int rc = -1;
    vmk_uint16 data1LB, data2LB, data3LB, dataLB;
-   vmk_uint32 offset, size, maxXferSize, xferSize, numd;
+   vmk_uint32 size;
    int ctrlRetry = 0;
    int genNumStart = -1;
    int genNumEnd = -1;
-   NvmeUserIo uio;
-   NvmeUserIo uioXferSize;
+   int lsp = 0;
    vmk_NvmeTelemetryEntry telemetryEntry;
    vmk_NvmeTelemetryEntry *telemetryLog;
 
@@ -1070,21 +1074,11 @@ retry:
     * Create Telemetry data for Host-Initiated request
     * Get Generation Number for Controller-Initiated request
     */
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
-   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getLogPage.cdw10.lid = lid;
-   uio.cmd.getLogPage.cdw10.numdl = sizeof(vmk_NvmeTelemetryEntry) / 4 - 1;
    if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED) {
-      uio.cmd.getLogPage.cdw10.lsp = 1;
+      lsp = 1;
    }
-   uio.cmd.getLogPage.cdw10.rae = 1;
-   uio.cmd.getLogPage.lpo = 0;
-   uio.length = sizeof(vmk_NvmeTelemetryEntry);
-   uio.addr = (vmk_uintptr_t)&telemetryEntry;
-   rc = Nvme_AdminPassthru(handle, &uio);
+   rc = Nvme_GetLogPage(handle, lid, VMK_NVME_DEFAULT_NSID, &telemetryEntry,
+                        sizeof(vmk_NvmeTelemetryEntry), 0, 1, lsp, 0, 0);
    if (rc) {
       if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED) {
          fprintf (stderr, "Failed to create Telemetry Host-Initiated data, 0x%x\n", rc);
@@ -1134,21 +1128,6 @@ retry:
       return 0;
    }
 
-   /* Get controller max transfer size */
-   memset(&uioXferSize, 0, sizeof(uioXferSize));
-   rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_MAX_XFER_LEN, &uioXferSize);
-   if (rc || uioXferSize.status) {
-      fprintf (stderr, "Failed to get max transfer size.\n");
-      close(fd);
-      if (rc) {
-         return rc;
-      } else {
-         return uioXferSize.status;
-      }
-   }
-   maxXferSize = (uioXferSize.length / NVME_TELEMETRY_DATA_BLK_SIZE) *
-                  NVME_TELEMETRY_DATA_BLK_SIZE;
-
    if ((telemetryLog = (vmk_NvmeTelemetryEntry *)malloc(
                         sizeof(vmk_NvmeTelemetryEntry) + size)) == NULL) {
       fprintf(stderr, "ERROR: Failed to malloc %d bytes.\n", size);
@@ -1159,30 +1138,15 @@ retry:
       return -ENOMEM;
    }
 
-   for (offset = 0; offset < size; offset += maxXferSize) {
-      xferSize = ((size-offset) >= maxXferSize) ? maxXferSize : (size-offset);
-
-      memset(&uio, 0, sizeof(uio));
-      numd = xferSize / 4 - 1;
-      uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
-      uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
-      uio.direction = XFER_FROM_DEV;
-      uio.timeoutUs = ADMIN_TIMEOUT;
-      uio.cmd.getLogPage.cdw10.lid = lid;
-      uio.cmd.getLogPage.cdw10.rae = 1;
-      uio.cmd.getLogPage.cdw10.numdl = (vmk_uint16)(numd & 0xffff);
-      uio.cmd.getLogPage.cdw11.numdu = (vmk_uint16)((numd >> 16) & 0xffff);
-      uio.cmd.getLogPage.lpo = offset + sizeof(vmk_NvmeTelemetryEntry);
-      uio.addr = (vmk_uintptr_t)(&telemetryLog->dataBlocks[offset]);
-      uio.length = xferSize;
-
-      rc = Nvme_AdminPassthru(handle, &uio);
-      if (rc) {
-         /* Failed to execute get telemetry log command. */
-         free(telemetryLog);
-         close(fd);
-         return rc;
-      }
+   rc = Nvme_GetLogPage(handle, lid, VMK_NVME_DEFAULT_NSID,
+                        telemetryLog->dataBlocks, size,
+                        sizeof(vmk_NvmeTelemetryEntry), 1, 0, 0, 0);
+   if (rc) {
+      /* Failed to execute get telemetry log command. */
+      fprintf(stderr, "ERROR: Failed to get telemetry log.\n");
+      free(telemetryLog);
+      close(fd);
+      return rc;
    }
 
    if (write(fd, (void *)telemetryLog->dataBlocks, size) != size) {
@@ -1203,18 +1167,8 @@ retry:
     * matches the original value read.
     */
    if (lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
-      memset(&uio, 0, sizeof(uio));
-      uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
-      uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
-      uio.direction = XFER_FROM_DEV;
-      uio.timeoutUs = ADMIN_TIMEOUT;
-      uio.cmd.getLogPage.cdw10.lid = lid;
-      uio.cmd.getLogPage.cdw10.numdl = sizeof(vmk_NvmeTelemetryEntry) / 4 - 1;
-      uio.cmd.getLogPage.cdw10.rae = 1;
-      uio.cmd.getLogPage.lpo = 0;
-      uio.length = sizeof(vmk_NvmeTelemetryEntry);
-      uio.addr = (vmk_uintptr_t)&telemetryEntry;
-      rc = Nvme_AdminPassthru(handle, &uio);
+      rc = Nvme_GetLogPage(handle, lid, VMK_NVME_DEFAULT_NSID, &telemetryEntry,
+                           sizeof(vmk_NvmeTelemetryEntry), 0, 1, 0, 0, 0);
       if (rc) {
          fprintf (stderr, "Failed to get"
                   " Data Generation Number after data collection is done.\n");
@@ -1248,8 +1202,7 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
 
    int fd;
    int rc = -1;
-   NvmeUserIo uio;
-   vmk_uint32 offset, size, xferSize, maxXferSize, numd;
+   vmk_uint32 offset, size;
    nvme_persistent_event_log_header logHeader;
    vmk_uint8 *logData = NULL;
 
@@ -1260,33 +1213,9 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
       return -EINVAL;
    }
 
-   memset(&uio, 0, sizeof(uio));
-   rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_MAX_XFER_LEN, &uio);
-   if (rc || uio.status) {
-      fprintf (stderr, "Failed to get max transfer size.\n");
-      if (rc) {
-         return rc;
-      } else {
-         return uio.status;
-      }
-   }
-   maxXferSize = uio.length;
-
-   memset(&logHeader, 0, sizeof(logHeader));
-   memset(&uio, 0, sizeof(uio));
-   numd = sizeof(logHeader) / 4 - 1;
-   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
-   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
-   uio.direction = XFER_NO_DATA;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getLogPage.cdw10.lid = NVME_LID_PERSISTENT_EVENT;
-   uio.cmd.getLogPage.cdw10.lsp = action;
-   uio.direction = XFER_FROM_DEV;
-   uio.cmd.getLogPage.cdw10.numdl = (vmk_uint16)(numd & 0xffff);
-   uio.cmd.getLogPage.cdw11.numdu = (vmk_uint16)((numd >> 16) & 0xffff);
-   uio.length = sizeof(logHeader);
-   uio.addr = (vmk_uintptr_t)&logHeader;
-   rc = Nvme_AdminPassthru(handle, &uio);
+   rc = Nvme_GetLogPage(handle, NVME_LID_PERSISTENT_EVENT,
+                        VMK_NVME_DEFAULT_NSID, &logHeader,
+                        sizeof(logHeader), 0, 0, action, 0, 0);
    if (rc) {
       fprintf (stderr, "Failed to fetch persistent event log header, 0x%x.\n", rc);
       return rc;
@@ -1313,48 +1242,95 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
    }
    size = logHeader.tll - sizeof(logHeader);
    offset = sizeof(logHeader);
-   xferSize = (size > maxXferSize) ? maxXferSize: size;
-   logData = malloc(xferSize);
+   logData = malloc(size);
    if (logData == NULL) {
       fprintf(stderr, "ERROR: Failed to allocate data buffer.\n");
       close(fd);
       return -ENOMEM;
    }
+
+   memset(logData, 0, size);
+   rc = Nvme_GetLogPage(handle, NVME_LID_PERSISTENT_EVENT,
+                        VMK_NVME_DEFAULT_NSID, logData, size,
+                        offset, 0, NVME_PEL_ACTION_READ, 0, 0);
+   if (rc) {
+      fprintf (stderr, "Failed to fetch persistent event log at size %d, status 0x%x.\n",
+               size, rc);
+      free(logData);
+      close(fd);
+      return rc;
+   }
+
+   if (write(fd, (void *)logData, size) != size) {
+      fprintf(stderr, "ERROR: Failed to write telemetry log size %d.\n", size);
+      rc = -EIO;
+   }
+
+   free(logData);
+   close(fd);
+   return rc;
+}
+
+int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid, void *logData,
+                    int dataLen, vmk_uint64 offset, int rae, int lsp, int lsi, int uuid)
+{
+   int rc = -1;
+   NvmeUserIo uio;
+   vmk_uint64 xferOffset;
+   vmk_uint32 xferSize, maxXferSize, numd, size;
+
+   if (dataLen % 4) {
+      fprintf (stderr, "The data length should be a multiple of 4.\n");
+      return -EINVAL;
+   }
+
+   if (dataLen <= 4096) {
+      maxXferSize = 4096;
+   } else {
+      memset(&uio, 0, sizeof(uio));
+      rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_MAX_XFER_LEN, &uio);
+      if (rc || uio.status) {
+         fprintf (stderr, "Failed to get max transfer size.\n");
+         if (rc) {
+            return rc;
+         } else {
+            return uio.status;
+         }
+      }
+      maxXferSize = uio.length;
+   }
+
+   memset(logData, 0, dataLen);
+   xferOffset = 0;
+   size = dataLen;
    while (size > 0) {
       xferSize = (size > maxXferSize) ? maxXferSize: size;
       memset(&uio, 0, sizeof(uio));
-      memset(logData, 0, xferSize);
       numd = xferSize / 4 - 1;
       uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
-      uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
+      uio.cmd.getLogPage.nsid = nsid;
       uio.direction = XFER_FROM_DEV;
       uio.timeoutUs = ADMIN_TIMEOUT;
-      uio.cmd.getLogPage.cdw10.lid = NVME_LID_PERSISTENT_EVENT;
+      uio.cmd.getLogPage.cdw10.lid = lid;
       uio.cmd.getLogPage.cdw10.numdl = (vmk_uint16)(numd & 0xffff);
       uio.cmd.getLogPage.cdw11.numdu = (vmk_uint16)((numd >> 16) & 0xffff);
-      uio.cmd.getLogPage.cdw10.lsp = NVME_PEL_ACTION_READ;
-      uio.cmd.getLogPage.lpo = offset;
+      uio.cmd.getLogPage.cdw10.lsp = lsp;
+      uio.cmd.getLogPage.cdw10.rae = rae;
+      uio.cmd.getLogPage.cdw11.lsi = lsi;
+      uio.cmd.getLogPage.cdw14.uuid = uuid;
+      uio.cmd.getLogPage.lpo = offset + xferOffset;
       uio.length = xferSize;
-      uio.addr = (vmk_uintptr_t)logData;
+      uio.addr = (vmk_uintptr_t)(logData + xferOffset);
       rc = Nvme_AdminPassthru(handle, &uio);
       if (rc) {
-         fprintf (stderr, "Failed to fetch persistent event log at offset 0x%x, size %d, status 0x%x.\n",
-                  offset, xferSize, rc);
-         break;
-      }
-      if (write(fd, (void *)logData, xferSize) != xferSize) {
-         fprintf(stderr, "ERROR: Failed to write telemetry log at offset 0x%x, size %d.\n",
-                 offset, xferSize);
-         rc = -EIO;
+         fprintf (stderr, "Failed to fetch log %d at offset 0x%lx, "
+                  "size %d, status 0x%x.\n",
+                  lid, offset + xferOffset, xferSize, rc);
          break;
       }
       size = size - xferSize;
-      offset = offset + xferSize;
+      xferOffset = xferOffset + xferSize;
    }
 
-   if (logData != NULL) {
-      free(logData);
-   }
-   close(fd);
    return rc;
 }

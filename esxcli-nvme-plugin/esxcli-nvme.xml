@@ -500,6 +500,48 @@
          </format-parameters>
 	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.format -A $val{adapter} -n $val{namespace} -f $val{format} -s $val{ses} -p $val{pi} -l $val{pil} -m $val{ms}</execute>
       </command>
+      <command path="nvme.device.log.get">
+         <description>Get NVMe log page</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="lid" type="string" required="true" shortname="i">
+               <description>Log page ID. Both decimal number and hexadecimal number are accepted. Hexadecimal number should start with '0x' or '0X'.</description>
+            </parameter>
+            <parameter name="length" type="int" required="true" shortname="l">
+               <description>Log page length.</description>
+            </parameter>
+            <parameter name="offset" type="int" required="false" shortname="o">
+               <description>Log page offset. The default value is 0.</description>
+            </parameter>
+            <parameter name="namespace" type="int" required="false" shortname="n">
+               <description>Namespace ID. The default value is 0xFFFFFFFF.</description>
+            </parameter>
+            <parameter name="rae" type="int" required="false" shortname="r">
+               <description>Retain asynchronous event. The default value is 0.</description>
+            </parameter>
+            <parameter name="lsp" type="int" required="false" shortname="s">
+               <description>Log specific field. The default value is 0.</description>
+            </parameter>
+            <parameter name="lsi" type="int" required="false" shortname="I">
+               <description>Log specific ID. The default value is 0.</description>
+            </parameter>
+            <parameter name="uuid" type="int" required="false" shortname="u">
+               <description>UUID index. The default value is 0.</description>
+            </parameter>
+            <parameter name="path" type="string" required="false" shortname="p">
+               <description>Log path. If set, the raw log data will be wrote to the specified file. If not set, the log data will be printed in hex format.</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i $val{lid} -l $val{length} -b 0 $if{offset, -o $val{offset}} $if{namespace, -n $val{namespace}} $if{rae, -n $val{rae}} $if{lsp, -s $val{lsp}} $if{lsi, -I $val{lsi}} $if{uuid, -u $val{uuid}} $if{path, -p $val{path}}</execute>
+      </command>
       <command path="nvme.device.log.error.get">
          <description>Get NVMe device error log information</description>
          <input-spec>
@@ -530,7 +572,7 @@
             <format-parameter name="header:ErrorInfo">Error Info:</format-parameter>
             <format-parameter name="fields:ErrorInfo">Error Count,Submission Queue ID,Command ID,Status Field,Byte in Command That Contained the Error,Bit in Command That Contained the Error,LBA,Namespace,Vendor Specific Information Available</format-parameter>
          </format-parameters>
-            <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 1 -e $val{elpe}</execute>
+            <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i 1 -b 1 -e $val{elpe}</execute>
       </command>
       <command path="nvme.device.log.smart.get">
          <description>Get NVMe device SMART log information</description>
@@ -594,7 +636,7 @@
             <format-parameter name="units:SMARTInfo.Temperature Sensor 7">K</format-parameter>
             <format-parameter name="units:SMARTInfo.Temperature Sensor 8">K</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 2 $if{namespace,-n $val{namespace}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i 2 -b 1 $if{namespace,-n $val{namespace}}</execute>
       </command>
       <command path="nvme.device.log.fwslot.get">
          <description>Get NVMe device firmware slot log information</description>
@@ -621,7 +663,7 @@
             <format-parameter name="header:FirmwareSlotInfo">Firmware Slot Info:</format-parameter>
             <format-parameter name="fields:FirmwareSlotInfo">Firmware Slot to Be Activated at Next Controller Reset,Firmware Slot Being Activated,Firmware Revision for Slot 1,Firmware Revision for Slot 2,Firmware Revision for Slot 3,Firmware Revision for Slot 4,Firmware Revision for Slot 5,Firmware Revision for Slot 6,Firmware Revision for Slot 7</format-parameter>
          </format-parameters>
-            <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 3</execute>
+            <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i 3 -b 1</execute>
       </command>
       <command path="nvme.device.log.telemetry.host.get">
          <description>Get NVMe telemetry host-initiated data</description>
@@ -643,7 +685,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 7 -p $val{path} $if{data, -d $val{data}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i 7 -b 1 -p $val{path} $if{data, -d $val{data}}</execute>
       </command>
       <command path="nvme.device.log.telemetry.controller.get">
          <description>Get NVMe telemetry controller-initiated data</description>
@@ -665,7 +707,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 8 -p $val{path} $if{data, -d $val{data}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i 8 -b 1 -p $val{path} $if{data, -d $val{data}}</execute>
       </command>
       <command path="nvme.device.log.persistentevent.get">
          <description>Get NVMe persistent event log</description>
@@ -686,7 +728,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 13 -a $val{action} $if{path, -p $val{path}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i 0xd -b 1 -s $val{action} $if{path, -p $val{path}}</execute>
       </command>
       <command path="nvme.device.feature.cap">
          <description>Get NVMe device feature supported capabilities information</description>

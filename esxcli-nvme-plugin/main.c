@@ -437,6 +437,38 @@ PrintFwSlotLog(vmk_NvmeFirmwareSlotInfo *fwSlotLog)
    esxcli_xml_end_output();
 }
 
+static void
+PrintHex(void *data, int len)
+{
+   int i, m, t;
+   vmk_uint8 *p = (vmk_uint8*)data;
+
+   m = len/16*16;
+   if (m == len) {
+      m = m - 16;
+   }
+   t = len - m;
+   esxcli_xml_begin_output();
+   xml_list_begin("string");
+   printf("<string>");
+   for (i = 0; i < m; i +=16) {
+      printf("%04x    %02x %02x %02x %02x %02x %02x %02x %02x "
+             "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+             i, p[i], p[i + 1], p[i + 2], p[i + 3],
+             p[i + 4], p[i + 5], p[i + 6], p[i + 7],
+             p[i + 8], p[i + 9], p[i + 10], p[i + 11],
+             p[i + 12], p[i + 13], p[i + 14], p[i + 15]);
+   }
+   printf("%04x    ", i);
+   for (i = m; i < len - 1; i ++) {
+      printf("%02x ", p[i]);
+   }
+   printf("%02x", p[i]);
+   printf("</string>");
+   xml_list_end();
+   esxcli_xml_end_output();
+}
+
 /**
  * Get the device name via runtime name.
  *
@@ -585,6 +617,42 @@ htoi(const char* str, int *value)
          return -1;
       }
       tmp = (tmp << 4) | (v & 0xf);
+      i = i + 1;
+   }
+   *value = tmp;
+   return 0;
+}
+
+/**
+ * Convert string to integer.
+ *
+ * @param [in] str
+ * @param [out] value
+ *
+ * @retval return 0 when successful.
+ *         return -1 for failure cases, e.g. input string has illegal characters.
+ */
+static int
+stoi(const char* str, int *value)
+{
+   int i = 0;
+   int n = 0;
+   int tmp = 0;
+
+   if (str == NULL || value == NULL) {
+      return -1;
+   }
+
+   n = strlen(str);
+   if (n > 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+      return htoi(str, value);
+   }
+
+   while (i < n) {
+      if (str[i] < '0' || str[i] > '9') {
+         return -1;
+      }
+      tmp = tmp * 10 + (str[i] - '0');
       i = i + 1;
    }
    *value = tmp;
@@ -2201,36 +2269,51 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
 {
    int ch;
    char *vmhba = NULL;
+   char *lidStr = NULL;
+   int  lid = 0;
+   int  nsId = VMK_NVME_DEFAULT_NSID;
+   int  elpe = 0;
+   int  dataArea = 0;
+   int  lsp = 0;
+   int  lsi = 0;
+   int  offset = 0;
+   int  rae = 0;
+   int  dataLen = 0;
+   int  builtin = 0;
+   int  uuid = 0;
    char *logPath = NULL;
-   int  lid = -1;
-   int  nsId = -1;
-   int  elpe = -1;
-   int  dataArea = -1;
-   int  action = -1;
+   BOOL setLid = 0;
    BOOL setNsid = 0;
    BOOL setElpe = 0;
    BOOL setDataarea = 0;
+   BOOL setLsp = 0;
+   BOOL setLsi = 0;
+   BOOL setOffset = 0;
+   BOOL setRae = 0;
+   BOOL setDataLen = 0;
+   BOOL setBuiltin = 0;
+   BOOL setUUID = 0;
    BOOL setLogPath = 0;
-   BOOL setAction = 0;
    int  i, rc;
    struct nvme_adapter_list    list;
    struct nvme_handle          *handle;
    vmk_NvmeIdentifyController  *idCtrlr;
-   NvmeUserIo uio;
    int maxErrorLogEntries;
    union {
       vmk_NvmeErrorInfoLogEntry errLog[MAX_ERROR_LOG_ENTRIES];
       vmk_NvmeSmartInfoEntry smartLog;
       vmk_NvmeFirmwareSlotInfo fwSlotLog;
    } log;
+   vmk_uint8 *logData = NULL;
 
-   while ((ch = getopt(argc, (char *const*)argv, "A:l:n:e:d:a:p:")) != -1) {
+   while ((ch = getopt(argc, (char *const*)argv, "A:i:n:e:d:s:I:o:r:l:b:u:p:")) != -1) {
       switch (ch) {
          case 'A':
             vmhba = optarg;
             break;
-         case 'l':
-            lid = atoi(optarg);
+         case 'i':
+            lidStr = optarg;
+            setLid = 1;
             break;
          case 'n':
             nsId = atoi(optarg);
@@ -2244,13 +2327,37 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
             dataArea = atoi(optarg);
             setDataarea = 1;
             break;
+         case 's':
+            lsp = atoi(optarg);
+            setLsp = 1;
+            break;
+         case 'I':
+            lsi = atoi(optarg);
+            setLsi = 1;
+            break;
+         case 'o':
+            offset = atoi(optarg);
+            setOffset = 1;
+            break;
+         case 'r':
+            rae = atoi(optarg);
+            setRae = 1;
+            break;
+         case 'l':
+            dataLen = atoi(optarg);
+            setDataLen = 1;
+            break;
+         case 'b':
+            builtin = atoi(optarg);
+            setBuiltin = 1;
+            break;
+         case 'u':
+            builtin = atoi(optarg);
+            setUUID = 1;
+            break;
          case 'p':
             logPath = optarg;
             setLogPath = 1;
-            break;
-         case 'a':
-            action = atoi(optarg);
-            setAction = 1;
             break;
          default:
             Error("Invalid parameter.");
@@ -2258,22 +2365,58 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       }
    }
 
+   /* Check required parameters: vmhba, lid, builtin.*/
    if (vmhba == NULL) {
       Error("Adapter is NULL.");
       return;
    }
 
-   switch (lid) {
-      case VMK_NVME_LID_ERROR_INFO:
-      case VMK_NVME_LID_SMART_HEALTH:
-      case VMK_NVME_LID_FW_SLOT:
-      case VMK_NVME_LID_TELEMETRY_HOST_INITIATED:
-      case VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED:
-      case NVME_LID_PERSISTENT_EVENT:
-         break;
-      default:
-         Error("Not supported log type %d.", lid);
+   if (!setLid) {
+      Error("Missing required parameter -i.");
+      return;
+   } else {
+      rc = stoi(lidStr, &lid);
+      if (rc) {
+         Error("Invalid log page ID %s.", lidStr);
          return;
+      }
+      if (lid > 0xff) {
+         Error("Invalid log page ID 0x%x.", lid);
+         return;
+      }
+   }
+
+   if (!setBuiltin) {
+      Error("Missing required parameter -b.");
+      return;
+   } else if (builtin != 0 && builtin != 1) {
+      Error("Invalid paramter -b.");
+      return;
+   }
+
+   if (builtin) {
+      /* For builtin logs, Check check supported log IDs.*/
+      switch (lid) {
+         case VMK_NVME_LID_ERROR_INFO:
+         case VMK_NVME_LID_SMART_HEALTH:
+         case VMK_NVME_LID_FW_SLOT:
+         case VMK_NVME_LID_TELEMETRY_HOST_INITIATED:
+         case VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED:
+         case NVME_LID_PERSISTENT_EVENT:
+            break;
+         default:
+            Error("Not supported log type %d.", lid);
+            return;
+      }
+   } else {
+      /* For non-builtin logs, Check required parameters: datalen.*/
+      if (!setDataLen) {
+         Error("Missing required parameter -l.");
+         return;
+      } else if (dataLen <= 0) {
+         Error("Invalid parameter -l.");
+         return;
+      }
    }
 
    rc = Nvme_GetAdapterList(&list);
@@ -2286,6 +2429,35 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
    if (handle == NULL) {
       Error("Failed to open device.");
       return;
+   }
+
+   if (!builtin) {
+      logData = malloc(dataLen);
+      if (logData == NULL) {
+         Error("Failed to get log page, 0x%x", -ENOMEM);
+         goto out;
+      }
+      rc = Nvme_GetLogPage(handle, lid, nsId, logData, dataLen, offset, rae, lsp, lsi, uuid);
+      if (rc) {
+         Error("Failed to get log page, 0x%x", rc);
+      } else {
+         if (setLogPath) {
+            rc = Nvme_WriteRawDataToFile(logData, dataLen, logPath);
+            if (rc) {
+               Error("Failed to write log page, 0x%x", rc);
+            } else {
+               esxcli_xml_begin_output();
+               xml_list_begin("string");
+               printf("<string>Download log successfully.</string>");
+               xml_list_end();
+               esxcli_xml_end_output();
+            }
+         } else {
+            PrintHex(logData, dataLen);
+         }
+      }
+      free(logData);
+      goto out;
    }
 
    idCtrlr = malloc(sizeof(*idCtrlr));
@@ -2386,16 +2558,16 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
    }
 
    if (lid == NVME_LID_PERSISTENT_EVENT) {
-      if (!setAction) {
-         Error("Missing required parameter -a when using -l %d", lid);
+      if (!setLsp) {
+         Error("Missing required parameter -s when using -l %d", lid);
          goto out_free;
       }
-      if (action > NVME_PEL_ACTION_RELEASE) {
-         Error("Invalid action %d", action);
+      if (lsp > NVME_PEL_ACTION_RELEASE) {
+         Error("Invalid action %d", lsp);
          goto out_free;
       }
-      if (action != NVME_PEL_ACTION_RELEASE && !setLogPath) {
-         Error("Missing required parameter -p when using -l %d -a %d", lid, action);
+      if (lsp != NVME_PEL_ACTION_RELEASE && !setLogPath) {
+         Error("Missing required parameter -p when using -l %d -a %d", lid, lsp);
          goto out_free;
       }
    }
@@ -2418,13 +2590,13 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
 
    /* Get persistent event log.*/
    if (lid == NVME_LID_PERSISTENT_EVENT) {
-      rc = Nvme_GetPersistentEventLog(handle, logPath, action);
+      rc = Nvme_GetPersistentEventLog(handle, logPath, lsp);
       if (rc) {
          Error("Failed to get persistent event log, 0x%x.", rc);
       } else {
          esxcli_xml_begin_output();
          xml_list_begin("string");
-         if (action == NVME_PEL_ACTION_RELEASE) {
+         if (lsp == NVME_PEL_ACTION_RELEASE) {
             printf("<string>Release persistent event log reporting context successfully.</string>");
          } else {
             printf("<string>Download persistent event log successfully.</string>");
@@ -2436,40 +2608,26 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
    }
 
    /* Get error, smart or firmware log. */
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
-   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getLogPage.cdw10.lid = lid;
-
    switch (lid)
    {
       case VMK_NVME_LID_ERROR_INFO:
-         uio.cmd.getLogPage.cdw10.numdl =
-             sizeof(vmk_NvmeErrorInfoLogEntry) * elpe / 4 - 1;
-         uio.length = sizeof(vmk_NvmeErrorInfoLogEntry) * elpe;
-         uio.addr = (vmk_uintptr_t)&log.errLog;
+         logData = (vmk_uint8 *)&log.errLog;
+         dataLen = sizeof(vmk_NvmeErrorInfoLogEntry) * elpe;
          break;
       case VMK_NVME_LID_SMART_HEALTH:
-         uio.cmd.getLogPage.nsid = nsId;
-         uio.cmd.getLogPage.cdw10.numdl =
-             sizeof(vmk_NvmeSmartInfoEntry) / 4 -1;
-         uio.length = sizeof(vmk_NvmeSmartInfoEntry);
-         uio.addr = (vmk_uintptr_t)&log.smartLog;
+         logData = (vmk_uint8 *)&log.smartLog;
+         dataLen = sizeof(vmk_NvmeSmartInfoEntry);
          break;
       case VMK_NVME_LID_FW_SLOT:
-         uio.cmd.getLogPage.cdw10.numdl =
-             sizeof(vmk_NvmeFirmwareSlotInfo) / 4 - 1;
-         uio.length = sizeof(vmk_NvmeFirmwareSlotInfo);
-         uio.addr = (vmk_uintptr_t)&log.fwSlotLog;
+         logData = (vmk_uint8 *)&log.fwSlotLog;
+         dataLen = sizeof(vmk_NvmeFirmwareSlotInfo);
          break;
       default:
          Error("Invalid parameter.");
          goto out_free;
    }
 
-   rc = Nvme_AdminPassthru(handle, &uio);
+   rc = Nvme_GetLogPage(handle, lid, nsId, logData, dataLen, 0, 0, 0, 0, 0);
 
    if (rc) {
       Error("Failed to get log info, %s.", strerror(rc));
