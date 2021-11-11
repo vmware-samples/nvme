@@ -1,12 +1,11 @@
 /*********************************************************************************
- * Copyright (c) 2013, 2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2013-2020 VMware, Inc. All rights reserved.
  * ******************************************************************************/
 
 #ifndef _NVME_LIB_H
 #define _NVME_LIB_H
 
-#include <nvme.h>
-#include <nvme_mgmt.h>
+#include "nvme_mgmt.h"
 
 /**
  * Command timeout in microseconds
@@ -40,9 +39,6 @@
 #define NVME_FIRMWARE_ACTIVATE_ACTION_ACT_NORESET  3
 #define NVME_FIRMWARE_ACTIVATE_ACTION_RESERVED     4
 
-#define NS_OFFLINE     0x0
-#define NS_ONLINE      0x1
-
 #define NS_UNALLOCATED 0x0
 #define NS_ALLOCATED   0x1
 #define NS_INACTIVE    0x2
@@ -52,10 +48,18 @@
  * Adapter instance list
  */
 struct nvme_adapter_list {
-   vmk_uint32             count;
-   struct nvmeAdapterInfo adapters[NVME_MAX_ADAPTERS];
+   vmk_uint32 count;
+   NvmeAdapterInfo adapters[NVME_MGMT_MAX_ADAPTERS];
 };
 
+struct nvme_ctrlr_list {
+   vmk_uint16 ctrlrId[2048];
+};
+
+/* Mulitple namesapce management */
+struct nvme_ns_list {
+   vmk_uint32 nsId[1024];
+};
 
 /**
  * Device handle
@@ -120,16 +124,16 @@ int
 Nvme_GetAdapterList(struct nvme_adapter_list *list);
 
 int
-Nvme_AdminPassthru(struct nvme_handle *handle, struct usr_io *uio);
+Nvme_AdminPassthru(struct nvme_handle *handle, NvmeUserIo *uio);
 
 int
-Nvme_AdminPassthru_error(struct nvme_handle *handle, int cmd, struct usr_io *uio);
+Nvme_AdminPassthru_error(struct nvme_handle *handle, int cmd, NvmeUserIo *uio);
 
 int
 Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, int nsId, void *id);
 
 int
-Nvme_Ioctl(struct nvme_handle *handle, int cmd, struct usr_io *uio);
+Nvme_Ioctl(struct nvme_handle *handle, int cmd, NvmeUserIo *uio);
 
 int Nvme_FormatNvm(struct nvme_handle *handle,
                    int ses,
@@ -161,7 +165,8 @@ int
 Nvme_AttachedNsId(struct nvme_handle *handle, int nsId);
 
 int
-Nvme_NsMgmtCreate(struct nvme_handle *handle, struct iden_namespace *idNs, int *cmdStatus);
+Nvme_NsMgmtCreate(struct nvme_handle *handle, vmk_NvmeIdentifyNamespace *idNs,
+                  int *cmdStatus);
 
 int
 Nvme_NsMgmtDelete(struct nvme_handle *handle, int nsId);
@@ -182,7 +187,7 @@ int
 Nvme_NsAttach(struct nvme_handle *handle,
               int sel,
               int nsId,
-              struct ctrlr_list *ctrlrList,
+              struct nvme_ctrlr_list *ctrlrList,
               int *cmdStatus);
 
 int

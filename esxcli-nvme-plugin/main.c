@@ -117,7 +117,7 @@ refineASCIIString(char *p, int len)
 }
 
 static void
-PrintIdentifyCtrlr(struct iden_controller *id)
+PrintIdentifyCtrlr(vmk_NvmeIdentifyController *id)
 {
    char* hexdumpbuff;
    char* readablebuff;
@@ -127,105 +127,135 @@ PrintIdentifyCtrlr(struct iden_controller *id)
 
    esxcli_xml_begin_output();
    xml_struct_begin("DeviceInfo");
-   PINTS("PCIVID", id->pcieVID);
-   PINTS("PCISSVID", id->pcieSSVID);
+   PINTS("PCIVID", id->vid);
+   PINTS("PCISSVID", id->ssvid);
    xml_field_begin("Serial Number");
-   printf("<string>%.20s</string>", id->serialNum);
+   printf("<string>%.20s</string>", id->sn);
    xml_field_end();
    xml_field_begin("Model Number");
-   printf("<string>%.40s</string>", id->modelNum);
+   printf("<string>%.40s</string>", id->mn);
    xml_field_end();
    xml_field_begin("Firmware Revision");
-   printf("<string>%.8s</string>", id->firmwareRev);
+   printf("<string>%.8s</string>", id->fr);
    xml_field_end();
-   PINT("Recommended Arbitration Burst", id->arbBurstSize);
+   PINT("Recommended Arbitration Burst", id->rab);
    xml_field_begin("IEEE OUI Identifier");
-   printf("<string>%02x%02x%02x</string>", id->ieeeOui[2], id->ieeeOui[1],
-          id->ieeeOui[0]);
+   printf("<string>%02x%02x%02x</string>", id->ieee[2], id->ieee[1],
+          id->ieee[0]);
    xml_field_end();
-   PBOOL("Controller Associated with an SR-IOV Virtual Function", id->cmic.sriov);
-   PBOOL("Controller Associated with a PCI Function", !id->cmic.sriov);
-   PBOOL("NVM Subsystem May Contain Two or More Controllers", id->cmic.mulCtrlrs);
-   PBOOL("NVM Subsystem Contains Only One Controller", !id->cmic.mulCtrlrs);
-   PBOOL("NVM Subsystem May Contain Two or More PCIe Ports", id->cmic.mulPorts);
-   PBOOL("NVM Subsystem Contains Only One PCIe Port", !id->cmic.mulPorts);
+   PBOOL("Controller Associated with an SR-IOV Virtual Function",
+         id->cmic & VMK_NVME_CTLR_IDENT_CMIC_SRIOV);
+   PBOOL("Controller Associated with a PCI Function",
+         !(id->cmic & VMK_NVME_CTLR_IDENT_CMIC_SRIOV));
+   PBOOL("NVM Subsystem May Contain Two or More Controllers",
+         id->cmic & VMK_NVME_CTLR_IDENT_CMIC_MH);
+   PBOOL("NVM Subsystem Contains Only One Controller",
+         !(id->cmic & VMK_NVME_CTLR_IDENT_CMIC_MH));
+   PBOOL("NVM Subsystem May Contain Two or More PCIe Ports",
+         id->cmic & VMK_NVME_CTLR_IDENT_CMIC_MP);
+   PBOOL("NVM Subsystem Contains Only One PCIe Port",
+         !(id->cmic & VMK_NVME_CTLR_IDENT_CMIC_MP));
    PINT("Max Data Transfer Size", id->mdts);
-   PINT("Controller ID", id->cntlId);
+   PINT("Controller ID", id->cntlid);
    xml_field_begin("Version");
    printf("<string>%d.%d</string>", id->ver.mjr, id->ver.mnr);
    xml_field_end();
    PINT("RTD3 Resume Latency", id->rtd3r);
    PINT("RTD3 Entry Latency", id->rtd3e);
-   PBOOL("Optional Firmware Activation Event Support", id->oaes.fwActEvent);
-   PBOOL("Optional Namespace Attribute Changed Event Support", id->oaes.nsChgEvent);
-   PBOOL("Host Identifier Support", id->ctratt.hostId);
-   PBOOL("Namespace Management and Attachment Support", id->adminCmdSup & 0x8);
-   PBOOL("Firmware Activate and Download Support", id->adminCmdSup & 0x4);
-   PBOOL("Format NVM Support", id->adminCmdSup & 0x2);
-   PBOOL("Security Send and Receive Support", id->adminCmdSup & 0x1);
-   PINT("Abort Command Limit", id->abortCmdLmt);
-   PINT("Async Event Request Limit", id->asyncReqLmt);
-   PBOOL("Firmware Activate Without Reset Support", id->firmUpdt & 0x10);
-   PINT("Firmware Slot Number", (id->firmUpdt & 0xe) >> 1);
-   PBOOL("The First Slot Is Read-only", id->firmUpdt & 0x1);
-   PBOOL("Command Effects Log Page Support", id->logPgAttrib & 0x2);
+   PBOOL("Optional Firmware Activation Event Support",
+         id->oaes & VMK_NVME_CTLR_IDENT_OAES_FW_ACTIVATE);
+   PBOOL("Optional Namespace Attribute Changed Event Support",
+         id->oaes & VMK_NVME_CTLR_IDENT_OAES_NS_ATTRIBUTE);
+   PBOOL("Host Identifier Support",
+         id->ctratt & VMK_NVME_CTLR_IDENT_CTRATT_HOST_ID);
+   PBOOL("Namespace Management and Attachment Support",
+         id->oacs & VMK_NVME_CTLR_IDENT_OACS_NS_MGMT);
+   PBOOL("Firmware Activate and Download Support",
+         id->oacs & VMK_NVME_CTLR_IDENT_OACS_FIRMWARE);
+   PBOOL("Format NVM Support",
+         id->oacs & VMK_NVME_CTLR_IDENT_OACS_FORMAT);
+   PBOOL("Security Send and Receive Support",
+         id->oacs & VMK_NVME_CTLR_IDENT_OACS_SECURITY);
+   PINT("Abort Command Limit", id->acl);
+   PINT("Async Event Request Limit", id->aerl);
+   PBOOL("Firmware Activate Without Reset Support",
+         id->frmw & VMK_NVME_CTLR_IDENT_FRMW_ACTIVATE_NO_RESET);
+   PINT("Firmware Slot Number", (id->frmw & 0xe) >> 1);
+   PBOOL("The First Slot Is Read-only",
+         id->frmw & VMK_NVME_CTLR_IDENT_FRMW_SLOT_1_RO);
+   PBOOL("Command Effects Log Page Support",
+         id->lpa & VMK_NVME_CTLR_IDENT_LPA_CMD_EFFECTS);
    PBOOL("SMART/Health Information Log Page per Namespace Support",
-         id->logPgAttrib & 0x1);
-   PINT("Error Log Page Entries", id->errLogPgEntr);
-   PINT("Number of Power States Support", id->numPowerSt);
-   PBOOL("Format of Admin Vendor Specific Commands Is Same", id->admVendCmdCfg & 0x1);
+         id->lpa & VMK_NVME_CTLR_IDENT_LPA_SMART_PER_NS);
+   PINT("Error Log Page Entries", id->elpe);
+   PINT("Number of Power States Support", id->npss);
+   PBOOL("Format of Admin Vendor Specific Commands Is Same",
+         id->avscc & VMK_NVME_CTLR_IDENT_AVSCC_STD_FMT);
    PBOOL("Format of Admin Vendor Specific Commands Is Vendor Specific",
-         (id->admVendCmdCfg & 0x1) == 0);
-   PBOOL("Autonomous Power State Transitions Support", id->apsta.autoPowerStX);
-   PINT("Warning Composite Temperature Threshold", id->wcTemp);
-   PINT("Critical Composite Temperature Threshold", id->ccTemp);
+         (id->avscc & VMK_NVME_CTLR_IDENT_AVSCC_STD_FMT) == 0);
+   PBOOL("Autonomous Power State Transitions Support", id->apsta & 0x1);
+   PINT("Warning Composite Temperature Threshold", id->wctemp);
+   PINT("Critical Composite Temperature Threshold", id->cctemp);
    PINT("Max Time for Firmware Activation", id->mtfa);
-   PINT("Host Memory Buffer Preferred Size", id->hmPre);
-   PINT("Host Memory Buffer Min Size", id->hmMin);
-   P128BIT("Total NVM Capacity", id->tNVMCap);
-   P128BIT("Unallocated NVM Capacity", id->uNVMCap);
-   PINT("Access Size", id->rpmbs.accessSize);
-   PINT("Total Size", id->rpmbs.accessSize);
-   PINT("Authentication Method", id->rpmbs.authMethod);
-   PINT("Number of RPMB Units", id->rpmbs.rpmbUnitsNum);
+   PINT("Host Memory Buffer Preferred Size", id->hmpre);
+   PINT("Host Memory Buffer Min Size", id->hmmin);
+   P128BIT("Total NVM Capacity", id->tnvmcap);
+   P128BIT("Unallocated NVM Capacity", id->unvmcap);
+   PINT("Access Size", id->rpmbs.as);
+   PINT("Total Size", id->rpmbs.ts);
+   PINT("Authentication Method", id->rpmbs.am);
+   PINT("Number of RPMB Units", id->rpmbs.nru);
    PINT("Keep Alive Support", id->kas);
-   PINT("Max Submission Queue Entry Size", 1 << ((id->subQSize & 0xf0) >> 4));
-   PINT("Required Submission Queue Entry Size", 1 << (id->subQSize & 0xf));
-   PINT("Max Completion Queue Entry Size", 1 << ((id->compQSize & 0xf0) >> 4));
-   PINT("Required Completion Queue Entry Size", 1 << (id->compQSize & 0xf));
-   PINT("Max Outstanding Commands", id->maxCmd);
-   PINT("Number of Namespaces", id->numNmspc);
-   PBOOL("Reservation Support", (id->cmdSupt & 0x20) >> 5);
-   PBOOL("Save/Select Field in Set/Get Feature Support", (id->cmdSupt & 0x10) >> 4);
-   PBOOL("Write Zeroes Command Support", (id->cmdSupt & 0x8) >> 3);
-   PBOOL("Dataset Management Command Support", (id->cmdSupt & 0x4) >> 2);
-   PBOOL("Write Uncorrectable Command Support", (id->cmdSupt & 0x2) >> 1);
-   PBOOL("Compare Command Support", id->cmdSupt & 0x1);
-   PBOOL("Fused Operation Support", id->fuseSupt & 0x1);
+   PINT("Max Submission Queue Entry Size", 1 << ((id->sqes & 0xf0) >> 4));
+   PINT("Required Submission Queue Entry Size", 1 << (id->sqes & 0xf));
+   PINT("Max Completion Queue Entry Size", 1 << ((id->cqes & 0xf0) >> 4));
+   PINT("Required Completion Queue Entry Size", 1 << (id->cqes & 0xf));
+   PINT("Max Outstanding Commands", id->maxcmd);
+   PINT("Number of Namespaces", id->nn);
+   PBOOL("Reservation Support", id->oncs & VMK_NVME_CTLR_IDENT_ONCS_RSV);
+   PBOOL("Save/Select Field in Set/Get Feature Support",
+         id->oncs & VMK_NVME_CTLR_IDENT_ONCS_SV);
+   PBOOL("Write Zeroes Command Support",
+         id->oncs & VMK_NVME_CTLR_IDENT_ONCS_WZ);
+   PBOOL("Dataset Management Command Support",
+         id->oncs & VMK_NVME_CTLR_IDENT_ONCS_DM);
+   PBOOL("Write Uncorrectable Command Support",
+         id->oncs & VMK_NVME_CTLR_IDENT_ONCS_WU);
+   PBOOL("Compare Command Support", id->oncs & VMK_NVME_CTLR_IDENT_ONCS_CMP);
+   PBOOL("Fused Operation Support", id->fuses & VMK_NVME_CTLR_IDENT_FUSES_CW);
    PBOOL("Cryptographic Erase as Part of Secure Erase Support",
-         (id->cmdAttrib & 0x4) >> 2);
+         id->fna & VMK_NVME_CTLR_IDENT_FNA_CYPER);
    PBOOL("Cryptographic Erase and User Data Erase to All Namespaces",
-         (id->cmdAttrib & 0x2) >> 1);
+         id->fna & VMK_NVME_CTLR_IDENT_FNA_SECER_ALLNS);
    PBOOL("Cryptographic Erase and User Data Erase to One Particular Namespace",
-         ((id->cmdAttrib & 0x2) >> 1) == 0);
-   PBOOL("Format Operation to All Namespaces", id->cmdAttrib & 0x1);
-   PBOOL("Format Opertaion to One Particular Namespace", (id->cmdAttrib & 0x1) == 0);
-   PBOOL("Volatile Write Cache Is Present", id->volWrCache & 0x1);
-   PINT("Atomic Write Unit Normal", id->atomWrNorm);
-   PINT("Atomic Write Unit Power Fail", id->atomWrFail);
-   PBOOL("Format of All NVM Vendor Specific Commands Is Same", id->nvmVendCmdCfg & 0x1);
+         (id->fna & VMK_NVME_CTLR_IDENT_FNA_SECER_ALLNS) == 0);
+   PBOOL("Format Operation to All Namespaces",
+         id->fna & VMK_NVME_CTLR_IDENT_FNA_FMT_ALLNS);
+   PBOOL("Format Opertaion to One Particular Namespace",
+         (id->fna & VMK_NVME_CTLR_IDENT_FNA_FMT_ALLNS) == 0);
+   PBOOL("Volatile Write Cache Is Present", id->vwc & 0x1);
+   PINT("Atomic Write Unit Normal", id->awun);
+   PINT("Atomic Write Unit Power Fail", id->awupf);
+   PBOOL("Format of All NVM Vendor Specific Commands Is Same",
+         id->nvscc & VMK_NVME_CTLR_IDENT_NVSCC_STD_FMT);
    PBOOL("Format of All NVM Vendor Specific Commands Is Vendor Specific",
-         (id->nvmVendCmdCfg & 0x1) == 0);
+         (id->nvscc & VMK_NVME_CTLR_IDENT_NVSCC_STD_FMT) == 0);
    PINT("Atomic Compare and Write Unit", id->acwu);
-   PBOOL("SGL Address Specify Offset Support", id->sgls.AddrSpcfOffSup);
-   PBOOL("MPTR Contain SGL Descriptor Support", id->sgls.useMPTRSup);
-   PBOOL("SGL Length Able to Larger than Data Amount", id->sgls.sglsLargerThanData);
-   PBOOL("SGL Length Shall Be Equal to Data Amount", (id->sgls.sglsLargerThanData == 0));
+   PBOOL("SGL Address Specify Offset Support",
+         id->sgls & VMK_NVME_CTLR_IDENT_SGLS_OFFSET_IN_ADDR);
+   PBOOL("MPTR Contain SGL Descriptor Support",
+         id->sgls & VMK_NVME_CTLR_IDENT_SGLS_MPTR_ONE_SGL);
+   PBOOL("SGL Length Able to Larger than Data Amount",
+         id->sgls & VMK_NVME_CTLR_IDENT_SGLS_LARGER_SGL);
+   PBOOL("SGL Length Shall Be Equal to Data Amount",
+         (id->sgls & VMK_NVME_CTLR_IDENT_SGLS_LARGER_SGL) == 0);
    PBOOL("Byte Aligned Contiguous Physical Buffer of Metadata Support",
-         id->sgls.byteAlignedContPhyBufSup);
-   PBOOL("SGL Bit Bucket Descriptor Support", id->sgls.sglsBitBuckDescSup);
-   PBOOL("SGL Keyed SGL Data Block Descriptor Support", id->sgls.keyedSglDataBlockDescSup);
-   PBOOL("SGL for NVM Command Set Support", id->sgls.sglsSup);
+         id->sgls & VMK_NVME_CTLR_IDENT_SGLS_MPTR_BYTE_ALIGN);
+   PBOOL("SGL Bit Bucket Descriptor Support",
+         id->sgls & VMK_NVME_CTLR_IDENT_SGLS_BIT_BUCKET);
+   PBOOL("SGL Keyed SGL Data Block Descriptor Support",
+         id->sgls & VMK_NVME_CTLR_IDENT_SGLS_KEYED_SGL);
+   PBOOL("SGL for NVM Command Set Support", id->sgls & 0x1);
 
    readbufflen = sizeof(id->subnqn) + 64;
    readablebuff = malloc(readbufflen);
@@ -256,65 +286,74 @@ PrintIdentifyCtrlr(struct iden_controller *id)
 }
 
 static void
-PrintIdentifyNs(struct iden_namespace *idNs)
+PrintIdentifyNs(vmk_NvmeIdentifyNamespace *idNs)
 {
    int lbaIndex;
    esxcli_xml_begin_output();
    xml_struct_begin("NamespaceInfo");
-   PULL("Namespace Size", idNs->size);
-   PULL("Namespace Capacity", idNs->capacity);
-   PULL("Namespace Utilization", idNs->utilization);
-   PBOOL("Thin Provisioning Support", idNs->feat & 0x1);
-   PBOOL("Namespace Atomic Support", (idNs->feat & 0x2) >> 1);
-   PBOOL("Deallocated or Unwritten Logical Block Error Support", (idNs->feat & 0x4) >> 2);
-   PINT("Number of LBA Formats", idNs->numLbaFmt);
-   PINT("LBA Format", idNs->fmtLbaSize & 0xf);
-   PBOOL("Extended Metadata", (idNs->fmtLbaSize & 0x10) >> 4);
-   PBOOL("Metadata as Seperate Buffer Support", (idNs->metaDataCap & 0x2) >> 1);
-   PBOOL("Metadata as Extended Buffer Support", idNs->metaDataCap & 0x1);
-   PBOOL("PI Type 1 Support", idNs->dataProtCap & 0x1);
-   PBOOL("PI Type 2 Support", (idNs->dataProtCap & 0x2) >> 1);
-   PBOOL("PI Type 3 Support", (idNs->dataProtCap & 0x4) >> 2);
-   PBOOL("PI in First Eight Bytes of Metadata Support", (idNs->dataProtCap & 0x8) >> 3);
-   PBOOL("PI in Last Eight Bytes of Metadata Support", (idNs->dataProtCap & 0x10) >> 4);
-   PINT("PI Enabled Type", idNs->dataProtSet & 0x7);
-   if (idNs->dataProtSet & 0x7) {
+   PULL("Namespace Size", idNs->nsze);
+   PULL("Namespace Capacity", idNs->ncap);
+   PULL("Namespace Utilization", idNs->nuse);
+   PBOOL("Thin Provisioning Support",
+         idNs->nsfeat & VMK_NVME_NS_FEATURE_THIN_PROVISION);
+   PBOOL("Namespace Atomic Support",
+         idNs->nsfeat & VMK_NVME_NS_ATOMICITY);
+   PBOOL("Deallocated or Unwritten Logical Block Error Support",
+         idNs->nsfeat & VMK_NVME_NS_DEALLOCATED_ERROR);
+   PINT("Number of LBA Formats", idNs->nlbaf);
+   PINT("LBA Format", idNs->flbas & 0xf);
+   PBOOL("Extended Metadata", (idNs->flbas & 0x10) >> 4);
+   PBOOL("Metadata as Seperate Buffer Support", (idNs->mc & 0x2) >> 1);
+   PBOOL("Metadata as Extended Buffer Support", idNs->mc & 0x1);
+   PBOOL("PI Type 1 Support", idNs->dpc & VMK_NVME_DPC_PI_TYPE_1);
+   PBOOL("PI Type 2 Support", idNs->dpc & VMK_NVME_DPC_PI_TYPE_2);
+   PBOOL("PI Type 3 Support", idNs->dpc & VMK_NVME_DPC_PI_TYPE_3);
+   PBOOL("PI in First Eight Bytes of Metadata Support",
+         idNs->dpc & VMK_NVME_DPC_PI_FIRST_EIGHT);
+   PBOOL("PI in Last Eight Bytes of Metadata Support",
+         idNs->dpc & VMK_NVME_DPC_PI_LAST_EIGHT);
+   PINT("PI Enabled Type", idNs->dps & 0x7);
+   if (idNs->dps & 0x7) {
       PSTR("MetaData Location",
-           idNs->dataProtSet & 0x8 ? "First Eight Bytes" : "Last Eight Bytes");
+           idNs->dps & 0x8 ? "First Eight Bytes" : "Last Eight Bytes");
    } else {
       PSTR("MetaData Location", "PI Disabled");
    }
-   PBOOL("Namespace Shared by Multiple Controllers", idNs->nmic.sharedNs);
-   PBOOL("Persist Through Power Loss Support", idNs->resCap.pstThruPowerLoss);
-   PBOOL("Write Exclusive Reservation Type Support", idNs->resCap.wrExcResv);
-   PBOOL("Exclusive Access Reservation Type Support", idNs->resCap.excAcsResv);
+   PBOOL("Namespace Shared by Multiple Controllers",
+         idNs->nmic & VMK_NVME_NS_IDENT_NMIC_MC);
+   PBOOL("Persist Through Power Loss Support",
+         idNs->rescap & VMK_NVME_RESCAP_PERSIST_POWER_LOSS);
+   PBOOL("Write Exclusive Reservation Type Support",
+         idNs->rescap & VMK_NVME_RESCAP_EX_WRITE_RESERVE);
+   PBOOL("Exclusive Access Reservation Type Support",
+         idNs->rescap & VMK_NVME_RESCAP_EX_ACCESS_RESERVE);
    PBOOL("Write Exclusive Registrants Only Reservation Type Support",
-         idNs->resCap.wrExcRegOnlyResv);
+         idNs->rescap & VMK_NVME_RESCAP_EX_WRITE_RESERVE_REG);
    PBOOL("Exclusive Access Registrants Only Reservation Type Support",
-         idNs->resCap.excAcsRegOnlyResv);
+         idNs->rescap & VMK_NVME_RESCAP_EX_ACCESS_RESERVE_REG);
    PBOOL("Write Exclusive All Registrants Reservation Type Support",
-         idNs->resCap.wrExcAllRegOnlyResv);
+         idNs->rescap & VMK_NVME_RESCAP_EX_WRITE_RESERVE_ALL);
    PBOOL("Exclusive Access All Registrants Reservation Type Support",
-         idNs->resCap.excAcsAllRegOnlyResv);
-   PBOOL("Format Progress Indicator Support", idNs->fpi.fmtProgIndtSup);
-   PINT("Percentage Remains to Be Formatted", idNs->fpi.pctRemFmt);
+         idNs->rescap & VMK_NVME_RESCAP_EX_ACCESS_RESERVE_ALL);
+   PBOOL("Format Progress Indicator Support", idNs->fpi & 0x80);
+   PINT("Percentage Remains to Be Formatted", idNs->fpi & 0x7f);
    PINT("Namespace Atomic Write Unit Normal", idNs->nawun);
    PINT("Namespace Atomic Write Unit Power Fail", idNs->nawupf);
    PINT("Namespace Atomic Compare and Write Unit", idNs->nacwu);
    PINT("Namespace Atomic Boundary Size Normal", idNs->nabsn);
    PINT("Namespace Atomic Boundary Offset", idNs->nabo);
    PINT("Namespace Atomic Boundary Size Power Fail", idNs->nabspf);
-   P128BIT("NVM Capacity", idNs->NVMCap);
+   P128BIT("NVM Capacity", idNs->nvmcap);
    PID("Namespace Globally Unique Identifier", (vmk_uint8 *)&idNs->nguid, 16);
    PID("IEEE Extended Unique Identifier", (vmk_uint8 *)&idNs->eui64, 8);
    xml_field_begin("LBA Format Support");
    xml_list_begin("structure");
-      for (lbaIndex = 0; lbaIndex <= idNs->numLbaFmt; lbaIndex ++) {
+      for (lbaIndex = 0; lbaIndex <= idNs->nlbaf; lbaIndex ++) {
          xml_struct_begin("LBAFormatSupport");
          PINT("Format ID", lbaIndex);
-         PINT("Metadata Size", idNs->lbaFmtSup[lbaIndex].metaSize);
-         PINT("LBA Data Size", 1 << idNs->lbaFmtSup[lbaIndex].dataSize);
-         PSTR("Relative Performance", nvmNsRelPerf[idNs->lbaFmtSup[lbaIndex].relPerf]);
+         PINT("Metadata Size", idNs->lbaf[lbaIndex].ms);
+         PINT("LBA Data Size", 1 << idNs->lbaf[lbaIndex].lbads);
+         PSTR("Relative Performance", nvmNsRelPerf[idNs->lbaf[lbaIndex].rp]);
          xml_struct_end();
    }
    xml_list_end();
@@ -324,74 +363,74 @@ PrintIdentifyNs(struct iden_namespace *idNs)
 }
 
 static void
-PrintErrLog(struct error_log * errLog)
+PrintErrLog(vmk_NvmeErrorInfoLogEntry * errLog)
 {
    xml_struct_begin("ErrorInfo");
-   PULL("Error Count", errLog->errorCount);
-   PINT("Submission Queue ID", errLog->sqID);
-   PINT("Command ID", errLog->cmdID);
-   PINT("Status Field", errLog->status);
-   PINT("Byte in Command That Contained the Error", errLog->errorByte);
-   PINT("Bit in Command That Contained the Error", errLog->errorBit);
+   PULL("Error Count", errLog->ec);
+   PINT("Submission Queue ID", errLog->sqid);
+   PINT("Command ID", errLog->cid);
+   PINT("Status Field", errLog->sf);
+   PINT("Byte in Command That Contained the Error", errLog->pel.byte);
+   PINT("Bit in Command That Contained the Error", errLog->pel.bit);
    PULL("LBA", errLog->lba);
-   PINT("Namespace", errLog->nameSpace);
-   PINT("Vendor Specific Information Available", errLog->vendorInfo);
+   PINT("Namespace", errLog->ns);
+   PINT("Vendor Specific Information Available", errLog->vsia);
    xml_struct_end();
 }
 
 static void
-PrintSmartLog(struct smart_log * smartLog)
+PrintSmartLog(vmk_NvmeSmartInfoEntry *smartLog)
 {
    esxcli_xml_begin_output();
    xml_struct_begin("SMARTInfo");
-   PBOOL("Available Spare Space Below Threshold", smartLog->criticalError & 0x1);
-   PBOOL("Temperature Warning", (smartLog->criticalError & 0x2) >> 1);
-   PBOOL("NVM Subsystem Reliability Degradation", (smartLog->criticalError & 0x4) >> 2);
-   PBOOL("Read Only Mode", (smartLog->criticalError & 0x8) >> 3);
-   PBOOL("Volatile Memory Backup Device Failure", (smartLog->criticalError & 0x10) >> 4);
-   PINT("Composite Temperature",*(vmk_uint16 *)smartLog->temperature);
-   PINT("Available Spare", smartLog->availableSpace);
-   PINT("Available Spare Threshold", smartLog->availableSpaceThreshold);
-   PINT("Percentage Used", smartLog->percentageUsed);
-   P128BIT("Data Units Read", smartLog->dataUnitsRead);
-   P128BIT("Data Units Written", smartLog->dataUnitsWritten);
-   P128BIT("Host Read Commands", smartLog->hostReadCommands);
-   P128BIT("Host Write Commands", smartLog->hostWriteCommands);
-   P128BIT("Controller Busy Time", smartLog->controllerBusyTime);
-   P128BIT("Power Cycles", smartLog->powerCycles);
-   P128BIT("Power On Hours", smartLog->powerOnHours);
-   P128BIT("Unsafe Shutdowns", smartLog->unsafeShutdowns);
-   P128BIT("Media Errors", smartLog->mediaErrors);
-   P128BIT("Number of Error Info Log Entries", smartLog->numberOfErrorInfoLogs);
-   PINT("Warning Composite Temperature Time", smartLog->warningCompositeTempTime);
-   PINT("Critical Composite Temperature Time", smartLog->criticalCompositeTempTime);
-   PINT("Temperature Sensor 1", smartLog->tempSensor1);
-   PINT("Temperature Sensor 2", smartLog->tempSensor2);
-   PINT("Temperature Sensor 3", smartLog->tempSensor3);
-   PINT("Temperature Sensor 4", smartLog->tempSensor4);
-   PINT("Temperature Sensor 5", smartLog->tempSensor5);
-   PINT("Temperature Sensor 6", smartLog->tempSensor6);
-   PINT("Temperature Sensor 7", smartLog->tempSensor7);
-   PINT("Temperature Sensor 8", smartLog->tempSensor8);
+   PBOOL("Available Spare Space Below Threshold", smartLog->cw.ss);
+   PBOOL("Temperature Warning", smartLog->cw.tmp);
+   PBOOL("NVM Subsystem Reliability Degradation", smartLog->cw.subsys);
+   PBOOL("Read Only Mode", smartLog->cw.ro);
+   PBOOL("Volatile Memory Backup Device Failure", smartLog->cw.backup);
+   PINT("Composite Temperature", smartLog->ct);
+   PINT("Available Spare", smartLog->as);
+   PINT("Available Spare Threshold", smartLog->ast);
+   PINT("Percentage Used", smartLog->pu);
+   P128BIT("Data Units Read", smartLog->dur);
+   P128BIT("Data Units Written", smartLog->duw);
+   P128BIT("Host Read Commands", smartLog->hrc);
+   P128BIT("Host Write Commands", smartLog->hwc);
+   P128BIT("Controller Busy Time", smartLog->cbt);
+   P128BIT("Power Cycles", smartLog->pc);
+   P128BIT("Power On Hours", smartLog->poh);
+   P128BIT("Unsafe Shutdowns", smartLog->us);
+   P128BIT("Media Errors", smartLog->me);
+   P128BIT("Number of Error Info Log Entries", smartLog->neile);
+   PINT("Warning Composite Temperature Time", smartLog->wctt);
+   PINT("Critical Composite Temperature Time", smartLog->cctt);
+   PINT("Temperature Sensor 1", smartLog->ts1);
+   PINT("Temperature Sensor 2", smartLog->ts2);
+   PINT("Temperature Sensor 3", smartLog->ts3);
+   PINT("Temperature Sensor 4", smartLog->ts4);
+   PINT("Temperature Sensor 5", smartLog->ts5);
+   PINT("Temperature Sensor 6", smartLog->ts6);
+   PINT("Temperature Sensor 7", smartLog->ts7);
+   PINT("Temperature Sensor 8", smartLog->ts8);
    xml_struct_end();
    esxcli_xml_end_output();
 }
 
 static void
-PrintFwSlotLog(struct firmware_slot_log * fwSlotLog)
+PrintFwSlotLog(vmk_NvmeFirmwareSlotInfo *fwSlotLog)
 {
    esxcli_xml_begin_output();
    xml_struct_begin("FirmwareSlotInfo");
    PINT("Firmware Slot to Be Activated at Next Controller Reset",
-        (fwSlotLog->activeFirmwareInfo & 0x70) >> 4);
-   PINT("Firmware Slot Being Activated", fwSlotLog->activeFirmwareInfo & 0x7);
-   P8BYTE("Firmware Revision for Slot 1", fwSlotLog->FirmwareRevisionSlot1);
-   P8BYTE("Firmware Revision for Slot 2", fwSlotLog->FirmwareRevisionSlot2);
-   P8BYTE("Firmware Revision for Slot 3", fwSlotLog->FirmwareRevisionSlot3);
-   P8BYTE("Firmware Revision for Slot 4", fwSlotLog->FirmwareRevisionSlot4);
-   P8BYTE("Firmware Revision for Slot 5", fwSlotLog->FirmwareRevisionSlot5);
-   P8BYTE("Firmware Revision for Slot 6", fwSlotLog->FirmwareRevisionSlot6);
-   P8BYTE("Firmware Revision for Slot 7", fwSlotLog->FirmwareRevisionSlot7);
+        (fwSlotLog->afi & 0x70) >> 4);
+   PINT("Firmware Slot Being Activated", fwSlotLog->afi & 0x7);
+   P8BYTE("Firmware Revision for Slot 1", (char *)(&fwSlotLog->frs[0]));
+   P8BYTE("Firmware Revision for Slot 2", (char *)(&fwSlotLog->frs[1]));
+   P8BYTE("Firmware Revision for Slot 3", (char *)(&fwSlotLog->frs[2]));
+   P8BYTE("Firmware Revision for Slot 4", (char *)(&fwSlotLog->frs[3]));
+   P8BYTE("Firmware Revision for Slot 5", (char *)(&fwSlotLog->frs[4]));
+   P8BYTE("Firmware Revision for Slot 6", (char *)(&fwSlotLog->frs[5]));
+   P8BYTE("Firmware Revision for Slot 7", (char *)(&fwSlotLog->frs[6]));
    xml_struct_end();
    esxcli_xml_end_output();
 }
@@ -553,21 +592,21 @@ htoi(const char* str, int *value)
 static int
 GetCtrlrId(struct nvme_handle *handle)
 {
-   struct iden_controller   *idCtrlr;
-   int                      rc = 0;
+   vmk_NvmeIdentifyController   *idCtrlr;
+   int                          rc = 0;
 
    idCtrlr = malloc(sizeof(*idCtrlr));
    if (idCtrlr == NULL) {
       return -1;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
    if (rc != 0) {
       free(idCtrlr);
       return -1;
    }
 
-   rc = idCtrlr->cntlId;
+   rc = idCtrlr->cntlid;
    free(idCtrlr);
    return rc;
 }
@@ -596,7 +635,7 @@ NvmePlugin_DeviceList(int argc, const char *argv[])
    for (i = 0; i < list.count; i++) {
       xml_struct_begin("DeviceList");
       PSTR("HBA Name", list.adapters[i].name);
-      PSTR("Status", list.adapters[i].status == ONLINE ? "Online" : "Offline");
+      PSTR("Status", list.adapters[i].status == ADAPTER_ONLINE ? "Online" : "Offline");
       PSTR("Signature", list.adapters[i].signature);
       xml_struct_end();
    }
@@ -607,19 +646,19 @@ NvmePlugin_DeviceList(int argc, const char *argv[])
 void
 NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
 {
-   int                      ch;
-   int                      rc;
-   int                      nsId;
-   struct nvme_adapter_list list;
-   const char              *vmhba = NULL;
-   struct nvme_handle      *handle;
-   struct iden_namespace   *idNs;
-   vmk_uint64               size        = 0;
-   vmk_uint64               capacity    = 0;
-   vmk_uint8                fmtLbaSize  = -1;
-   vmk_uint8                dataProtSet = -1;
-   vmk_uint8                nmic        = -1;
-   int                      cmdStatus   = 0;
+   int                         ch;
+   int                         rc;
+   int                         nsId;
+   struct nvme_adapter_list    list;
+   const char                  *vmhba = NULL;
+   struct nvme_handle          *handle;
+   vmk_NvmeIdentifyNamespace   *idNs;
+   vmk_uint64                  size        = 0;
+   vmk_uint64                  capacity    = 0;
+   vmk_uint8                   fmtLbaSize  = -1;
+   vmk_uint8                   dataProtSet = -1;
+   vmk_uint8                   nmic        = -1;
+   int                         cmdStatus   = 0;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:s:c:f:p:m:")) != -1) {
       switch (ch) {
@@ -692,11 +731,11 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
 
    memset(idNs, 0, sizeof(*idNs));
 
-   idNs->size = size;
-   idNs->capacity = capacity;
-   idNs->fmtLbaSize = fmtLbaSize;
-   idNs->dataProtSet = dataProtSet;
-   idNs->nmic.sharedNs = nmic & 0x1;
+   idNs->nsze = size;
+   idNs->ncap = capacity;
+   idNs->flbas = fmtLbaSize;
+   idNs->dps = dataProtSet;
+   idNs->nmic = nmic & VMK_NVME_NS_IDENT_NMIC_MC;
 
    nsId = Nvme_NsMgmtCreate(handle, idNs, &cmdStatus);
    if (nsId == -1) {
@@ -857,7 +896,7 @@ NvmePlugin_DeviceNsAttach(int argc, const char *argv[])
    const char              *vmhba = NULL;
    struct nvme_adapter_list list;
    struct nvme_handle      *handle;
-   struct ctrlr_list       *ctrlrList;
+   struct nvme_ctrlr_list  *ctrlrList;
    vmk_uint32               nsId = 0;
    vmk_uint32               ctrlrId = 0;
    int                      cmdStatus = 0;
@@ -962,14 +1001,16 @@ NvmePlugin_DeviceNsAttach(int argc, const char *argv[])
    ctrlrList->ctrlrId[0] = 1; //number of controllers
    ctrlrList->ctrlrId[1] = ctrlrId; //1st controller id
 
-   rc = Nvme_NsAttach(handle, NS_ATTACH, nsId, ctrlrList, &cmdStatus);
+   rc = Nvme_NsAttach(handle, VMK_NVME_NS_CTLR_ATTACH,
+                      nsId, ctrlrList, &cmdStatus);
    if (rc != 0) {
       switch (cmdStatus) {
          case 0x0:
             Error("Failed to execute attach request, 0x%x.", rc);
             break;
          case 0x118:
-            Error("Controller %d is already attached to namespace %d.", ctrlrId, nsId);
+            Error("Controller %d is already attached to namespace %d.",
+                  ctrlrId, nsId);
             break;
          case 0x119:
             Error("Namespace %d is private.", nsId);
@@ -978,13 +1019,14 @@ NvmePlugin_DeviceNsAttach(int argc, const char *argv[])
             Error("The controller list provided is invalid.");
             break;
          default:
-            Error("Failed to attach namespace %d to controller %d, 0x%x", nsId, ctrlrId, cmdStatus);
+            Error("Failed to attach namespace %d to controller %d, 0x%x",
+                  nsId, ctrlrId, cmdStatus);
             break;
       }
       goto out_free;
    }
 
-   rc = Nvme_NsListUpdate(handle, NS_ATTACH, nsId);
+   rc = Nvme_NsListUpdate(handle, VMK_NVME_NS_CTLR_ATTACH, nsId);
    if (rc != 0) {
       Error("Attach namespace successfully, but failed to update namespace list after"
             " attach. Offline namespace.");
@@ -1010,11 +1052,11 @@ NvmePlugin_DeviceNsDetach(int argc, const char *argv[])
 {
    int                      ch;
    int                      rc;
-   const char              *vmhba = NULL;
+   const char               *vmhba = NULL;
    struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
+   struct nvme_handle       *handle;
    int                      status;
-   struct ctrlr_list       *ctrlrList;
+   struct nvme_ctrlr_list   *ctrlrList;
    vmk_uint32               nsId = 0;
    vmk_uint32               ctrlrId = 0;
    char                     cmd[MAX_CMD_LEN];
@@ -1159,7 +1201,8 @@ NvmePlugin_DeviceNsDetach(int argc, const char *argv[])
    ctrlrList->ctrlrId[0] = 1; //number of controllers
    ctrlrList->ctrlrId[1] = ctrlrId; //1st controller id
 
-   rc = Nvme_NsAttach(handle, NS_DETACH, nsId, ctrlrList, &cmdStatus);
+   rc = Nvme_NsAttach(handle, VMK_NVME_NS_CTLR_DETACH,
+                      nsId, ctrlrList, &cmdStatus);
    if (rc != 0) {
       switch (cmdStatus) {
          case 0x0:
@@ -1169,19 +1212,21 @@ NvmePlugin_DeviceNsDetach(int argc, const char *argv[])
             Error("Namespace %d is private.", nsId);
             break;
          case 0x11a:
-            Error("Controller %d is not attached to the namespace %d", ctrlrId, nsId);
+            Error("Controller %d is not attached to the namespace %d",
+                  ctrlrId, nsId);
             break;
          case 0x11c:
             Error("The controller list provided is invalid.");
             break;
          default:
-            Error("Failed to detach namespace %d from controller %d, 0x%x.", nsId, ctrlrId, cmdStatus);
+            Error("Failed to detach namespace %d from controller %d, 0x%x.",
+                  nsId, ctrlrId, cmdStatus);
             break;
       }
       goto out_free;
    }
 
-   rc = Nvme_NsListUpdate(handle, NS_DETACH, nsId);
+   rc = Nvme_NsListUpdate(handle, VMK_NVME_NS_CTLR_DETACH, nsId);
    if (rc != 0) {
       Error("Detach namespace successfully, but failed to update namespace list after"
             " detach. Offline namespace.");
@@ -1212,9 +1257,9 @@ NvmePlugin_DeviceNsOnline(int argc, const char *argv[])
 {
    int                      ch;
    int                      rc;
-   const char              *vmhba = NULL;
+   const char               *vmhba = NULL;
    struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
+   struct nvme_handle       *handle;
    vmk_uint32               nsId = 0;
    int                      status;
 
@@ -1420,10 +1465,10 @@ void
 NvmePlugin_DeviceListController(int argc, const char *argv[])
 {
    int                      ch, i, rc;
-   const char              *vmhba = NULL;
+   const char               *vmhba = NULL;
    struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct ctrlr_list       *ctrlrList;
+   struct nvme_handle       *handle;
+   struct nvme_ctrlr_list   *ctrlrList;
    vmk_uint32               nsId = 0;
    BOOL                     setNs = false;
 
@@ -1498,13 +1543,15 @@ NvmePlugin_DeviceListController(int argc, const char *argv[])
          Error("Namespace %d is not created.", nsId);
          goto out_free;
       }
-      rc = Nvme_Identify(handle, ATTACHED_CONTROLLER_LIST, 0, nsId, ctrlrList);
+      rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER_IDS_ATTACHED,
+                         0, nsId, ctrlrList);
       if (rc != 0) {
          Error("Failed to get attached controller list, 0x%x.", rc);
          goto out_free;
       }
    } else {
-      rc = Nvme_Identify(handle, ALL_CONTROLLER_LIST, 0, 0, ctrlrList);
+      rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER_IDS,
+                         0, 0, ctrlrList);
       if (rc != 0) {
          Error("Failed to get all controller list, 0x%x.", rc);
          goto out_free;
@@ -1532,12 +1579,12 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
 {
    int                      ch, rc;
    vmk_uint32               i, j, k, numNs;
-   const char              *vmhba = NULL;
+   const char               *vmhba = NULL;
    struct nvme_adapter_list list;
-   struct ns_list          *nsAllocatedList = NULL;
-   struct ns_list          *nsActiveList = NULL;
-   struct nvme_handle      *handle;
-   struct iden_controller  *idCtrlr;
+   struct nvme_ns_list      *nsAllocatedList = NULL;
+   struct nvme_ns_list      *nsActiveList = NULL;
+   struct nvme_handle       *handle;
+   vmk_NvmeIdentifyController  *idCtrlr = NULL;
    char runtimeName[MAX_DEV_NAME_LEN];
    char (*devNames)[MAX_DEV_NAME_LEN] = NULL;
    int  *statusFlags = NULL;
@@ -1581,7 +1628,7 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free;
@@ -1605,21 +1652,23 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
          goto out_free_allocated;
       }
 
-      rc = Nvme_Identify(handle, ALLOCATED_NAMESPACE_LIST, 0, 0, nsAllocatedList);
+      rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS,
+                         0, 0, nsAllocatedList);
       if (rc != 0) {
          Error("Failed to get allocated namespace list, 0x%x.", rc);
          goto out_free_active;
       }
 
-      rc = Nvme_Identify(handle, ACTIVE_NAMESPACE_LIST, 0, 0, nsActiveList);
+      rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS_ACTIVE,
+                         0, 0, nsActiveList);
       if (rc != 0) {
          Error("Failed to attached namespace list, 0x%x.", rc);
          goto out_free_active;
       }
    }
 
-   numNs = idCtrlr->numNmspc < NVME_MAX_NAMESPACE_PER_CONTROLLER ?
-           idCtrlr->numNmspc : NVME_MAX_NAMESPACE_PER_CONTROLLER;
+   numNs = idCtrlr->nn < NVME_MAX_NAMESPACE_PER_CONTROLLER ?
+           idCtrlr->nn : NVME_MAX_NAMESPACE_PER_CONTROLLER;
 
    devNames = (char(*)[MAX_DEV_NAME_LEN])malloc(numNs * sizeof(char) * MAX_DEV_NAME_LEN);
    statusFlags = (int *)malloc(numNs * sizeof(int));
@@ -1720,11 +1769,11 @@ out:
 void
 NvmePlugin_DeviceNsGet(int argc, const char *argv[])
 {
-   int                      ch, rc, nsId = 0;
-   const char              *vmhba = NULL;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct iden_namespace    *idNs;
+   int                          ch, rc, nsId = 0;
+   const char                   *vmhba = NULL;
+   struct nvme_adapter_list     list;
+   struct nvme_handle           *handle;
+   vmk_NvmeIdentifyNamespace    *idNs;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:n:")) != -1) {
       switch (ch) {
@@ -1796,9 +1845,11 @@ NvmePlugin_DeviceNsGet(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_NAMESPACE, 0, nsId, idNs);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_ACTIVE,
+                      0, nsId, idNs);
    if (rc) {
-      Error("Failed to get identify data for namespace %d, %s.", nsId, strerror(rc));
+      Error("Failed to get identify data for namespace %d, %s.",
+            nsId, strerror(rc));
    } else {
       PrintIdentifyNs(idNs);
    }
@@ -1813,10 +1864,10 @@ NvmePlugin_DeviceGet(int argc, const char *argv[])
 {
    int                      ch;
    int                      rc;
-   const char              *vmhba = NULL;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct iden_controller  *id;
+   const char               *vmhba = NULL;
+   struct nvme_adapter_list    list;
+   struct nvme_handle          *handle;
+   vmk_NvmeIdentifyController  *id;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:")) != -1) {
       switch (ch) {
@@ -1854,7 +1905,7 @@ NvmePlugin_DeviceGet(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, id);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, id);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free;
@@ -1875,10 +1926,10 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
    int  nsId = -1;
    int  f = -1, s = -1, l = -1, p = -1, m = -1;
    int  rc;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct iden_controller  *idCtrlr;
-   struct iden_namespace   *idNs;
+   struct nvme_adapter_list    list;
+   struct nvme_handle          *handle;
+   vmk_NvmeIdentifyController  *idCtrlr;
+   vmk_NvmeIdentifyNamespace   *idNs;
    char cmd[MAX_CMD_LEN];
    char runtimeName[MAX_DEV_NAME_LEN];
    int ch;
@@ -1976,13 +2027,13 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free_idCtrlr;
    }
 
-   if((idCtrlr->adminCmdSup & 0x2) == 0) {
+   if((idCtrlr->oacs & VMK_NVME_CTLR_IDENT_OACS_FORMAT) == 0) {
       Error("NVM Format command is not supported.");
       goto out_free_idCtrlr;
    }
@@ -1993,65 +2044,67 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
       goto out_free_idCtrlr;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_NAMESPACE, 0, nsId, idNs);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_ACTIVE,
+                      0, nsId, idNs);
    if (rc != 0) {
       Error("Failed to get namespace identify information, 0x%x.", rc);
       goto out_free_idNs;
    }
 
-   if (idNs->numLbaFmt < f) {
+   if (idNs->nlbaf < f) {
       Error("Invalid parameter: format %d exceeds supported format number %d.",
-             f, idNs->numLbaFmt);
+             f, idNs->nlbaf);
       goto out_free_idNs;
    }
 
-   mdSize = idNs->lbaFmtSup[f].metaSize;
+   mdSize = idNs->lbaf[f].ms;
 
-   if ((idNs->metaDataCap & 0x1) == 0 && m == 1 && mdSize > 0) {
-      Error("Invalid parameter: ms, namespace doesn't support metadata being tranferred"
-            " as part of an extended data buffer.");
+   if ((idNs->mc & VMK_NVME_MC_EXTENDED_LBA) == 0 && m == 1 && mdSize > 0) {
+      Error("Invalid parameter: ms, namespace doesn't support metadata"
+            " being tranferred as part of an extended data buffer.");
       goto out_free_idNs;
    }
 
-   if ((idNs->metaDataCap & 0x2) == 0 && m == 0 && mdSize > 0) {
-      Error("Invalid parameter: ms, namespace doesn't support metadata being tranferred"
-            " as part of a separate buffer.");
+   if ((idNs->mc & VMK_NVME_MC_SEPARATE_BUFFER) == 0 && m == 0 && mdSize > 0) {
+      Error("Invalid parameter: ms, namespace doesn't support metadata"
+            " being tranferred as part of a separate buffer.");
       goto out_free_idNs;
    }
 
    if (mdSize == 0 && p > 0) {
-      Error("Invalid parameter: pi, PI cannot be enabled with zero metadata size.");
+      Error("Invalid parameter: pi, PI cannot be enabled with"
+            " zero metadata size.");
       goto out_free_idNs;
    }
 
-   if ((idNs->dataProtCap & 0x1) == 0 && p == 1) {
+   if ((idNs->dpc & VMK_NVME_DPC_PI_TYPE_1) == 0 && p == 1) {
       Error("Invalid parameter: pi, namespace doesn't support PI Type 1.");
       goto out_free_idNs;
    }
 
-   if ((idNs->dataProtCap & 0x2) == 0 && p == 2) {
+   if ((idNs->dpc & VMK_NVME_DPC_PI_TYPE_2) == 0 && p == 2) {
       Error("Invalid parameter: pi, namespace doesn't support PI Type 2.");
       goto out_free_idNs;
    }
 
-   if ((idNs->dataProtCap & 0x4) == 0 && p == 3) {
+   if ((idNs->dpc & VMK_NVME_DPC_PI_TYPE_3) == 0 && p == 3) {
       Error("Invalid parameter: pi, namespace doesn't support PI Type 3.");
       goto out_free_idNs;
    }
 
-   if ((idNs->dataProtCap & 0x8) == 0 && l == 1 && p > 0) {
-      Error("Invalid parameter: pil, namespace doesn't support PI data being transferred"
-            " as first eight bytes of metadata.");
+   if ((idNs->dpc & VMK_NVME_DPC_PI_FIRST_EIGHT) == 0 && l == 1 && p > 0) {
+      Error("Invalid parameter: pil, namespace doesn't support PI data"
+            " being transferred as first eight bytes of metadata.");
       goto out_free_idNs;
    }
 
-   if ((idNs->dataProtCap & 0x10) == 0 && l == 0 && p > 0) {
-      Error("Invalid parameter: pil, namespace doesn't support PI data being transferred"
-            " as last eight bytes of metadata.");
+   if ((idNs->dpc & VMK_NVME_DPC_PI_LAST_EIGHT) == 0 && l == 0 && p > 0) {
+      Error("Invalid parameter: pil, namespace doesn't support PI data"
+            " being transferred as last eight bytes of metadata.");
       goto out_free_idNs;
    }
 
-   if ((idCtrlr->cmdAttrib & 0x4) == 0 && s == 2) {
+   if ((idCtrlr->fna & VMK_NVME_CTLR_IDENT_FNA_CYPER) == 0 && s == 2) {
       Error("Invalid parameter: ses, crytographic erase is not supported.");
       goto out_free_idNs;
    }
@@ -2071,10 +2124,14 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
          Error("Failed to get device name of namespace %d.", nsId);
          goto out_free_idNs;
       }
-      /* If GetDeviceName returns VMK_NOT_FOUND, it indicates that the path is dead or cannot be seen
-       * by upper layer for some reason. It should be OK to directly do offline operation under this case.*/
+      /* If GetDeviceName returns VMK_NOT_FOUND, it indicates that the path is
+       * dead or cannot be seen by upper layer for some reason.
+       * It should be OK to directly do offline operation under this case.
+       */
       if (status == VMK_OK) {
-         snprintf(cmd, MAX_CMD_LEN, "esxcli storage core claiming unclaim -t path -p %s", runtimeName);
+         snprintf(cmd, MAX_CMD_LEN,
+                  "esxcli storage core claiming unclaim -t path -p %s",
+                  runtimeName);
          rc = ExecuteCommand(cmd);
          if (rc) {
             Error("Failed to format since the namespace is still in use.");
@@ -2095,8 +2152,8 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
    } else {
       rc = Nvme_NsUpdate(handle, nsId);
       if (rc) {
-         Error("Format successfully, but failed to update namespace attributes after"
-               " format. Offline namespace.");
+         Error("Format successfully, but failed to update namespace attributes"
+               " after format. Offline namespace.");
          goto out_free_idNs;
       }
    }
@@ -2111,8 +2168,9 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
    snprintf(cmd, MAX_CMD_LEN, "esxcli storage filesystem rescan");
    rc = ExecuteCommand(cmd);
    if (rc) {
-      Error("Format, update namesapce attributes and online namespace successfully,"
-            " but failed to rescan the filesystem. A stale entry may exist.");
+      Error("Format, update namesapce attributes and online namespace"
+            " successfully, but failed to rescan the filesystem."
+            " A stale entry may exist.");
       goto out_free_idNs;
    }
 
@@ -2147,15 +2205,15 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
    BOOL setNsid = 0;
    BOOL setElpe = 0;
    int  i, rc;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct iden_controller  *idCtrlr;
-   struct usr_io uio;
+   struct nvme_adapter_list    list;
+   struct nvme_handle          *handle;
+   vmk_NvmeIdentifyController  *idCtrlr;
+   NvmeUserIo uio;
    int maxErrorLogEntries;
    union {
-      struct error_log errLog[MAX_ERROR_LOG_ENTRIES];
-      struct smart_log smartLog;
-      struct firmware_slot_log fwSlotLog;
+      vmk_NvmeErrorInfoLogEntry errLog[MAX_ERROR_LOG_ENTRIES];
+      vmk_NvmeSmartInfoEntry smartLog;
+      vmk_NvmeFirmwareSlotInfo fwSlotLog;
    } log;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:l:n:e:")) != -1) {
@@ -2205,20 +2263,21 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free;
    }
-   maxErrorLogEntries = (int)idCtrlr->errLogPgEntr + 1;
+   maxErrorLogEntries = (int)idCtrlr->elpe + 1;
    if (maxErrorLogEntries > MAX_ERROR_LOG_ENTRIES) {
       maxErrorLogEntries = MAX_ERROR_LOG_ENTRIES;
    }
 
    /* Check the optional parameters: nsId and eple.*/
   if (setNsid) {
-      if (lid == GLP_ID_SMART_HEALTH && (idCtrlr->logPgAttrib & 0x1)) {
-         if (nsId < 1 || nsId > (int)idCtrlr->numNmspc) {
+      if (lid == VMK_NVME_LID_SMART_HEALTH &&
+          (idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_SMART_PER_NS)) {
+         if (nsId < 1 || nsId > (int)idCtrlr->nn) {
             rc = Nvme_AllocatedNsId(handle, nsId);
             if (rc == -1) {
                Error("Failed to check Namespace Id %d is created.", nsId);
@@ -2245,7 +2304,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       }
    }
    if (setElpe) {
-      if (lid == GLP_ID_ERR_INFO) {
+      if (lid == VMK_NVME_LID_ERROR_INFO) {
          if (elpe < 1 || elpe > maxErrorLogEntries) {
             Error("Invalid error log page entries. The supported range is [1, %d].",
                   maxErrorLogEntries);
@@ -2256,35 +2315,38 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
          goto out_free;
       }
    } else {
-      if (lid == GLP_ID_ERR_INFO) {
+      if (lid == VMK_NVME_LID_ERROR_INFO) {
          Error("Missing required parameter -e when using -l 1");
          goto out_free;
       }
    }
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_LOG_PAGE;
-   uio.cmd.header.namespaceID = -1;
+   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
+   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getLogPage.LogPageID = lid;
+   uio.cmd.getLogPage.cdw10.lid = lid;
 
    switch (lid)
    {
-      case GLP_ID_ERR_INFO:
-         uio.cmd.cmd.getLogPage.numDW = GLP_LEN_ERR_INFO * elpe / 4 - 1;
-         uio.length = GLP_LEN_ERR_INFO * elpe;
+      case VMK_NVME_LID_ERROR_INFO:
+         uio.cmd.getLogPage.cdw10.numdl =
+             sizeof(vmk_NvmeErrorInfoLogEntry) * elpe / 4 - 1;
+         uio.length = sizeof(vmk_NvmeErrorInfoLogEntry) * elpe;
          uio.addr = (vmk_uintptr_t)&log.errLog;
          break;
-      case GLP_ID_SMART_HEALTH:
-         uio.cmd.header.namespaceID = nsId;
-         uio.cmd.cmd.getLogPage.numDW = GLP_LEN_SMART_HEALTH / 4 - 1;
-         uio.length = GLP_LEN_SMART_HEALTH;
+      case VMK_NVME_LID_SMART_HEALTH:
+         uio.cmd.getLogPage.nsid = nsId;
+         uio.cmd.getLogPage.cdw10.numdl =
+             sizeof(vmk_NvmeSmartInfoEntry) / 4 -1;
+         uio.length = sizeof(vmk_NvmeSmartInfoEntry);
          uio.addr = (vmk_uintptr_t)&log.smartLog;
          break;
-      case GLP_ID_FIRMWARE_SLOT_INFO:
-         uio.cmd.cmd.getLogPage.numDW = GLP_LEN_FIRMWARE_SLOT_INFO / 4 - 1;
-         uio.length = GLP_LEN_FIRMWARE_SLOT_INFO;
+      case VMK_NVME_LID_FW_SLOT:
+         uio.cmd.getLogPage.cdw10.numdl =
+             sizeof(vmk_NvmeFirmwareSlotInfo) / 4 - 1;
+         uio.length = sizeof(vmk_NvmeFirmwareSlotInfo);
          uio.addr = (vmk_uintptr_t)&log.fwSlotLog;
          break;
       default:
@@ -2301,7 +2363,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
 
    switch (lid)
    {
-      case GLP_ID_ERR_INFO:
+      case VMK_NVME_LID_ERROR_INFO:
          esxcli_xml_begin_output();
          xml_list_begin("structure");
          for (i = 0; i < elpe; i++) {
@@ -2310,10 +2372,10 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
          xml_list_end();
          esxcli_xml_end_output();
          break;
-      case GLP_ID_SMART_HEALTH:
+      case VMK_NVME_LID_SMART_HEALTH:
          PrintSmartLog(&log.smartLog);
          break;
-      case GLP_ID_FIRMWARE_SLOT_INFO:
+      case VMK_NVME_LID_FW_SLOT:
          PrintFwSlotLog(&log.fwSlotLog);
          break;
       default:
@@ -2371,7 +2433,8 @@ const char* strFeatErr(vmk_uint32 code) {
       default: return "Error";
    }
 }
-#define NVME_FEATURE_ERROR_STR strFeatErr((uio.comp.SCT << 8) | uio.comp.SC)
+#define NVME_FEATURE_ERROR_STR strFeatErr((uio.comp.dw3.sct << 8) |  \
+                                          uio.comp.dw3.sc)
 
 void issueSetFeature(struct nvme_handle *handle,
                      int nsId,
@@ -2386,18 +2449,18 @@ void issueSetFeature(struct nvme_handle *handle,
                      vmk_uint32 len)
 {
    int rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
    memset(&uio, 0, sizeof(uio));
 
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_SET_FEATURES;
-   uio.cmd.header.namespaceID = nsId;
-   uio.cmd.cmd.setFeatures.featureID = fid;
-   uio.cmd.cmd.setFeatures.save = save;
-   uio.cmd.dw[11] = dw11;
-   uio.cmd.dw[12] = dw12;
-   uio.cmd.dw[13] = dw13;
-   uio.cmd.dw[14] = dw14;
-   uio.cmd.dw[15] = dw15;
+   uio.cmd.setFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_SET_FEATURES;
+   uio.cmd.setFeatures.nsid = nsId;
+   uio.cmd.setFeatures.cdw10.fid = fid;
+   uio.cmd.setFeatures.cdw10.sv = save;
+   uio.cmd.setFeatures.cdw11 = (vmk_NvmeSetFeaturesCdw11)dw11;
+   uio.cmd.setFeatures.cdw12 = dw12;
+   uio.cmd.setFeatures.cdw13 = dw13;
+   uio.cmd.setFeatures.cdw14 = dw14;
+   uio.cmd.setFeatures.cdw15 = dw15;
    uio.direction = XFER_TO_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
    uio.addr = (vmk_uintptr_t)buf;
@@ -2417,14 +2480,14 @@ void issueSetFeature(struct nvme_handle *handle,
 void getFeature_01h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_ARBITRATION;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_ARBITRATION;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -2433,7 +2496,7 @@ void getFeature_01h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("Arbitration");
@@ -2445,15 +2508,20 @@ void getFeature_01h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_01h(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_01h(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    int   ch, rc, burst = 0, low = 0, mid = 0, high = 0;
    char *burstStr = NULL;
    char *lowStr = NULL;
    char *midStr = NULL;
    char *highStr = NULL;
-   struct usr_io uioReg;
-   vmk_uint64 regs;
+   NvmeUserIo uioReg;
+   vmk_NvmeRegCap regs;
    vmk_uint32 dw11;
 
    optind = 1;
@@ -2519,7 +2587,7 @@ void setFeature_01h(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
 
-   if ((regs & NVME_CAP_AMS_MSK64) >> NVME_CAP_AMS_LSB == 0) {
+   if (regs.ams == 0) {
       if (low || mid || high) {
          Error("Invalid operation: Controller only support Round Robin arbitration"
                " mechanism, Low/Medium/High Priority Weight must be set to 0.");
@@ -2527,20 +2595,21 @@ void setFeature_01h(struct nvme_handle *handle, int save, int nsId, int argc, co
       }
    }
    dw11 = burst | (low << 8) | (mid << 16) | (high << 24);
-   issueSetFeature(handle, 0, FTR_ID_ARBITRATION, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_ARBITRATION,
+      save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_02h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_PWR_MANAGEMENT;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_POWER_MANAGEMENT;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -2549,7 +2618,7 @@ void getFeature_02h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("PowerManagement");
@@ -2564,7 +2633,7 @@ void setFeature_02h(struct nvme_handle *handle, int save, int nsId, int argc, co
    int   ch, rc, workload = 0, powerState = 0;
    char *workloadStr = NULL;
    char *powerStateStr = NULL;
-   struct iden_controller idCtrlr;
+   vmk_NvmeIdentifyController idCtrlr;
    vmk_uint32 dw11;
 
    optind = 1;
@@ -2601,42 +2670,45 @@ void setFeature_02h(struct nvme_handle *handle, int save, int nsId, int argc, co
       Error("Invalid parameter.");
       return;
    }
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
    }
 
-   if (powerState > idCtrlr.numPowerSt || powerState < 0) {
+   if (powerState > idCtrlr.npss || powerState < 0) {
       Error("Invalid parameter: power state setting is beyond supported: %d!",
-            idCtrlr.numPowerSt);
+            idCtrlr.npss);
       return;
    }
-   if (!((idCtrlr.ver.mjr == 1 && idCtrlr.ver.mnr >= 2) || (idCtrlr.ver.mjr >= 2))) {
+   if (!((idCtrlr.ver.mjr == 1 && idCtrlr.ver.mnr >= 2) ||
+       (idCtrlr.ver.mjr >= 2))) {
       if (workloadStr != 0) {
-         Error("Invalid parameter: 'Workload Hint' is only supported by the device whose version >= 1.2.");
+         Error("Invalid parameter: 'Workload Hint' is only supported by the"
+               " device whose version >= 1.2.");
          return;
       }
    }
    dw11 = powerState | (workload << 5);
-   issueSetFeature(handle, 0, FTR_ID_PWR_MANAGEMENT, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_POWER_MANAGEMENT,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_03h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc, numRanges, i;
-   struct usr_io uio;
+   NvmeUserIo uio;
    vmk_uint8 buf[4096];
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_LBA_RANGE_TYPE;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_LBA_RANGE_TYPE;
+   uio.cmd.getFeatures.cdw10.sel = select;
    uio.addr = (vmk_uintptr_t)buf;
    uio.length = 4096;
-   uio.cmd.header.namespaceID = nsId;
+   uio.cmd.getFeatures.nsid = nsId;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -2645,7 +2717,7 @@ void getFeature_03h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    numRanges = value & 0x3f;
@@ -2679,27 +2751,33 @@ void getFeature_03h(struct nvme_handle *handle, int select, int nsId)
       PBOOL("Attr:Hidden", buf[64 * i + 1] & 0x2);
       PULL("Starting LBA", *((vmk_uint64*)&buf[64 * i + 16]));
       PULL("Number of Logical Blocks", *((vmk_uint64*)&buf[64 * i + 24]));
-      printf("<field name=\"Unique Identifier\"><string>%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x</string></field>\n",
-             buf[64 * i + 32], buf[64 * i + 33], buf[64 * i + 34], buf[64 * i + 35], buf[64 * i + 36], buf[64 * i + 37], buf[64 * i + 38], buf[64 * i + 39],
-             buf[64 * i + 40], buf[64 * i + 41], buf[64 * i + 42], buf[64 * i + 43], buf[64 * i + 44], buf[64 * i + 45], buf[64 * i + 46], buf[64 * i + 47]);
+      printf("<field name=\"Unique Identifier\"><string>"
+             "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+             "</string></field>\n",
+             buf[64 * i + 32], buf[64 * i + 33], buf[64 * i + 34],
+             buf[64 * i + 35], buf[64 * i + 36], buf[64 * i + 37],
+             buf[64 * i + 38], buf[64 * i + 39], buf[64 * i + 40],
+             buf[64 * i + 41], buf[64 * i + 42], buf[64 * i + 43],
+             buf[64 * i + 44], buf[64 * i + 45], buf[64 * i + 46],
+             buf[64 * i + 47]);
       xml_struct_end();
    }
    xml_list_end();
    esxcli_xml_end_output();
 }
 
-int getSmartLog(struct nvme_handle *handle, struct smart_log *smartLog)
+int getSmartLog(struct nvme_handle *handle, vmk_NvmeSmartInfoEntry *smartLog)
 {
    int rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_LOG_PAGE;
-   uio.cmd.header.namespaceID = -1;
+   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
+   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getLogPage.LogPageID = GLP_ID_SMART_HEALTH;
-   uio.cmd.cmd.getLogPage.numDW = GLP_LEN_SMART_HEALTH / 4 - 1;
-   uio.length = GLP_LEN_SMART_HEALTH;
+   uio.cmd.getLogPage.cdw10.lid = VMK_NVME_LID_SMART_HEALTH;
+   uio.cmd.getLogPage.cdw10.numdl = sizeof(vmk_NvmeSmartInfoEntry) / 4 - 1;
+   uio.length = sizeof(vmk_NvmeSmartInfoEntry);
    uio.addr = (vmk_uintptr_t)smartLog;
    rc = Nvme_AdminPassthru(handle, &uio);
    return rc;
@@ -2709,18 +2787,18 @@ void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
 {
    int rc;
    vmk_uint32 sensor = 0, overThreshold = 0, underThreshold = 0;
-   struct iden_controller idCtrlr;
-   struct smart_log smartLog;
+   vmk_NvmeIdentifyController idCtrlr;
+   vmk_NvmeSmartInfoEntry smartLog;
 
-   struct usr_io uio;
+   NvmeUserIo uio;
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_TEMP_THRESHOLD;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_TEMP_THRESHOLD;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
@@ -2736,27 +2814,27 @@ void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
    xml_list_begin("structure");
    for (sensor = 0; sensor < 9; sensor++) {
       if (sensor != 0) {
-         vmk_uint16 temp = (&smartLog.tempSensor1)[sensor - 1];
+         vmk_uint16 temp = (&smartLog.ts1)[sensor - 1];
          if (temp == 0) {
             // The temperature sensor is not implemented
             continue;
          }
       }
-      if (sensor != 0 || idCtrlr.wcTemp != 0) {
-         uio.cmd.cmd.getFeatures.numCplQReq = sensor | 0x10;
+      if (sensor != 0 || idCtrlr.wctemp != 0) {
+         uio.cmd.getFeatures.cdw11 = (sensor | 0x10) << 16;
          rc = Nvme_AdminPassthru(handle, &uio);
          if (rc) {
             continue;
          }
-         underThreshold = uio.comp.param.cmdSpecific & 0xffff;
+         underThreshold = uio.comp.dw0 & 0xffff;
       }
 
-      uio.cmd.cmd.getFeatures.numCplQReq = sensor;
+      uio.cmd.getFeatures.cdw11 = sensor << 16;
       rc = Nvme_AdminPassthru(handle, &uio);
       if (rc) {
          continue;
       }
-      overThreshold = uio.comp.param.cmdSpecific & 0xffff;
+      overThreshold = uio.comp.dw0 & 0xffff;
 
       xml_struct_begin("TemperatureThreshold");
       if (sensor == 0) {
@@ -2764,7 +2842,7 @@ void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
       } else {
          printf("<field name=\"Threshold Temperature Select\"><string>Temperature Sensor %d</string></field>\n", sensor);
       }
-      if (sensor == 0 && idCtrlr.wcTemp == 0) {
+      if (sensor == 0 && idCtrlr.wctemp == 0) {
          PSTR("Under Temperature Threshold", "N/A");
       } else {
          printf("<field name=\"Under Temperature Threshold\"><string>%d K</string></field>\n", underThreshold);
@@ -2781,8 +2859,8 @@ void setFeature_04h(struct nvme_handle *handle, int save, int nsId, int argc, co
    int   ch, rc, sensor = 0, under = 0, threshold = 0;
    char *sensorStr = NULL;
    char *thresholdStr = NULL;
-   struct iden_controller idCtrlr;
-   struct smart_log smartLog;
+   vmk_NvmeIdentifyController idCtrlr;
+   vmk_NvmeSmartInfoEntry smartLog;
    vmk_uint32 dw11;
 
    optind = 1;
@@ -2824,7 +2902,7 @@ void setFeature_04h(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
@@ -2836,45 +2914,51 @@ void setFeature_04h(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
 
-   if (sensor == 0 && under == 1 && idCtrlr.wcTemp == 0) {
-      Error("Invalid operation: The under temperature threshold Feature is not implemented for Composite Temperature.");
+   if (sensor == 0 && under == 1 && idCtrlr.wctemp == 0) {
+      Error("Invalid operation: The under temperature threshold Feature is not"
+            " implemented for Composite Temperature.");
       return;
    }
-   if (sensor != 0 && (&smartLog.tempSensor1)[sensor - 1] == 0) {
-      Error("Invalid operation: The Temperature sensor %d is not implemented.", sensor);
+   if (sensor != 0 && (&smartLog.ts1)[sensor - 1] == 0) {
+      Error("Invalid operation: The Temperature sensor %d is not implemented.",
+            sensor);
       return;
    }
    dw11 = threshold | (sensor << 16) | under << 20;
-   issueSetFeature(handle, 0, FTR_ID_TEMP_THRESHOLD, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_TEMP_THRESHOLD,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_05h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
-   struct iden_controller idCtrlr;
+   NvmeUserIo uio;
+   vmk_NvmeIdentifyController idCtrlr;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_ERR_RECOVERY;
-   uio.cmd.cmd.getFeatures.select = select;
-   uio.cmd.header.namespaceID = nsId;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_ERROR_RECOVERY;
+   uio.cmd.getFeatures.cdw10.sel = select;
+   uio.cmd.getFeatures.nsid = nsId;
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
    }
-   if ((idCtrlr.ver.mjr == 1 && idCtrlr.ver.mnr >= 2) || (idCtrlr.ver.mjr >= 2)) {
+   if ((idCtrlr.ver.mjr == 1 && idCtrlr.ver.mnr >= 2) ||
+       (idCtrlr.ver.mjr >= 2)) {
       if (nsId == 0) {
-         Error("Invalid parameter: Must specify a valid namespace ID for the device whose version >= 1.2.");
+         Error("Invalid parameter: Must specify a valid namespace ID"
+               " for the device whose version >= 1.2.");
          return;
       }
    } else {
       if (nsId != 0) {
-         Error("Invalid parameter: Shouldn't specify namespace ID for a device whose version < 1.2.");
+         Error("Invalid parameter: Shouldn't specify namespace ID"
+               " for a device whose version < 1.2.");
          return;
       }
    }
@@ -2886,23 +2970,29 @@ void getFeature_05h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("ErrorRecovery");
    PINT("Time Limited Error Recovery", value & 0xffff);
-   PBOOL("Deallocated or Unwritten Logical Block Error Enable", value & 0x10000);
+   PBOOL("Deallocated or Unwritten Logical Block Error Enable",
+         value & 0x10000);
    xml_struct_end();
    esxcli_xml_end_output();
 }
 
-void setFeature_05h(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_05h(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    int   ch, rc, dulbe = 0, time = 0;
    char *dulbeStr = NULL;
    char *timeStr = NULL;
-   struct iden_controller idCtrlr;
-   struct iden_namespace idNs;
+   vmk_NvmeIdentifyController idCtrlr;
+   vmk_NvmeIdentifyNamespace idNs;
    vmk_uint32 dw11;
 
    optind = 1;
@@ -2941,62 +3031,70 @@ void setFeature_05h(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
    }
    if ((idCtrlr.ver.mjr == 1 && idCtrlr.ver.mnr >= 2) || (idCtrlr.ver.mjr >= 2) ) {
       if (nsId == 0) {
-         Error("Invalid parameter: Must specify a valid namespace ID for the device whose version >= 1.2.");
+         Error("Invalid parameter: Must specify a valid namespace ID"
+               " for the device whose version >= 1.2.");
          return;
       }
    } else {
       if (nsId != 0) {
-         Error("Invalid parameter: Shouldn't specify namespace ID for a device whose version < 1.2.");
+         Error("Invalid parameter: Shouldn't specify namespace ID"
+               " for a device whose version < 1.2.");
          return;
       }
       if (dulbe) {
-         Error("Invalid parameter: Can't enable 'Deallocated or Unwritten Logical Block Error'. It is not supported for a device whose version < 1.2.");
+         Error("Invalid parameter: Can't enable 'Deallocated or"
+               " Unwritten Logical Block Error'."
+               " It is not supported for a device whose version < 1.2.");
          return;
       }
    }
 
    if (dulbe) {
-      rc = Nvme_Identify(handle, IDENTIFY_NAMESPACE, 0, nsId, &idNs);
+      rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_ACTIVE,
+                         0, nsId, &idNs);
       if (rc) {
-         Error("Failed to get identify data for namespace %d, %s.", nsId, strerror(rc));
+         Error("Failed to get identify data for namespace %d, %s.",
+               nsId, strerror(rc));
          return;
       }
-      if ((idNs.feat & 0x4) == 0) {
-         Error("Invalid operation: Can't enable Deallocated or Unwritten Logical Block Error, it's not supported for the namespace.");
+      if ((idNs.nsfeat & VMK_NVME_NS_DEALLOCATED_ERROR) == 0) {
+         Error("Invalid operation: Can't enable Deallocated or Unwritten"
+               " Logical Block Error, it's not supported for the namespace.");
          return;
       }
    }
    dw11 = time | (dulbe << 16);
-   issueSetFeature(handle, nsId, FTR_ID_ERR_RECOVERY, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, nsId, VMK_NVME_FEATURE_ID_ERROR_RECOVERY,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_06h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
-   struct iden_controller idCtrlr;
+   NvmeUserIo uio;
+   vmk_NvmeIdentifyController idCtrlr;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_WRITE_CACHE;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_VOLATILE_WRITE_CACHE;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
    }
 
-   if ((idCtrlr.volWrCache & 0x1) == 0) {
+   if ((idCtrlr.vwc &0x1) == 0) {
       Error("Failed to get this feature: controller has no write cache!");
       return;
    }
@@ -3008,7 +3106,7 @@ void getFeature_06h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
@@ -3018,11 +3116,16 @@ void getFeature_06h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_06h(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_06h(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    int   ch, rc, enable = 0;
    char *enableStr = NULL;
-   struct iden_controller idCtrlr;
+   vmk_NvmeIdentifyController idCtrlr;
    vmk_uint32 dw11;
 
    optind = 1;
@@ -3044,13 +3147,13 @@ void setFeature_06h(struct nvme_handle *handle, int save, int nsId, int argc, co
       Error("Invalid enable value format.");
       return;
    }
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
    }
 
-   if ((idCtrlr.volWrCache & 0x1) == 0) {
+   if ((idCtrlr.vwc & 0x1) == 0) {
       Error("Failed to set this feature: controller has no write cache!");
       return;
    }
@@ -3060,20 +3163,21 @@ void setFeature_06h(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
    dw11 = enable;
-   issueSetFeature(handle, 0, FTR_ID_WRITE_CACHE, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_VOLATILE_WRITE_CACHE,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_07h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_NUM_QUEUE;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_NUM_QUEUE;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -3082,7 +3186,7 @@ void getFeature_07h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
@@ -3096,14 +3200,14 @@ void getFeature_07h(struct nvme_handle *handle, int select, int nsId)
 void getFeature_08h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_INT_COALESCING;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_INT_COALESCING;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -3112,7 +3216,7 @@ void getFeature_08h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
@@ -3123,7 +3227,12 @@ void getFeature_08h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_08h(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_08h(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    int   ch, time = 0, threshold = 0;
    char *timeStr = NULL;
@@ -3165,21 +3274,22 @@ void setFeature_08h(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
    dw11 = threshold | (time << 8);
-   issueSetFeature(handle, 0, FTR_ID_INT_COALESCING, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_INT_COALESCING,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc, vectNum, i;
-   struct usr_io uio;
-   struct usr_io uioVect;
+   NvmeUserIo uio;
+   NvmeUserIo uioVect;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_INT_VECTOR_CONFIG;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_INT_VECTOR_CONFIG;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
    memset(&uioVect, 0, sizeof(uioVect));
    rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_INT_VECT_NUM, &uioVect);
@@ -3193,12 +3303,12 @@ void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_begin_output();
    xml_list_begin("structure");
    for (i = 0; i < vectNum; i++) {
-      uio.cmd.cmd.getFeatures.numSubQReq = i;
+      uio.cmd.getFeatures.cdw11 = i & 0xffff;
       rc = Nvme_AdminPassthru(handle, &uio);
       if (rc) {
          continue;
       }
-      value = uio.comp.param.cmdSpecific;
+      value = uio.comp.dw0;
       xml_struct_begin("InterruptVectorConfiguration");
       PINT("Interrupt Vector", value & 0xffff);
       PBOOL("Coalescing Disable", value & 0x10000);
@@ -3208,12 +3318,17 @@ void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_09h(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_09h(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    int   ch, rc, vectNum, vector = 0, disable = 0;
    char *vectorStr = NULL;
    char *disableStr = NULL;
-   struct usr_io uioVect;
+   NvmeUserIo uioVect;
    vmk_uint32 dw11;
 
    optind = 1;
@@ -3260,32 +3375,35 @@ void setFeature_09h(struct nvme_handle *handle, int save, int nsId, int argc, co
 
    vectNum = uioVect.length;
    if (vector < 0 || vector > vectNum) {
-      Error("Invalid parameter: interrupt vector number is beyond supported: %d!",
+      Error("Invalid parameter: interrupt vector number"
+            " is beyond supported: %d!",
             vectNum);
       return;
    }
 
    if (vector == 0) {
-      Error("Invalid parameter: interrupt coalescing is not supported for admin queue!");
+      Error("Invalid parameter: interrupt coalescing is not"
+            " supported for admin queue!");
       return;
    }
 
 
    dw11 = vector | (disable << 16);
-   issueSetFeature(handle, 0, FTR_ID_INT_VECTOR_CONFIG, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_INT_VECTOR_CONFIG,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_0ah(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_WRITE_ATOMICITY;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_WRITE_ATOMICITY;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -3294,7 +3412,7 @@ void getFeature_0ah(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
@@ -3304,7 +3422,12 @@ void getFeature_0ah(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_0ah(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_0ah(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    int   ch, disable = 0;
    char *disableStr = NULL;
@@ -3336,20 +3459,21 @@ void setFeature_0ah(struct nvme_handle *handle, int save, int nsId, int argc, co
    }
 
    dw11 = disable;
-   issueSetFeature(handle, 0, FTR_ID_WRITE_ATOMICITY, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_WRITE_ATOMICITY,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_0bh(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_ASYN_EVENT_CONFIG;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_ASYNC_EVENT_CONFIG;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -3358,7 +3482,7 @@ void getFeature_0bh(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
@@ -3378,14 +3502,19 @@ void getFeature_0bh(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_0bh(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_0bh(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    int   ch, rc, smart = 0, namespace = 0, firmware = 0;
    char *smartStr = NULL;
    char *namespaceStr = NULL;
    char *firmwareStr = NULL;
    vmk_uint32 dw11;
-   struct iden_controller idCtrlr;
+   vmk_NvmeIdentifyController idCtrlr;
 
    optind = 1;
    while ((ch = getopt(argc, (char *const*)argv, ":v:m:w:")) != -1) {
@@ -3415,14 +3544,15 @@ void setFeature_0bh(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
    }
    if (namespaceStr != NULL) {
-      if (!idCtrlr.oaes.nsChgEvent) {
-         Error("Invalid parameter: The device don't support to set 'Namespace Activation Notices'");
+      if (!(idCtrlr.oaes & VMK_NVME_CTLR_IDENT_OAES_NS_ATTRIBUTE)) {
+         Error("Invalid parameter: The device don't support to"
+               " set 'Namespace Activation Notices'");
          return;
       }
       errno = 0;
@@ -3434,8 +3564,9 @@ void setFeature_0bh(struct nvme_handle *handle, int save, int nsId, int argc, co
    }
 
    if (firmwareStr != NULL) {
-      if (!idCtrlr.oaes.fwActEvent) {
-         Error("Invalid parameter: The device don't support to set 'Firmware Activation Notices'");
+      if (!(idCtrlr.oaes & VMK_NVME_CTLR_IDENT_OAES_FW_ACTIVATE)) {
+         Error("Invalid parameter: The device don't support to set"
+               " 'Firmware Activation Notices'");
          return;
       }
       errno = 0;
@@ -3452,33 +3583,36 @@ void setFeature_0bh(struct nvme_handle *handle, int save, int nsId, int argc, co
    }
 
    dw11 = smart | (namespace << 8) | (firmware << 9);
-   issueSetFeature(handle, 0, FTR_ID_ASYN_EVENT_CONFIG, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_ASYNC_EVENT_CONFIG,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc, i;
-   struct usr_io uio;
-   struct iden_controller idCtrlr;
+   NvmeUserIo uio;
+   vmk_NvmeIdentifyController idCtrlr;
    vmk_uint64 buf[32];
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_AUTO_PWR_TRANSITION;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid =
+      VMK_NVME_FEATURE_ID_AUTONOMOUS_POWER_STATE_TRANS;
+   uio.cmd.getFeatures.cdw10.sel = select;
    uio.addr = (vmk_uintptr_t)buf;
    uio.length = 256;
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
    }
 
-   if (idCtrlr.apsta.autoPowerStX == 0) {
-      Error("Invalid operation: The controller doesn't support autonomous power state transitions!");
+   if ((idCtrlr.apsta & 0x1) == 0) {
+      Error("Invalid operation: The controller doesn't support"
+            " autonomous power state transitions!");
       return;
    }
 
@@ -3489,7 +3623,7 @@ void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("AutonomousPowerStateTransition");
@@ -3500,7 +3634,8 @@ void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
       xml_struct_begin("DataEntry");
       PINT("Power State", i);
       PINT("Idle Transition Power State", (buf[i] & 0xf8) >> 3);
-      PINT("Idle Time Prior to Transition(milliseconds)", (buf[i] & 0xffffff00) >> 8);
+      PINT("Idle Time Prior to Transition(milliseconds)",
+           (buf[i] & 0xffffff00) >> 8);
       xml_struct_end();
    }
    xml_list_end();
@@ -3512,27 +3647,28 @@ void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
 void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
    vmk_uint32 buf[1024];
-   struct iden_controller idCtrlr;
+   vmk_NvmeIdentifyController idCtrlr;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_HOST_MEM_BUFFER;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_HOST_MEMORY_BUFFER;
+   uio.cmd.getFeatures.cdw10.sel = select;
    uio.addr = (vmk_uintptr_t)buf;
    uio.length = 4096;
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
    }
 
-   if (idCtrlr.hmPre == 0) {
-      Error("Invalid operation: The controller doesn't support the Host Memory Buffer feature!");
+   if (idCtrlr.hmpre == 0) {
+      Error("Invalid operation: The controller doesn't support"
+            " the Host Memory Buffer feature!");
       return;
    }
 
@@ -3543,7 +3679,7 @@ void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("HostMemoryBuffer");
@@ -3556,7 +3692,8 @@ void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
    xml_field_begin("Host Memory Buffer Attributes");
    xml_struct_begin("Data");
    PINTS("Host Memory Buffer Size", buf[0]);
-   PULL("Host Memory Descriptor List Address", (vmk_uint64)buf[2] << 32  | buf[1]);
+   PULL("Host Memory Descriptor List Address",
+        (vmk_uint64)buf[2] << 32  | buf[1]);
    PINTS("Host Memory Descriptor List Entry Count", buf[3]);
    xml_struct_end();
    xml_field_end();
@@ -3567,17 +3704,17 @@ void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
 void getFeature_0fh(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
-   struct iden_controller idCtrlr;
+   NvmeUserIo uio;
+   vmk_NvmeIdentifyController idCtrlr;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_KEEP_ALIVE_TIMER;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_KEEP_ALIVE_TIMER;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
@@ -3595,7 +3732,7 @@ void getFeature_0fh(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
@@ -3605,11 +3742,16 @@ void getFeature_0fh(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_0fh(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_0fh(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    int   ch, rc, timeout = 0;
    char *timeoutStr = NULL;
-   struct iden_controller idCtrlr;
+   vmk_NvmeIdentifyController idCtrlr;
    vmk_uint32 dw11;
 
    optind = 1;
@@ -3632,7 +3774,7 @@ void setFeature_0fh(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       return;
@@ -3644,20 +3786,22 @@ void setFeature_0fh(struct nvme_handle *handle, int save, int nsId, int argc, co
    }
 
    dw11 = timeout;
-   issueSetFeature(handle, 0, FTR_ID_KEEP_ALIVE_TIMER, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_KEEP_ALIVE_TIMER,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_80h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_SW_PROGRESS_MARKER;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid =
+      VMK_NVME_FEATURE_ID_SOFTWARE_PROGRESS_MARKER;
+   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -3666,7 +3810,7 @@ void getFeature_80h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
@@ -3676,26 +3820,32 @@ void getFeature_80h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_80h(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void
+setFeature_80h(struct nvme_handle *handle,
+               int save,
+               int nsId,
+               int argc,
+               const char **argv)
 {
    vmk_uint32 dw11;
 
    dw11 = 0;
-   issueSetFeature(handle, 0, FTR_ID_SW_PROGRESS_MARKER, save, dw11, 0, 0, 0, 0, NULL, 0);
+   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_SOFTWARE_PROGRESS_MARKER,
+                   save, dw11, 0, 0, 0, 0, NULL, 0);
 }
 
 void getFeature_81h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   struct usr_io uio;
+   NvmeUserIo uio;
    vmk_uint8 buf[16];
 
    memset(&uio, 0, sizeof(uio));
-   uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
    uio.direction = XFER_FROM_DEV;
    uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.cmd.getFeatures.featureID = FTR_ID_HOST_IDENTIFIER;
-   uio.cmd.cmd.getFeatures.select = select;
+   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_HOST_ID;
+   uio.cmd.getFeatures.cdw10.sel = select;
    uio.addr = (vmk_uintptr_t)buf;
    uio.length = 16;
 
@@ -3706,13 +3856,15 @@ void getFeature_81h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   value = uio.comp.param.cmdSpecific;
+   value = uio.comp.dw0;
    Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("HostIdentifier");
    PBOOL("Enable Extended Host Identifier", value & 0x1);
-   printf("<field name=\"Host Identifier\"><string>%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x</string></field>\n",
+   printf("<field name=\"Host Identifier\"><string>"
+          "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+          "</string></field>\n",
           buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
           buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15]);
    xml_struct_end();
@@ -3721,126 +3873,126 @@ void getFeature_81h(struct nvme_handle *handle, int select, int nsId)
 
 struct Feature features[] = {
    {
-      FTR_ID_ARBITRATION,
+      VMK_NVME_FEATURE_ID_ARBITRATION,
       "Arbitration",
       0,
       getFeature_01h,
       setFeature_01h,
    },
    {
-      FTR_ID_PWR_MANAGEMENT,
+      VMK_NVME_FEATURE_ID_POWER_MANAGEMENT,
       "Power Management",
       0,
       getFeature_02h,
       setFeature_02h,
    },
    {
-      FTR_ID_LBA_RANGE_TYPE,
+      VMK_NVME_FEATURE_ID_LBA_RANGE_TYPE,
       "LBA Range Type",
       4096,
       getFeature_03h,
       NULL,
    },
    {
-      FTR_ID_TEMP_THRESHOLD,
+      VMK_NVME_FEATURE_ID_TEMP_THRESHOLD,
       "Temperature Threshold",
       0,
       getFeature_04h,
       setFeature_04h,
    },
    {
-      FTR_ID_ERR_RECOVERY,
+      VMK_NVME_FEATURE_ID_ERROR_RECOVERY,
       "Error Recovery",
       0,
       getFeature_05h,
       setFeature_05h,
    },
    {
-      FTR_ID_WRITE_CACHE,
+      VMK_NVME_FEATURE_ID_VOLATILE_WRITE_CACHE,
       "Volatile Write Cache",
       0,
       getFeature_06h,
       setFeature_06h,
    },
    {
-      FTR_ID_NUM_QUEUE,
+      VMK_NVME_FEATURE_ID_NUM_QUEUE,
       "Number of Queues",
       0,
       getFeature_07h,
       NULL,
    },
    {
-      FTR_ID_INT_COALESCING,
+      VMK_NVME_FEATURE_ID_INT_COALESCING,
       "Interrupt Coalescing",
       0,
       getFeature_08h,
       setFeature_08h,
    },
    {
-      FTR_ID_INT_VECTOR_CONFIG,
+      VMK_NVME_FEATURE_ID_INT_VECTOR_CONFIG,
       "Interrupt Vector Configuration",
       0,
       getFeature_09h,
       setFeature_09h,
    },
    {
-      FTR_ID_WRITE_ATOMICITY,
+      VMK_NVME_FEATURE_ID_WRITE_ATOMICITY,
       "Write Atomicity Normal",
       0,
       getFeature_0ah,
       setFeature_0ah,
    },
    {
-      FTR_ID_ASYN_EVENT_CONFIG,
+      VMK_NVME_FEATURE_ID_ASYNC_EVENT_CONFIG,
       "Asynchronous Event Configuration",
       0,
       getFeature_0bh,
       setFeature_0bh,
    },
    {
-      FTR_ID_AUTO_PWR_TRANSITION,
+      VMK_NVME_FEATURE_ID_AUTONOMOUS_POWER_STATE_TRANS,
       "Autonomous Power State Transition",
       256,
       getFeature_0ch,
       NULL,
    },
    {
-      FTR_ID_HOST_MEM_BUFFER,
+      VMK_NVME_FEATURE_ID_HOST_MEMORY_BUFFER,
       "Host Memory Buffer",
       4096,
       getFeature_0dh,
       NULL,
    },
    {
-      FTR_ID_KEEP_ALIVE_TIMER,
+      VMK_NVME_FEATURE_ID_KEEP_ALIVE_TIMER,
       "Keep Alive Timer",
       0,
       getFeature_0fh,
       setFeature_0fh,
    },
    {
-      FTR_ID_SW_PROGRESS_MARKER,
+      VMK_NVME_FEATURE_ID_SOFTWARE_PROGRESS_MARKER,
       "Software Progress Marker",
       0,
       getFeature_80h,
       setFeature_80h,
    },
    {
-      FTR_ID_HOST_IDENTIFIER,
+      VMK_NVME_FEATURE_ID_HOST_ID,
       "Host Identifier",
       16,
       getFeature_81h,
       NULL,
    },
    {
-      FTR_ID_RESERV_NOTIF_MASK,
+      VMK_NVME_FEATURE_ID_RESV_NOTIFICATION_MASK,
       "Reservation Notification Mask",
       0,
       NULL,
       NULL,
    },
    {
-      FTR_ID_RESERV_PERSIST,
+      VMK_NVME_FEATURE_ID_RESV_PERSISTENCE,
       "Reservation Persistance",
       0,
       NULL,
@@ -3865,10 +4017,10 @@ void
 NvmePlugin_DeviceFeatureCap(int argc, const char *argv[])
 {
    int                      ch, rc, i, value;
-   const char              *vmhba = NULL;
+   const char               *vmhba = NULL;
    struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct usr_io            uio;
+   struct nvme_handle       *handle;
+   NvmeUserIo               uio;
    vmk_uint8                buf[4096];
 
    while ((ch = getopt(argc, (char*const*)argv, ":A:")) != -1) {
@@ -3901,11 +4053,11 @@ NvmePlugin_DeviceFeatureCap(int argc, const char *argv[])
    xml_list_begin("structure");
    for (i = 0; i < NUM_FEATURES; i++) {
       memset(&uio, 0, sizeof(uio));
-      uio.cmd.header.opCode = NVM_ADMIN_CMD_GET_FEATURES;
+      uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
       uio.direction = XFER_FROM_DEV;
       uio.timeoutUs = ADMIN_TIMEOUT;
-      uio.cmd.cmd.getFeatures.featureID = features[i].fid;
-      uio.cmd.cmd.getFeatures.select = 0x3;
+      uio.cmd.getFeatures.cdw10.fid = features[i].fid;
+      uio.cmd.getFeatures.cdw10.sel = 0x3;
       if (features[i].useBufferLen > 0) {
          uio.addr = (vmk_uintptr_t)buf;
          uio.length = features[i].useBufferLen;
@@ -3918,7 +4070,7 @@ NvmePlugin_DeviceFeatureCap(int argc, const char *argv[])
          continue;
       }
 
-      value = uio.comp.param.cmdSpecific;
+      value = uio.comp.dw0;
       Debug("value = %x\n", value);
       xml_struct_begin("Feature");
       PSTR("Feature Identifier", features[i].desc);
@@ -4050,11 +4202,11 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
    const char              *vmhba = NULL;
    const char              *ftr = NULL;
    const char              *ns  = NULL;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct iden_controller   idCtrlr;
-   int                      save = 0;
-   struct Feature          *feature;
+   struct nvme_adapter_list     list;
+   struct nvme_handle           *handle;
+   vmk_NvmeIdentifyController   idCtrlr;
+   int                          save = 0;
+   struct Feature               *feature;
 
    while ((ch = getopt(argc, (char*const*)argv, "-:A:f:n:S")) != -1) {
       switch (ch) {
@@ -4117,13 +4269,13 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
       return;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out;
    }
 
-   if ((idCtrlr.cmdSupt & (1 << 4)) == 0 && save == 1) {
+   if ((idCtrlr.oncs & VMK_NVME_CTLR_IDENT_ONCS_SV) == 0 && save == 1) {
       Error("Invalid parameter: The controller doesn't support saving feature.");
       goto out;
    }
@@ -4217,9 +4369,9 @@ NvmePlugin_DeviceFirmwareDownload(int argc, const char *argv[])
    void *fwBuf = NULL;
    int  fwSize = 0;
    int  rc;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct iden_controller  *idCtrlr;
+   struct nvme_adapter_list    list;
+   struct nvme_handle          *handle;
+   vmk_NvmeIdentifyController  *idCtrlr;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:f:")) != -1) {
       switch (ch) {
@@ -4258,13 +4410,13 @@ NvmePlugin_DeviceFirmwareDownload(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
    if (rc) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free;
    }
 
-   if ((idCtrlr->adminCmdSup & 0x4) == 0) {
+   if ((idCtrlr->oacs & VMK_NVME_CTLR_IDENT_OACS_FIRMWARE) == 0) {
       Error("Firmware download command is not supported.");
       goto out_free;
    }
@@ -4307,9 +4459,9 @@ NvmePlugin_DeviceFirmwareActivate(int argc, const char *argv[])
    int  rc;
    int  action = -1;
    int  status = 0;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct iden_controller  *idCtrlr;
+   struct nvme_adapter_list    list;
+   struct nvme_handle          *handle;
+   vmk_NvmeIdentifyController  *idCtrlr;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:s:a:")) != -1) {
       switch (ch) {
@@ -4353,24 +4505,24 @@ NvmePlugin_DeviceFirmwareActivate(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_Identify(handle, IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
    if (rc) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free;
    }
 
-   if ((idCtrlr->adminCmdSup & 0x4) == 0) {
+   if ((idCtrlr->oacs & VMK_NVME_CTLR_IDENT_OACS_FIRMWARE) == 0) {
       Error("Firmware activate command is not supported.");
       goto out_free;
    }
 
-   maxSlot = (idCtrlr->firmUpdt & 0xf) >> 1;
+   maxSlot = (idCtrlr->frmw & 0xf) >> 1;
    if (slot < 0 || slot > maxSlot) {
       Error("Invalid slot number.");
       goto out_free;
    }
 
-   if (slot == 1 && (idCtrlr->firmUpdt & 0x1) &&
+   if (slot == 1 && (idCtrlr->frmw & 0x1) &&
        (action == NVME_FIRMWARE_ACTIVATE_ACTION_NOACT ||
        action == NVME_FIRMWARE_ACTIVATE_ACTION_DLACT)) {
       Error("Invalid action: Slot 1 is read only.");
@@ -4410,11 +4562,13 @@ NvmePlugin_DeviceFirmwareActivate(int argc, const char *argv[])
             Error("Invalid firmware image.");
             break;
          case 0x112:
-            Error("The frimware activation would exceed the MFTA value reported in identify controller."
-                  " Please re-issue activate command with other actions using a reset.");
+            Error("The frimware activation would exceed the MFTA value"
+                  " reported in identify controller. Please re-issue"
+                  " activate command with other actions using a reset.");
             break;
          case 0x113:
-            Error("The image specified is being prohibited from activation by the controller for vendor specific reasons.");
+            Error("The image specified is being prohibited from activation by"
+                  " the controller for vendor specific reasons.");
             break;
          case 0x114:
             Error("The firmware image has overlapping ranges.");
@@ -4468,7 +4622,8 @@ NvmePlugin_DriverLoglevelSet(int argc, const char *argv[])
          return;
       }
       if (logLevel != 5) {
-         Error("Debug level is invalid when setting log level to %d.\n", logLevel);
+         Error("Debug level is invalid when setting log level to %d.\n",
+               logLevel);
       }
       else {
          rc = htoi(debugString, &debugLevel);
@@ -4496,62 +4651,65 @@ NvmePlugin_DriverLoglevelSet(int argc, const char *argv[])
 static void
 PrintCtrlrRegs(void *regs)
 {
-   vmk_uint64 reg64;
-   vmk_uint32 reg32;
+   vmk_NvmeRegCap    regCap;
+   vmk_NvmeRegVs     regVs;
+   vmk_NvmeRegCc     regCc;
+   vmk_NvmeRegCsts   regCsts;
+   vmk_NvmeRegAqa    regAqa;
 
    esxcli_xml_begin_output();
    xml_struct_begin("DeviceRegs");
 
-   reg64 = *(vmk_uint64 *)(regs + NVME_CAP);
-   PULL("CAP", reg64);
-   PULL("CAP.MPSMAX", (reg64 & NVME_CAP_MPSMAX_MSK64) >> NVME_CAP_MPSMAX_LSB);
-   PULL("CAP.MPSMIN", (reg64 & NVME_CAP_MPSMIN_MSK64) >> NVME_CAP_MPSMIN_LSB);
-   PULL("CAP.CSS", (reg64 & NVME_CAP_CSS_MSK64) >> NVME_CAP_CSS_LSB);
-   PULL("CAP.NSSRS", (reg64 & NVME_CAP_NSSRS_MSK64) >> NVME_CAP_NSSRS_LSB);
-   PULL("CAP.DSTRD", (reg64 & NVME_CAP_DSTRD_MSK64) >> NVME_CAP_DSTRD_LSB);
-   PULL("CAP.TO", (reg64 & NVME_CAP_TO_MSK64) >> NVME_CAP_TO_LSB);
-   PULL("CAP.AMS", (reg64 & NVME_CAP_AMS_MSK64) >> NVME_CAP_AMS_LSB);
-   PULL("CAP.CQR", (reg64 & NVME_CAP_CQR_MSK64) >> NVME_CAP_CQR_LSB);
-   PULL("CAP.MQES", reg64 & NVME_CAP_MQES_MSK64);
+   regCap = *(vmk_NvmeRegCap *)(regs + VMK_NVME_REG_CAP);
+   PULL("CAP", *(vmk_uint64 *)(regs + VMK_NVME_REG_CAP));
+   PINTS("CAP.MPSMAX", regCap.mpsmax);
+   PINTS("CAP.MPSMIN", regCap.mpsmin);
+   PINTS("CAP.CSS", regCap.css);
+   PINTS("CAP.NSSRS", regCap.nssrs);
+   PINTS("CAP.DSTRD", regCap.dstrd);
+   PINTS("CAP.TO", regCap.to);
+   PINTS("CAP.AMS", regCap.ams);
+   PINTS("CAP.CQR", regCap.cqr);
+   PINTS("CAP.MQES", regCap.mqes);
 
-   reg32 = *(vmk_uint32 *)(regs + NVME_VS);
-   PINTS("VS", reg32);
-   PINTS("VS.MJR", (reg32 & NVME_VS_MJR_MSK) >> NVME_VS_MJR_LSB);
-   PINTS("VS.MNR", (reg32 & NVME_VS_MNR_MSK) >> NVME_VS_MNR_LSB);
+   regVs = *(vmk_NvmeRegVs *)(regs + VMK_NVME_REG_VS);
+   PINTS("VS", *(vmk_uint32 *)(regs + VMK_NVME_REG_VS));
+   PINTS("VS.MJR", regVs.mjr);
+   PINTS("VS.MNR", regVs.mnr);
 
-   PINTS("INTMS", *(vmk_uint32 *)(regs + NVME_INTMS));
+   PINTS("INTMS", *(vmk_uint32 *)(regs + VMK_NVME_REG_INTMS));
 
-   PINTS("INTMC", *(vmk_uint32 *)(regs + NVME_INTMC));
+   PINTS("INTMC", *(vmk_uint32 *)(regs + VMK_NVME_REG_INTMC));
 
-   reg32 = *(vmk_uint32 *)(regs + NVME_CC);
-   PINTS("CC", reg32);
-   PINTS("CC.IOCQES", (reg32 & NVME_CC_IOCQES_MSK) >> NVME_CC_IOCQES_LSB);
-   PINTS("CC.IOSQES", (reg32 & NVME_CC_IOSQES_MSK) >> NVME_CC_IOSQES_LSB);
-   PINTS("CC.SHN", (reg32 & NVME_CC_SHN_MSK) >> NVME_CC_SHN_LSB);
-   PINTS("CC.AMS", (reg32 & NVME_CC_AMS_MSK) >> NVME_CC_AMS_LSB);
-   PINTS("CC.MPS", (reg32 & NVME_CC_MPS_MSK) >> NVME_CC_MPS_LSB);
-   PINTS("CC.CSS", (reg32 & NVME_CC_CSS_MSK) >> NVME_CC_CSS_LSB);
-   PINTS("CC.EN", reg32 & NVME_CC_EN_MSK);
+   regCc = *(vmk_NvmeRegCc *)(regs + VMK_NVME_REG_CC);
+   PINTS("CC", *(vmk_uint32 *)(regs + VMK_NVME_REG_CC));
+   PINTS("CC.IOCQES", regCc.iocqes);
+   PINTS("CC.IOSQES", regCc.iosqes);
+   PINTS("CC.SHN", regCc.shn);
+   PINTS("CC.AMS", regCc.ams);
+   PINTS("CC.MPS", regCc.mps);
+   PINTS("CC.CSS", regCc.css);
+   PINTS("CC.EN", regCc.en);
 
-   reg32 = *(vmk_uint32 *)(regs + NVME_CSTS);
-   PINTS("CSTS", reg32);
-   PINTS("CSTS.PP", (reg32 & NVME_CSTS_PP_MSK) >> NVME_CSTS_PP_LSB);
-   PINTS("CSTS.NSSRO", (reg32 & NVME_CSTS_NSSRO_MSK) >> NVME_CSTS_NSSRO_LSB);
-   PINTS("CSTS.SHST", (reg32 & NVME_CSTS_SHST_MSK) >> NVME_CSTS_SHST_LSB);
-   PINTS("CSTS.CFS", (reg32 & NVME_CSTS_CFS_MSK) >> NVME_CSTS_CFS_LSB);
-   PINTS("CSTS.RDY", reg32 & NVME_CSTS_RDY_MSK);
+   regCsts = *(vmk_NvmeRegCsts *)(regs + VMK_NVME_REG_CSTS);
+   PINTS("CSTS", *(vmk_uint32 *)(regs + VMK_NVME_REG_CSTS));
+   PINTS("CSTS.PP", regCsts.pp);
+   PINTS("CSTS.NSSRO", regCsts.nssro);
+   PINTS("CSTS.SHST", regCsts.shst);
+   PINTS("CSTS.CFS", regCsts.cfs);
+   PINTS("CSTS.RDY", regCsts.rdy);
 
-   PINTS("NSSR", *(vmk_uint32 *)(regs + NVME_NSSR));
+   PINTS("NSSR", *(vmk_uint32 *)(regs + VMK_NVME_REG_NSSR));
 
-   reg32 = *(vmk_uint32 *)(regs + NVME_AQA);
-   PINTS("AQA", reg32);
-   PINTS("AQA.ACQS", (reg32 & NVME_AQA_CQS_MSK) >> NVME_AQA_CQS_LSB);
-   PINTS("AQA.ASQS", reg32 & NVME_AQA_SQS_MSK);
+   regAqa = *(vmk_NvmeRegAqa *)(regs + VMK_NVME_REG_AQA);
+   PINTS("AQA", *(vmk_uint32 *)(regs + VMK_NVME_REG_AQA));
+   PINTS("AQA.ACQS", regAqa.acqs);
+   PINTS("AQA.ASQS", regAqa.asqs);
 
-   PULL("ASQ", *(vmk_uint64 *)(regs + NVME_ASQ));
-   PULL("ACQ", *(vmk_uint64 *)(regs + NVME_ACQ));
-   PINTS("CMBLOC", *(vmk_uint32 *)(regs + NVME_CMBLOC));
-   PINTS("CMBSZ", *(vmk_uint32 *)(regs + NVME_CMBSZ));
+   PULL("ASQ", *(vmk_uint64 *)(regs + VMK_NVME_REG_ASQ));
+   PULL("ACQ", *(vmk_uint64 *)(regs + VMK_NVME_REG_ACQ));
+   PINTS("CMBLOC", *(vmk_uint32 *)(regs + VMK_NVME_REG_CMBLOC));
+   PINTS("CMBSZ", *(vmk_uint32 *)(regs + VMK_NVME_REG_CMBSZ));
    xml_struct_end();
    esxcli_xml_end_output();
 }
@@ -4561,10 +4719,10 @@ NvmePlugin_DeviceRegisterGet(int argc, const char *argv[])
 {
    int                      ch;
    int                      rc;
-   const char              *vmhba = NULL;
+   const char               *vmhba = NULL;
    struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   struct usr_io            uio;
+   struct nvme_handle       *handle;
+   NvmeUserIo               uio;
    vmk_uint8                regs[8192];
 
    while ((ch = getopt(argc, (char *const*)argv, "A:")) != -1) {
@@ -4713,7 +4871,8 @@ NvmePlugin_DeviceTimeoutGet(int argc, const char *argv[])
       esxcli_xml_begin_output();
       xml_list_begin("string");
       if (timeout == 0) {
-         printf("<string>Current timeout is 0. Timeout checker is disabled.</string>");
+         printf("<string>Current timeout is 0."
+                " Timeout checker is disabled.</string>");
       } else {
          printf("<string>Current timeout is %d s.</string>", timeout);
       }
@@ -4871,7 +5030,9 @@ NvmeLookupFunction(const char *op)
 static inline BOOL
 NvmeFunctionEnabled(int fnIdx)
 {
-   /* All functions are enabled by default. Return false to disable the specific one. */
+   /* All functions are enabled by default.
+    * Return false to disable the specific one.
+    */
    return true;
 }
 

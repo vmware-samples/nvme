@@ -5,6 +5,8 @@
 This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
+2020/9/29 1.2.0.42-1vmw
+   Fix PR #2638853: remove dependency on old nvme driver.
 
 2020/9/24 1.2.0.41-1vmw
    Fix PR #2625463: Mark statusFlags as NS_UNALLOCATED if namespace is not found.
