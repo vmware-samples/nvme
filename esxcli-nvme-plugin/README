@@ -5,6 +5,10 @@
 This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
+
+2020/9/10 1.2.0.40-1vmw
+   Fix PR #2634978: Increase default timeout to 60 seconds.
+
 2020/9/9 1.2.0.39-1vmw
    Fix PR #2637414: Make esxcli-nvme-plugin build in DDK environment.
 
