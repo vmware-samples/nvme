@@ -91,7 +91,7 @@ NVMEPCIEQueueCreate(NVMEPCIEController *ctrlr,
    }
 
    if (qid > 0) {
-      ctrlr->numIoQueues ++;
+      vmk_AtomicInc32(&ctrlr->numIoQueues);
    }
    return VMK_OK;
 
@@ -127,7 +127,7 @@ NVMEPCIEQueueDestroy(NVMEPCIEController *ctrlr, vmk_uint32 qid, vmk_NvmeStatus s
    vmkStatus = QueueDestroy(qinfo);
 
    if (qid > 0) {
-      ctrlr->numIoQueues --;
+      vmk_AtomicDec32(&ctrlr->numIoQueues);
    }
 
    return VMK_OK;

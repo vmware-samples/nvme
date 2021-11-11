@@ -39,7 +39,7 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.1"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.2"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -204,7 +204,7 @@ typedef struct NVMEPCIEController {
    int bar;
    int barSize;
    vmk_VA regs;
-   vmk_uint32 numIoQueues;
+   vmk_atomic32 numIoQueues;
    vmk_uint32 maxIoQueues;
    NVMEPCIECtrlrOsResources osRes;
    NVMEPCIEQueueInfo *queueList;
