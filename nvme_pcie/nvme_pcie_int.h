@@ -34,6 +34,13 @@
 
 #define NVME_ABORT 1
 #define NVME_STATS 1
+#define NVME_PCIE_STORAGE_POLL 1
+
+#if NVME_PCIE_STORAGE_POLL
+extern int nvmePCIEPollEnabled;
+extern vmk_uint64 nvmePCIEPollInterval;
+extern vmk_uint32 nvmePCIEPollThr;
+#endif
 
 /**
  * Driver name. This should be the name of the SC file.
@@ -43,7 +50,7 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.16"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.17"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -178,7 +185,12 @@ typedef union NVMEPCIEPendingCmdInfo {
  */
 typedef struct NVMEPCIECmdInfoList {
    vmk_Lock lock;
-   int nrAct;
+   /**
+    * Record active commands
+    *
+    * It can help StoragePoll to switch from interruption mode to poll.
+    */
+   vmk_atomic32 nrAct;
    NVMEPCIEPendingCmdInfo pendingFreeCmdList;
    vmk_uint32 freeCmdList;
    NVMEPCIECmdInfo *list;
@@ -210,6 +222,19 @@ typedef struct NVMEPCIEQueueInfo {
    NVMEPCIECompQueueInfo *cqInfo;
    NVMEPCIECmdInfoList *cmdList;
    NVMEPCIEQueueStats *stats;
+   /** Help to ensure vmk_IntrEnable/Disable appear in pairs. */
+   vmk_atomic8 isIntrEnabled;
+#if NVME_PCIE_STORAGE_POLL
+   /**
+    * Whether pollHandler is enabled or not
+    *
+    * We cannot use lock to wrap 'vmk_StoragePollEnable()', because
+    * it will create a high priority system world inside.
+    */
+   vmk_atomic8 isPollHdlrEnabled;
+   // StoragePoll handler. Set as NULL, if failed to create
+   vmk_StoragePoll pollHandler;
+#endif
 } NVMEPCIEQueueInfo;
 
 /* to mark the special device needs some workaround */
@@ -235,6 +260,9 @@ typedef struct NVMEPCIEController {
    NVMEPCIEWorkaround workaround;
    vmk_uint32 dstrd;
    vmk_Bool statsEnabled;
+#if NVME_PCIE_STORAGE_POLL
+   vmk_Bool pollEnabled;
+#endif
 } NVMEPCIEController;
 
 /**
@@ -383,7 +411,7 @@ VMK_ReturnStatus NVMEPCIEStopQueue(NVMEPCIEQueueInfo *qinfo,
                                    vmk_NvmeStatus status);
 VMK_ReturnStatus NVMEPCIEResumeQueue(NVMEPCIEQueueInfo *qinfo);
 void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo);
-void NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo);
+vmk_uint32 NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo);
 
 /** vmk nvme adapter and controller init/cleanup functions */
 VMK_ReturnStatus NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr);
@@ -405,6 +433,29 @@ VMK_ReturnStatus NVMEPCIEIdentify(NVMEPCIEController *ctrlr,
                                   vmk_NvmeCnsField cns,
                                   vmk_uint32 nsID,
                                   vmk_uint8 *data);
+
+VMK_INLINE void NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo);
+
+VMK_INLINE void NVMEPCIEDisableIntr(NVMEPCIEQueueInfo *qinfo,
+                                    vmk_Bool intrSync);
+
+#if NVME_PCIE_STORAGE_POLL
+vmk_uint32 NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,
+                                 vmk_uint32 leastPoll,
+                                 vmk_uint32 budget);
+void NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,
+                                 vmk_uint32 leastPoll);
+void NVMEPCIEStoragePollSetup(NVMEPCIEController *ctrlr);
+/**
+ * For NVMEPCIEStoragePollCreate/NVMEPCIEStoragePollEnable,
+ * If one queue failed to create or enable its poll handler,
+ * this queue will return to interruption mode and do not panic.
+ */
+void NVMEPCIEStoragePollCreate(NVMEPCIEQueueInfo *qinfo);
+void NVMEPCIEStoragePollEnable(NVMEPCIEQueueInfo *qinfo);
+void NVMEPCIEStoragePollDisable(NVMEPCIEQueueInfo *qinfo);
+void NVMEPCIEStoragePollDestory(NVMEPCIEQueueInfo *qinfo);
+#endif
 
 /** Interrupt functions */
 VMK_ReturnStatus NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,

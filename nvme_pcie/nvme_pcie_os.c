@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016, 2018, 2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016, 2018, 2020-2021 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -309,6 +309,10 @@ NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
 
    if (vmkStatus == VMK_OK) {
       ctrlr->osRes.intrType = type;
+#if NVME_PCIE_STORAGE_POLL
+      ctrlr->pollEnabled = ((type == VMK_PCI_INTERRUPT_TYPE_MSIX) &&
+                            nvmePCIEPollEnabled) ? VMK_TRUE : VMK_FALSE;
+#endif
       ctrlr->osRes.numIntrs = numAllocated;
       if (type == VMK_PCI_INTERRUPT_TYPE_MSI) {
          vmkStatus = NVMEPCIEIntrRegister(ctrlr->osRes.device,
@@ -322,6 +326,9 @@ NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
       }
    } else {
       ctrlr->osRes.intrType = VMK_PCI_INTERRUPT_TYPE_NONE;
+#if NVME_PCIE_STORAGE_POLL
+      ctrlr->pollEnabled = VMK_FALSE;
+#endif
       ctrlr->osRes.numIntrs = 0;
       NVMEPCIEFree(ctrlr->osRes.intrArray);
       ctrlr->osRes.intrArray = NULL;

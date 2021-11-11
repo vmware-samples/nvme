@@ -553,6 +553,13 @@ QueueConstruct(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo,
       goto destroy_cmdinfolist;
    }
 #endif
+
+#if NVME_PCIE_STORAGE_POLL
+   if (ctrlr->pollEnabled && (qinfo->id > 0)) {
+      NVMEPCIEStoragePollCreate(qinfo);
+   }
+#endif
+
    return VMK_OK;
 
 destroy_cmdinfolist:
@@ -596,6 +603,16 @@ QueueDestroy(NVMEPCIEQueueInfo *qinfo)
    if (vmkStatus != VMK_OK) {
       EPRINT(ctrlr, "Failed to destroy object of statistics %d, 0x%x.",
              qinfo->id, vmkStatus);
+   }
+#endif
+
+#if NVME_PCIE_STORAGE_POLL
+   /**
+    * Destroy poll handler if StoragePoll feature enabled and handler created
+    * successfully
+    */
+   if (ctrlr->pollEnabled) {
+      NVMEPCIEStoragePollDestory(qinfo);
    }
 #endif
 
@@ -717,6 +734,49 @@ void
 NVMEPCIEQueueIntrHandler(void *handlerData, vmk_IntrCookie intrCookie)
 {
    NVMEPCIEQueueInfo *qinfo = (NVMEPCIEQueueInfo *)handlerData;
+#if NVME_PCIE_STORAGE_POLL
+   vmk_Bool pollEnabled = qinfo->ctrlr->pollEnabled;
+   vmk_atomic32 *nrActPtr = &qinfo->cmdList->nrAct;
+   vmk_StoragePollState pollState = VMK_STORAGEPOLL_DISABLED;
+#endif
+
+#if NVME_PCIE_STORAGE_POLL
+   /**
+    * To avoid the following unnecessary process when interrupt has been
+    * disabled.
+    */
+   if (!vmk_AtomicRead8(&qinfo->isIntrEnabled)) {
+      return;
+   }
+
+   /**
+    * Just poll for IO queues if StoragePoll feature enabled and handler
+    * created successfully.
+    */
+   if (pollEnabled && VMK_LIKELY(qinfo->pollHandler != NULL)) {
+      /**
+       * Activate polling by determining OIO
+       *
+       * If OIO is adequate, it is appropriate to replace a large quantity
+       * of interrupts by polling.
+       */
+      if (vmk_AtomicRead32(nrActPtr) < nvmePCIEPollThr) {
+         vmk_SpinlockLock(qinfo->cqInfo->lock);
+         NVMEPCIEProcessCq(qinfo);
+         vmk_SpinlockUnlock(qinfo->cqInfo->lock);
+      } else {
+         vmk_StoragePollCheckState(qinfo->pollHandler, &pollState);
+         if (VMK_LIKELY(pollState != VMK_STORAGEPOLL_DISABLED)) {
+            // Do not synchronize interrupt here to avoid endless waiting
+            NVMEPCIEDisableIntr(qinfo, VMK_FALSE);
+            vmk_StoragePollActivate(qinfo->pollHandler);
+         }
+      }
+
+      return;
+   }
+#endif
+
    vmk_SpinlockLock(qinfo->cqInfo->lock);
    NVMEPCIEProcessCq(qinfo);
    vmk_SpinlockUnlock(qinfo->cqInfo->lock);
@@ -737,7 +797,6 @@ NVMEPCIEFlushFreeCmdInfo(NVMEPCIEQueueInfo *qinfo)
    } while (vmk_AtomicReadIfEqualWrite64(&cmdList->pendingFreeCmdList.atomicComposite,
                                          oldValue.atomicComposite, (vmk_uint64)0)
             != oldValue.atomicComposite);
-   cmdList->nrAct -= oldValue.freeListLength;
    return oldValue.cmdOffset;
 }
 
@@ -768,6 +827,9 @@ NVMEPCIEGetCmdInfo(NVMEPCIEQueueInfo *qinfo, vmk_uint16 cid)
          return NULL;
       }
    }
+
+   vmk_AtomicInc32(&qinfo->cmdList->nrAct);
+
 #ifdef NVME_STATS
    cmdInfo->sendToHwTs = 0;
    cmdInfo->doneByHwTs = 0;
@@ -806,7 +868,8 @@ NVMEPCIEGetCmdInfoLegacy(NVMEPCIEQueueInfo *qinfo)
           * There shouldn't be queue full errors as vmknvme knows the number of
           * active commands and won't issue commands when there is no free slot.
           */
-         WPRINT(ctrlr, "Queue[%d] command list empty. %d", qinfo->id, cmdList->nrAct);
+         WPRINT(ctrlr, "Queue[%d] command list empty. %d", qinfo->id,
+                vmk_AtomicRead32(&cmdList->nrAct));
          vmk_SpinlockUnlock(cmdList->lock);
          return NULL;
       }
@@ -814,7 +877,7 @@ NVMEPCIEGetCmdInfoLegacy(NVMEPCIEQueueInfo *qinfo)
 
    cmdInfo = &cmdList->list[cmdList->freeCmdList-1];
    cmdList->freeCmdList = cmdInfo->freeLink;
-   cmdList->nrAct ++;
+   vmk_AtomicInc32(&cmdList->nrAct);
    vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_PCIE_CMD_STATUS_ACTIVE);
 
    vmk_SpinlockUnlock(cmdList->lock);
@@ -860,11 +923,15 @@ NVMEPCIEPutCmdInfo(NVMEPCIEQueueInfo *qinfo, NVMEPCIECmdInfo *cmdInfo)
 {
    NVMEPCIEController *ctrlr = qinfo->ctrlr;
    vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_PCIE_CMD_STATUS_FREE);
+
+   vmk_AtomicDec32(&qinfo->cmdList->nrAct);
+
    if (!ctrlr->abortEnabled) {
       NVMEPCIEPushCmdInfo(qinfo, cmdInfo);
    }
    DPRINT_CMD(ctrlr, "Put cmd Info [%d] %p back to queue [%d], nrAct: %d.",
-              cmdInfo->cmdId, cmdInfo, qinfo->id, qinfo->cmdList->nrAct);
+              cmdInfo->cmdId, cmdInfo, qinfo->id,
+              vmk_AtomicRead32(&qinfo->cmdList->nrAct));
 }
 
 /**
@@ -1224,12 +1291,276 @@ NVMEPCIEIssueCommandToHw(NVMEPCIEQueueInfo *qinfo,
    return VMK_NVME_STATUS_VMW_WOULD_BLOCK;
 }
 
+#if NVME_PCIE_STORAGE_POLL
 /**
- * Process the commands completed by hardware in the given queue
+ * Poll routine for the IO queue defined in vmkapi_storage_poll.h.
  *
- * @param[in] qinfo    Queue instance
+ * @param[in]  driverData  NVMEPCIEQueueInfo passed to poll handler when
+ *                         creating
+ * @param[in]  leastPoll   Minimum number of IO commands to be processed
+ *                         in this invocation.
+ * @param[in]  budget      Maximum number of IO commands to be processed
+ *                         in this invocation.
+ *
+ * @return                 The number of completed IO commands.
+ */
+vmk_uint32
+NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
+                      vmk_uint32 leastPoll,               // IN
+                      vmk_uint32 budget)                  // IN
+{
+   vmk_StoragePollState pollState = VMK_STORAGEPOLL_DISABLED;
+   NVMEPCIEQueueInfo *qinfo = driverData.ptr;
+   vmk_StoragePoll pollHandler = qinfo->pollHandler;
+   vmk_uint32 ret = 0;
+   vmk_Bool needPoll = VMK_FALSE;
+
+   if (VMK_LIKELY(budget != 0)) {
+      NVMEPCIEStoragePollAccumCmd(qinfo, leastPoll);
+
+      vmk_SpinlockLock(qinfo->cqInfo->lock);
+      ret += NVMEPCIEProcessCq(qinfo);
+      vmk_SpinlockUnlock(qinfo->cqInfo->lock);
+
+      /** Check if the number of completed IO commands is valid */
+      if (ret >= leastPoll && ret <= budget) {
+         needPoll = VMK_TRUE;
+      }
+   }
+
+   vmk_StoragePollCheckState(pollHandler, &pollState);
+   if ((!needPoll) &&
+       VMK_LIKELY(pollState != VMK_STORAGEPOLL_DISABLED)) {
+      NVMEPCIEEnableIntr(qinfo);
+
+      /**
+       * @brief Avoid Dead CQE
+       *
+       * Consider a situation below, when it comes to IO ending, just after
+       * this callback invocation, and before enabling CQ's interruption
+       * devices may post new CQEs whose interrupts cannot be acknowledged
+       * due to Edge Trigger mode of NVMe, which results in Dead CQE.
+       *
+       * Just invoke NVMEPCIEProcessCq() once again to avoid.
+       */
+      vmk_SpinlockLock(qinfo->cqInfo->lock);
+      NVMEPCIEProcessCq(qinfo);
+      vmk_SpinlockUnlock(qinfo->cqInfo->lock);
+   } else if (VMK_UNLIKELY(pollState == VMK_STORAGEPOLL_DISABLED)) {
+      vmk_AtomicWrite8(&qinfo->isPollHdlrEnabled, VMK_FALSE);
+   }
+
+   return ret;
+}
+
+/**
+ * Delay some time to accumulate adequate IO commands to be polled.
+ *
+ * @param[in]  qinfo       Queue instance
+ * @param[in]  leastPoll   Minimum number of IO commands to be processed
+ *                         in this invocation.
  */
 void
+NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,   // IN
+                            vmk_uint32 leastPoll)       // IN
+{
+   // Get pending info in CQ
+   NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
+   vmk_uint32 tryPollTimes = 0;
+   vmk_uint32 tryLen = leastPoll;
+   vmk_NvmeCompletionQueueEntry *cqEntry;
+   vmk_uint16 head, tryHead, phase;
+   vmk_uint32 qsize = cqInfo->qsize;
+
+   /** Try to access CQE as more as possible. */
+   tryLen = (tryLen > qsize) ? qsize : tryLen;
+
+   /**
+    * TODO:
+    * Maximum delay times, may be determined dynamically in future.
+    */
+   while (tryPollTimes < 3) {
+      /** Determine number of CQEs */
+      head = cqInfo->head;
+      tryHead = head + tryLen;
+      phase = cqInfo->phase;
+      if (tryHead >= qsize) {
+         tryHead -= qsize;
+         phase = !phase;
+      }
+
+      cqEntry = &cqInfo->compq[tryHead];
+      if (cqEntry->dw3.p != phase) {
+         tryPollTimes++;
+
+         /**
+          * TODO:
+          * Delay time, may be determined dynamically in future.
+          */
+         vmk_WorldSleep(50);
+      } else {
+         break;
+      }
+   }
+}
+
+void
+NVMEPCIEStoragePollSetup(NVMEPCIEController *ctrlr)
+{
+   vmk_NvmeQueueID qid;
+   NVMEPCIEQueueInfo *qinfo = NULL;
+
+   for (qid = 1; qid <= vmk_AtomicRead32(&ctrlr->numIoQueues); qid++) {
+      qinfo = &ctrlr->queueList[qid];
+
+      NVMEPCIEStoragePollCreate(qinfo);
+      NVMEPCIEStoragePollEnable(qinfo);
+   }
+}
+
+void
+NVMEPCIEStoragePollCreate(NVMEPCIEQueueInfo *qinfo)
+{
+   VMK_ReturnStatus status = VMK_OK;
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   vmk_StoragePollProps propInit;
+   const char *adapterName = NULL;
+
+   if (vmk_AtomicRead32(&qinfo->state) == NVME_PCIE_QUEUE_NON_EXIST) {
+      return;
+   }
+
+   adapterName = vmk_NvmeGetAdapterName(ctrlr->osRes.vmkAdapter);
+   if (adapterName == NULL) {
+      return;
+   }
+
+   if (qinfo->pollHandler == NULL) {
+      propInit.moduleID = vmk_ModuleCurrentID;
+      propInit.pollObjectID = qinfo->id;
+      propInit.heapID = NVME_PCIE_DRIVER_RES_HEAP_ID;
+      vmk_NameInitialize(&propInit.adapterName, adapterName);
+      propInit.driverData.ptr = qinfo;
+      propInit.pollCb = NVMEPCIEStoragePollCB;
+
+      status = vmk_StoragePollCreate(&propInit, &qinfo->pollHandler);
+      if (VMK_OK != status) {
+         EPRINT(ctrlr, "Failed to create storagePoll handler for queue %d!"
+                       " Return to interruption mode for this queue.",
+                qinfo->id);
+
+         /** Set as NULL to claim that failed to create poll handler */
+         qinfo->pollHandler = NULL;
+         vmk_AtomicWrite8(&qinfo->isPollHdlrEnabled, VMK_FALSE);
+      } else {
+         vmk_StoragePollSetInterval(qinfo->pollHandler, nvmePCIEPollInterval);
+      }
+   }
+}
+
+void
+NVMEPCIEStoragePollEnable(NVMEPCIEQueueInfo *qinfo)
+{
+   VMK_ReturnStatus status = VMK_OK;
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+
+   if (qinfo->pollHandler == NULL) {
+      return;
+   }
+
+   if (!vmk_AtomicReadIfEqualWrite8(&qinfo->isPollHdlrEnabled, VMK_FALSE,
+                                    VMK_TRUE)) {
+      status = vmk_StoragePollEnable(qinfo->pollHandler);
+      if (status != VMK_OK) {
+         WPRINT(ctrlr, "Failed to enable poll handler %p for queue %d"
+                       " due to %s! Return to interruption mode for"
+                       " this queue.",
+                qinfo->pollHandler, qinfo->id, vmk_StatusToString(status));
+
+         vmk_StoragePollDestroy(qinfo->pollHandler);
+         qinfo->pollHandler = NULL;
+         vmk_AtomicWrite8(&qinfo->isPollHdlrEnabled, VMK_FALSE);
+      }
+   }
+}
+
+void
+NVMEPCIEStoragePollDisable(NVMEPCIEQueueInfo *qinfo)
+{
+   if ((qinfo->pollHandler != NULL) &&
+       (vmk_AtomicReadIfEqualWrite8(&qinfo->isPollHdlrEnabled, VMK_TRUE,
+                                    VMK_FALSE))) {
+      vmk_StoragePollDisable(qinfo->pollHandler);
+   }
+}
+
+void
+NVMEPCIEStoragePollDestory(NVMEPCIEQueueInfo *qinfo)
+{
+   if (qinfo->pollHandler != NULL) {
+      vmk_StoragePollDestroy(qinfo->pollHandler);
+      qinfo->pollHandler = NULL;
+   }
+}
+#endif
+
+/**
+ * Enable interrupt cookie binding to a queue
+ *
+ * @param[in]  qinfo       Queue instance
+ */
+void
+NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo)
+{
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
+   VMK_ReturnStatus status = VMK_OK;
+   vmk_atomic8 *isIntrEnPtr = &qinfo->isIntrEnabled;
+
+   if (VMK_LIKELY(ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX)) {
+
+      if (!vmk_AtomicReadIfEqualWrite8(isIntrEnPtr, VMK_FALSE, VMK_TRUE)) {
+         status = vmk_IntrEnable(ctrlr->osRes.intrArray[cqInfo->intrIndex]);
+         VMK_ASSERT(VMK_OK == status);
+      }
+   }
+}
+
+/**
+ * Disable interrupt cookie binding to a queue
+ *
+ * @param[in]  qinfo       Queue instance
+ * @param[in]  intrSync    Whether to synchronize interrupt cookie binding to
+ *                         the queue
+ */
+void
+NVMEPCIEDisableIntr(NVMEPCIEQueueInfo *qinfo, vmk_Bool intrSync)
+{
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
+   VMK_ReturnStatus status = VMK_OK;
+   vmk_atomic8 *isIntrEnPtr = &qinfo->isIntrEnabled;
+
+   if (VMK_LIKELY(ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX)) {
+      if (vmk_AtomicReadIfEqualWrite8(isIntrEnPtr, VMK_TRUE, VMK_FALSE)) {
+         if (VMK_UNLIKELY(intrSync)) {
+            vmk_IntrSync(ctrlr->osRes.intrArray[qinfo->cqInfo->intrIndex]);
+         }
+         status = vmk_IntrDisable(ctrlr->osRes.intrArray[cqInfo->intrIndex]);
+         VMK_ASSERT(VMK_OK == status);
+      }
+   }
+}
+
+/**
+ * Process the commands completed by hardware in the given queue, return
+ * the number of completed IO commands.
+ *
+ * @param[in]  qinfo    Queue instance
+ *
+ * @return              The number of completed IO commands.
+ */
+vmk_uint32
 NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
 {
    NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
@@ -1239,6 +1570,7 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
    NVMEPCIECmdInfo *cmdInfo;
    vmk_NvmeCompletionQueueEntry *cqEntry;
    vmk_uint16 head, phase, sqHead;
+   vmk_uint32 numCmdCompleted = 0;
 #ifdef NVME_STATS
    vmk_TimerRelCycles latency = 0;
    vmk_TimerCycles lastValidTs = 0;
@@ -1304,6 +1636,9 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
       if (cmdInfo->done) {
          cmdInfo->done(qinfo, cmdInfo);
       }
+
+      numCmdCompleted++;
+
       if (++head >= cqInfo->qsize) {
          head = 0;
          phase = !phase;
@@ -1317,6 +1652,8 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
          NVMEPCIEWritel(head, cqInfo->doorbell);
       }
    }
+
+   return numCmdCompleted;
 }
 
 static VMK_ReturnStatus
@@ -1498,11 +1835,18 @@ void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo)
       vmk_AtomicDec32(&qinfo->refCount);
       return;
    }
-   if (ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX) {
-      // Flush out all in-flight interrupts.
-      vmk_IntrSync(ctrlr->osRes.intrArray[qinfo->cqInfo->intrIndex]);
-      vmk_IntrDisable(ctrlr->osRes.intrArray[qinfo->cqInfo->intrIndex]);
+
+#if NVME_PCIE_STORAGE_POLL
+   /**
+    * Disable poll handler and re-enable interrupt if StoragePoll feature
+    * enabled and handler created successfully
+    */
+   if (ctrlr->pollEnabled) {
+      NVMEPCIEStoragePollDisable(qinfo);
    }
+#endif
+
+   NVMEPCIEDisableIntr(qinfo, VMK_TRUE);
    vmk_AtomicDec32(&qinfo->refCount);
    return;
 }
@@ -1526,10 +1870,19 @@ NVMEPCIEResumeQueue(NVMEPCIEQueueInfo *qinfo)
       WPRINT(qinfo->ctrlr, "Trying to resume active queue %d.", qinfo->id);
       return VMK_OK;
    }
-   if (ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX) {
-      vmkStatus = vmk_IntrEnable(ctrlr->osRes.intrArray[qinfo->cqInfo->intrIndex]);
-      VMK_ASSERT(vmkStatus == VMK_OK);
+
+#if NVME_PCIE_STORAGE_POLL
+   /**
+    * Enable poll handler if StoragePoll feature enabled and handler created
+    * successfully
+    */
+   if (ctrlr->pollEnabled) {
+      NVMEPCIEStoragePollEnable(qinfo);
    }
+#endif
+
+   NVMEPCIEEnableIntr(qinfo);
+
    return vmkStatus;
 }
 

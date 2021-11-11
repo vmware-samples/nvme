@@ -102,12 +102,31 @@ QueryAdapter(vmk_NvmeAdapter adapter,
 }
 
 /**
+ * notifyAdapterIOAllowed callback of adapter ops
+ */
+static void
+NotifyAdapterIOAllowed(vmk_NvmeAdapter adapter,
+                       vmk_Bool ioAllowed)
+{
+   NVMEPCIEController *ctrlr = vmk_NvmeGetAdapterDriverData(adapter);
+
+   IPRINT(ctrlr, "IOAllowed: %d.", ioAllowed);
+
+#if NVME_PCIE_STORAGE_POLL
+   if (ioAllowed && ctrlr->pollEnabled) {
+      NVMEPCIEStoragePollSetup(ctrlr);
+   }
+#endif
+}
+
+/**
  * Adapter ops used to register vmk_NvmeAdapter
  */
 vmk_NvmeAdapterOps nvmePCIEAdapterOps = {
    .startAdapter = StartAdapter,
    .stopAdapter  = StopAdapter,
    .queryAdapter = QueryAdapter,
+   .notifyAdapterIOAllowed = NotifyAdapterIOAllowed,
 };
 
 void Workaround4HW(NVMEPCIEController *ctrlr, vmk_NvmeRegisterID regID, vmk_uint32* regValue)

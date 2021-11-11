@@ -5,6 +5,11 @@
 This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
+
+2021/7/14 1.2.3.17-1vmw
+
+   Enable StoragePoll.
+
 2021/5/19 1.2.3.16-1vmw
 
    Implement nvme-stats support.
