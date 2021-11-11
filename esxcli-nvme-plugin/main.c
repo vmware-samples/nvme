@@ -20,6 +20,7 @@
 #include <vmkapi.h>
 #include "esxcli_xml.h"
 #include "nvme_lib.h"
+#include "str.h"
 
 //#define PLUGIN_DEBUG
 
@@ -66,9 +67,64 @@ static const char *nvmNsRelPerf[] = {
    "Degraded performance",
 };
 
+#define HEX2CHAR(n) ((n >= 10) ? (n - 10 + 'A') : (n + '0'))
+
+static void
+hexdumptoString(char *inbuff, int inlen, char *outbuff, int outlen)
+{
+   int k, n;
+   vmk_uint8 *p = inbuff;
+   int i = inlen - 1;
+
+   while (i >=0 ) {
+      if (p[i] != '\0') {
+         break;
+      }
+      i --;
+   }
+   for (k = 0, n = 0; k <= i && n < (outlen - 1); k ++) {
+      outbuff[n] = HEX2CHAR((p[k] >> 4));
+      outbuff[n + 1] = HEX2CHAR((p[k] & 0xf));
+      n += 2;
+   }
+   outbuff[n] = 0;
+}
+
+static int
+refineASCIIString(char *p, int len)
+{
+   int i = len - 1;
+   int unprintable = 0;
+
+   while (i >=0 ) {
+      if (p[i] == '\0' || p[i] == ' ') {
+         p[i] = '\0';
+      } else {
+         break;
+      }
+      i --;
+   }
+   while (i >= 0) {
+      if (p[i] == '\0') {
+         p[i] = '_';
+      }
+      if (p[i] < 0x20 || p[i] == 0x7f) {
+         p[i] = '?';
+         unprintable = 1;
+      }
+      i --;
+   }
+   return unprintable;
+}
+
 static void
 PrintIdentifyCtrlr(struct iden_controller *id)
 {
+   char* hexdumpbuff;
+   char* readablebuff;
+   int readbufflen;
+   int hexbufflen;
+
    esxcli_xml_begin_output();
    xml_struct_begin("DeviceInfo");
    PINTS("PCIVID", id->pcieVID);
@@ -170,7 +226,30 @@ PrintIdentifyCtrlr(struct iden_controller *id)
    PBOOL("SGL Bit Bucket Descriptor Support", id->sgls.sglsBitBuckDescSup);
    PBOOL("SGL Keyed SGL Data Block Descriptor Support", id->sgls.keyedSglDataBlockDescSup);
    PBOOL("SGL for NVM Command Set Support", id->sgls.sglsSup);
-   PSTR("NVM Subsystem NVMe Qualified Name", id->subnqn);
+
+   readbufflen = sizeof(id->subnqn) + 64;
+   readablebuff = malloc(readbufflen);
+   if (readablebuff != NULL) {
+      memcpy(readablebuff, id->subnqn, sizeof(id->subnqn));
+      if (refineASCIIString(readablebuff, sizeof(id->subnqn))) {
+         Str_Strcat(readablebuff, "(has unprintable characters)", readbufflen);
+      }
+      PSTR("NVM Subsystem NVMe Qualified Name", readablebuff);
+      free(readablebuff);
+   } else {
+      PSTR("NVM Subsystem NVMe Qualified Name", id->subnqn);
+   }
+
+   hexbufflen = sizeof(id->subnqn) * 2;
+   hexdumpbuff = malloc(hexbufflen);
+   if (hexdumpbuff != NULL) {
+      hexdumptoString((char*)id->subnqn, sizeof(id->subnqn), hexdumpbuff, hexbufflen);
+      PSTR("NVM Subsystem NVMe Qualified Name (hex format)", hexdumpbuff);
+      free(hexdumpbuff);
+   } else {
+      PSTR("NVM Subsystem NVMe Qualified Name (hex format)", "NULL");
+   }
+
    xml_struct_end();
    esxcli_xml_end_output();
 }
