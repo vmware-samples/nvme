@@ -6,6 +6,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2021/4/19 1.2.3.15-1vmw
+
+   Fix PSOD while hotplug happened during controller reset
+
 2021/2/5 1.2.3.14-1vmw
 
    Fail the Attach() if interrupt allocation fails.

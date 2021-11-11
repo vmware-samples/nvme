@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -258,6 +258,7 @@ CompQueueDestroy(NVMEPCIEQueueInfo *qinfo)
    DPRINT_Q(ctrlr, "Free lock for cq %d.", cqInfo->id);
 
    NVMEPCIEFree(cqInfo);
+   qinfo->cqInfo = NULL;
    DPRINT_Q(ctrlr, "Free cq %d.", qinfo->id);
 
    return vmkStatus;
@@ -356,6 +357,7 @@ SubQueueDestroy(NVMEPCIEQueueInfo *qinfo)
    DPRINT_Q(ctrlr, "Free lock for sq %d.", sqInfo->id);
 
    NVMEPCIEFree(sqInfo);
+   qinfo->sqInfo = NULL;
    DPRINT_Q(ctrlr, "Free sq %d.", qinfo->id);
 
    return vmkStatus;
@@ -457,6 +459,7 @@ CmdInfoListDestroy(NVMEPCIEQueueInfo *qinfo)
    DPRINT_Q(ctrlr, "Free cmdList lock for queue %d.", qinfo->id);
 
    NVMEPCIEFree(cmdList);
+   qinfo->cmdList = NULL;
    DPRINT_Q(ctrlr, "Free cmdList for queue %d.", qinfo->id);
 
    return VMK_OK;
@@ -776,17 +779,19 @@ NVMEPCIESubmitAsyncCommand(NVMEPCIEController *ctrlr,
    vmk_uint16 cid;
 
    qinfo = &ctrlr->queueList[qid];
+   vmk_AtomicInc32(&qinfo->refCount);
    if (vmk_AtomicRead32(&qinfo->state) != NVME_PCIE_QUEUE_ACTIVE) {
       vmkCmd->nvmeStatus = VMK_NVME_STATUS_VMW_IN_RESET;
+      vmk_AtomicDec32(&qinfo->refCount);
       return VMK_FAILURE;
    }
-   vmk_AtomicInc32(&qinfo->refCount);
 
    if (ctrlr->abortEnabled) {
       cid = vmkCmd->nvmeCmd.cdw0.cid;
       VMK_ASSERT(cid < qinfo->cmdList->idCount - NVME_PCIE_SYNC_CMD_NUM);
       if (VMK_UNLIKELY(cid >= qinfo->cmdList->idCount - NVME_PCIE_SYNC_CMD_NUM)) {
          vmkCmd->nvmeStatus = VMK_NVME_STATUS_VMW_BAD_PARAMETER;
+         vmk_AtomicDec32(&qinfo->refCount);
          return VMK_FAILURE;
       }
       cmdInfo = NVMEPCIEGetCmdInfo(qinfo, cid);
@@ -897,11 +902,12 @@ NVMEPCIESubmitSyncCommand(NVMEPCIEController *ctrlr,
    }
 
    qinfo = &ctrlr->queueList[qid];
+   vmk_AtomicInc32(&qinfo->refCount);
    if (vmk_AtomicRead32(&qinfo->state) != NVME_PCIE_QUEUE_ACTIVE) {
       vmkCmd->nvmeStatus = VMK_NVME_STATUS_VMW_IN_RESET;
+      vmk_AtomicDec32(&qinfo->refCount);
       return VMK_FAILURE;
    }
-   vmk_AtomicInc32(&qinfo->refCount);
 
    if (ctrlr->abortEnabled) {
       cmdInfo = NVMEPCIEGetCmdInfo(qinfo, NVME_PCIE_SYNC_CMD_ID);
@@ -1338,9 +1344,12 @@ void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo)
    NVMEPCIEController *ctrlr = qinfo->ctrlr;
    NVMEPCIEQueueState state;
 
-   state = vmk_AtomicReadWrite32(&qinfo->state, NVME_PCIE_QUEUE_SUSPENDED);
-   if (state == NVME_PCIE_QUEUE_SUSPENDED) {
+   vmk_AtomicInc32(&qinfo->refCount);
+   state = vmk_AtomicReadIfEqualWrite32(&qinfo->state, NVME_PCIE_QUEUE_ACTIVE,
+                                        NVME_PCIE_QUEUE_SUSPENDED);
+   if (state != NVME_PCIE_QUEUE_ACTIVE) {
       WPRINT(ctrlr, "Trying to suspend inactive queue %d.", qinfo->id);
+      vmk_AtomicDec32(&qinfo->refCount);
       return;
    }
    if (ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX) {
@@ -1348,6 +1357,7 @@ void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo)
       vmk_IntrSync(ctrlr->osRes.intrArray[qinfo->cqInfo->intrIndex]);
       vmk_IntrDisable(ctrlr->osRes.intrArray[qinfo->cqInfo->intrIndex]);
    }
+   vmk_AtomicDec32(&qinfo->refCount);
    return;
 }
 
@@ -1388,10 +1398,18 @@ NVMEPCIEResumeQueue(NVMEPCIEQueueInfo *qinfo)
 void
 NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
 {
-   NVMEPCIECmdInfo *cmdInfo = qinfo->cmdList->list;
+   NVMEPCIECmdInfo *cmdInfo = NULL;
    vmk_atomic32 atomicStatus;
    int i;
 
+   vmk_AtomicInc32(&qinfo->refCount);
+   if (vmk_AtomicRead32(&qinfo->state) == NVME_PCIE_QUEUE_NON_EXIST) {
+      WPRINT(qinfo->ctrlr, "Trying to flush non exist queue %d.", qinfo->id);
+      vmk_AtomicDec32(&qinfo->refCount);
+      return;
+   }
+
+   cmdInfo = qinfo->cmdList->list;
    vmk_SpinlockLock(qinfo->cqInfo->lock);
    NVMEPCIEProcessCq(qinfo);
    vmk_SpinlockUnlock(qinfo->cqInfo->lock);
@@ -1406,6 +1424,7 @@ NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
       }
       cmdInfo++;
    }
+   vmk_AtomicDec32(&qinfo->refCount);
 }
 
 /**
