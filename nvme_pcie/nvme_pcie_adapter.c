@@ -132,6 +132,9 @@ ReadRegister32(vmk_NvmeController controller,
                vmk_uint32 *regValue)
 {
    NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
+   if (VMK_UNLIKELY(ctrlr->isRemoved)) {
+      return VMK_PERM_DEV_LOSS;
+   }
    *regValue = NVMEPCIEReadl(ctrlr->regs + regID);
    /*do workaround for some special device.*/
    Workaround4HW(ctrlr, regID, regValue);
@@ -148,6 +151,9 @@ ReadRegister64(vmk_NvmeController controller,
                vmk_uint64 *regValue)
 {
    NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
+   if (VMK_UNLIKELY(ctrlr->isRemoved)) {
+      return VMK_PERM_DEV_LOSS;
+   }
    *regValue = NVMEPCIEReadq(ctrlr->regs + regID);
    DPRINT_CTRLR(ctrlr, "regID: 0x%x regValue: 0x%lx", regID, *regValue);
    return VMK_OK;
@@ -162,6 +168,9 @@ WriteRegister32(vmk_NvmeController controller,
                 vmk_uint32 regValue)
 {
    NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
+   if (VMK_UNLIKELY(ctrlr->isRemoved)) {
+      return VMK_PERM_DEV_LOSS;
+   }
    NVMEPCIEWritel(regValue, (ctrlr->regs + regID));
    DPRINT_CTRLR(ctrlr, "regID: 0x%x regValue: 0x%x", regID, regValue);
    return VMK_OK;
@@ -188,6 +197,10 @@ ConfigAdminQueue(vmk_NvmeController controller)
    NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
    NVMEPCIEQueueInfo *qinfo = &ctrlr->queueList[0];
    vmk_NvmeRegAqa aqa;
+
+   if (ctrlr->isRemoved) {
+      return VMK_PERM_DEV_LOSS;
+   }
 
    aqa.asqs = qinfo->sqInfo->qsize - 1;
    aqa.acqs = qinfo->cqInfo->qsize - 1;

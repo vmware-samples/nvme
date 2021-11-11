@@ -6,6 +6,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2020/3/9 1.2.3.3-1vmw
+
+   Avoid MMIO access if the device is removed.
+
 2020/3/6 1.2.3.2-1vmw
 
    Make controller's numIoQueues atomic.

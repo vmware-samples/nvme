@@ -497,7 +497,7 @@ QueueConstruct(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo,
    }
 
    VPRINT(ctrlr, "sq[%d].doorbell: 0x%lx, cq[%d].doorbell: 0x%lx",
-             qid, qinfo->sqInfo->doorbell, qid, qinfo->cqInfo->doorbell);
+          qid, qinfo->sqInfo->doorbell, qid, qinfo->cqInfo->doorbell);
 
    vmkStatus = CmdInfoListConstruct(qinfo, sqsize - 1);
    if (vmkStatus != VMK_OK) {
@@ -999,6 +999,11 @@ NVMEPCIEIssueCommandToHw(NVMEPCIEQueueInfo *qinfo,
       return VMK_NVME_STATUS_VMW_IN_RESET;
    }
 
+   if (VMK_UNLIKELY(qinfo->ctrlr->isRemoved)) {
+      vmk_SpinlockUnlock(sqInfo->lock);
+      return VMK_NVME_STATUS_VMW_QUIESCED;
+   }
+
    vmk_Memcpy(&sqInfo->subq[tail], &cmdInfo->vmkCmd->nvmeCmd, VMK_NVME_SQE_SIZE);
    NVMEPCIEDumpSqe(qinfo->ctrlr, &cmdInfo->vmkCmd->nvmeCmd);
    sqInfo->subq[tail].cdw0.cid = cmdInfo->cmdId;
@@ -1067,7 +1072,9 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
    if (!((head == cqInfo->head) && (phase == cqInfo->phase))) {
       cqInfo->head = head;
       cqInfo->phase = phase;
-      NVMEPCIEWritel(head, cqInfo->doorbell);
+      if (VMK_LIKELY(!ctrlr->isRemoved)) {
+         NVMEPCIEWritel(head, cqInfo->doorbell);
+      }
    }
 }
 
