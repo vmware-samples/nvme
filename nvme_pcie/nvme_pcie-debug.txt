@@ -1,0 +1,66 @@
+== NVMe driver logger and debug utils ==
+
+NVMe driver exposes 2 parameters for users to set log and debug level.
+
+1. nvmePCIELogLevel
+
+nvmePCIELogLevel determines the log level of nvme_pcie driver. There are 5 levels:
+
+   * 1 - error
+   * 2 - warning
+   * 3 - info (default)
+   * 4 - verbose
+   * 5 - debug
+
+Each level has its corresponding Marco. See the table below.
+
+   +---------------------------------+
+   |  Num   |   Level   |   Macro    |
+   +--------+-----------+------------+
+   |   1    |   error   |   EPRINT   |
+   +--------+-----------+------------+
+   |   2    |   warning |   WPRINT   |
+   +--------+-----------+------------+
+   |   3    |   info    |   IPRINT   |
+   +--------+-----------+------------+
+   |   4    |   verbose |   VPRINT   |
+   +--------+-----------+------------+
+   |   5    |   debug   |   DPRINT   |
+   +---------------------------------+
+
+Log message is incremental, which means, when nvme_log_leve is set to 3 (info), message of which log number less than 3 shall be printed,including EPRINT, WPRINT, IPRINT.
+When nvmePCIELogLevel is set to 5 (debug), all the logs with EPRINT, WPRINT, IPRINT, VPRINT, DPRINT shall be printed.
+
+2. nvmePCIEDebugMask
+
+nvmePCIEDebugMask is a 32 bitmap, used to distinguish different component levels, in order to avoid too many log spewing when log level set to 5 (debug),
+
+  31                               15                              0
+  +----------------------------------------------------------------+
+  |   NVME_DEBUG_DUMP_x            |        DPRINT_x               |
+  +----------------------------------------------------------------+
+
+The lower 16 bits are used to print driver differnet components:
+
+   BIT_0:  NVME_DEBUG_CTRLR: Print ctrlr level log
+   BIT_1:  NVME_DEBUG_NS:    Print namespace level log
+   BIT_2:  NVME_DEBUG_Q:     Print queue level log
+   BIT_3:  NVME_DEBUG_CMD:   Print IO command level log
+   BIT_4:  NVME_DEBUG_ADMIN: Print admin command log
+   BIT_5:  NVME_DEBUG_MGMT:  Print management log
+   BIT_6:  NVME_DEBUG_INIT:  Print init/cleanup log
+
+
+
+The higher 16 bits are used to be switches for driver debug utils in nvme_pcie_debug.c:
+
+   BIT_16: NVME_DEBUG_DUMP_CTRLR   (Reserved)
+   BIT_17: NVME_DEBUG_DUMP_NS      (Reserved)
+   BIT_18: NVME_DEBUG_DUMP_SQE     NVMEPCIEDumpSqe
+   BIT_19: NVME_DEBUG_DUMP_CQE     NvmeDebug_DumpCmd
+   BIT_20: NVME_DEBUG_DUMP_PRP     (Reserved)
+   BIT_21: NVME_DEBUG_DUMP_SGL     (Reserved)
+
+Usage:
+
+   setting nvmePCIELogLevel=5 nvmePCIEDebugMask=0xC to enable DPRINT_Q, DPRINT_CMD.
