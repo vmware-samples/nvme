@@ -1454,7 +1454,8 @@ NVMEPCIEStoragePollCreate(NVMEPCIEQueueInfo *qinfo)
    }
 
    adapterName = vmk_NvmeGetAdapterName(ctrlr->osRes.vmkAdapter);
-   if (adapterName == NULL) {
+   if ((adapterName == NULL) ||
+       (vmk_Strnlen(adapterName, VMK_MISC_NAME_MAX) == 0)) {
       return;
    }
 
