@@ -132,8 +132,8 @@ nvme_pcie_bulletin_def = {
       'kbUrl'       : 'http://kb.vmware.com/kb/example.html',
 
       'componentNameSpec' : { 'name' : 'VMware-NVMe-PCIe',
-                              'uistring' : 'VMware NVMe PCI Express \
-                                            Storage Driver'
+                              'uistring' : 'VMware NVMe PCI Express '
+                                           'Storage Driver'
                             },
 
       'componentVersionSpec' : { 'version' : fullVersion,
