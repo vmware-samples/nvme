@@ -1,11 +1,7 @@
-/*******************************************************************************
- * Portions Copyright (c) 2013-2015  VMware, Inc. All rights reserved.
- *
- * Portions Copyright (c) 2012-2014, Micron Technology, Inc.
- *
- * Portions Copyright (c) 2012-2013  Integrated Device Technology, Inc.
- * All rights reserved.
- *******************************************************************************/
+/*****************************************************************************
+ * Copyright (c) 2016-2018, 2020 VMware, Inc. All rights reserved.
+ * -- VMware Confidential
+ *****************************************************************************/
 
 /*
  * @file: nvme_pcie_debug.h --
