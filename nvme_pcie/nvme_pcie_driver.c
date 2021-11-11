@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -26,6 +26,8 @@ static VMK_ReturnStatus SetupAdminQueue(NVMEPCIEController *ctrlr);
 static void DestroyAdminQueue(NVMEPCIEController *ctrlr);
 extern void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo);
 extern void NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status);
+extern int nvmePCIEMsiEnbaled;
+
 /**
  * Wait for CSTS.RDY to become expected value
  *
@@ -687,10 +689,18 @@ SetupAdminQueue(NVMEPCIEController *ctrlr)
 {
    VMK_ReturnStatus vmkStatus;
 
-   vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, 1);
-   if (vmkStatus != VMK_OK) {
-      EPRINT(ctrlr, "Failed to allocate admin queue interrupt, 0x%x.", vmkStatus);
-      return vmkStatus;
+   if (!nvmePCIEMsiEnbaled) {
+      vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, 1);
+      if (vmkStatus != VMK_OK) {
+         EPRINT(ctrlr, "Failed to allocate msix admin queue interrupt, 0x%x.", vmkStatus);
+         return vmkStatus;
+      }
+   } else{
+      vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSI, 1);
+      if (vmkStatus != VMK_OK) {
+         EPRINT(ctrlr, "Failed to allocate msi admin queue interrupt, 0x%x.", vmkStatus);
+         return vmkStatus;
+      }
    }
 
    vmkStatus = NVMEPCIEQueueCreate(ctrlr, 0, nvmePCIEAdminQueueSize);

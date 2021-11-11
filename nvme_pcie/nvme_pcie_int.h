@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -32,6 +32,8 @@
 #include "nvme_pcie_os.h"
 #include "nvme_pcie_debug.h"
 
+#define NVME_ABORT 1
+
 /**
  * Driver name. This should be the name of the SC file.
  */
@@ -40,7 +42,7 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.11"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.14"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -74,6 +76,9 @@
 #define NVME_PCIE_MAX_TRANSFER_SIZE (NVME_PCIE_MAX_PRPS * VMK_PAGE_SIZE)
 
 #define NVME_PCIE_SG_MAX_ENTRIES 32
+
+#define NVME_PCIE_SYNC_CMD_NUM 10
+#define NVME_PCIE_SYNC_CMD_ID 0xffff
 
 typedef struct NVMEPCIEController NVMEPCIEController;
 typedef struct NVMEPCIECmdInfo NVMEPCIECmdInfo;
@@ -212,6 +217,7 @@ typedef struct NVMEPCIEController {
    NVMEPCIECtrlrOsResources osRes;
    NVMEPCIEQueueInfo *queueList;
    vmk_Bool isRemoved;
+   vmk_Bool abortEnabled;
    NVMEPCIEWorkaround workaround;
    vmk_uint32 dstrd;
 } NVMEPCIEController;
@@ -231,10 +237,11 @@ NVMEPCIEGetCtrlrName(NVMEPCIEController *ctrlr)
 static inline vmk_ByteCount
 NVMEPCIEQueueAllocSize(void)
 {
-   return (sizeof(NVMEPCIEQueueInfo) +
-           sizeof(NVMEPCIESubQueueInfo) +
+   vmk_uint32 numCmdInfo =
+      NVME_PCIE_MAX_IO_QUEUE_SIZE * 2 + NVME_PCIE_SYNC_CMD_NUM;
+   return (sizeof(NVMEPCIEQueueInfo) + sizeof(NVMEPCIESubQueueInfo) +
            sizeof(NVMEPCIECompQueueInfo) +
-           sizeof(NVMEPCIECmdInfo) * NVME_PCIE_MAX_IO_QUEUE_SIZE +
+           sizeof(NVMEPCIECmdInfo) * numCmdInfo +
            vmk_SpinlockAllocSize(VMK_SPINLOCK) * 3);
 }
 
@@ -389,6 +396,10 @@ VMK_ReturnStatus NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
                                    vmk_PCIInterruptType type,
                                    vmk_uint32 numDesired);
 void NVMEPCIEIntrFree(NVMEPCIEController *ctrlr);
+
+VMK_ReturnStatus NVMEPCIECtrlMsiAck(void *handlerData,
+                                    vmk_IntrCookie intrCookie);
+void NVMEPCIECtrlMsiHandler(void *handlerData, vmk_IntrCookie intrCookie);
 
 VMK_ReturnStatus NVMEPCIEQueueIntrAck(void *handlerData,
                                       vmk_IntrCookie intrCookie);

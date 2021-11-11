@@ -310,6 +310,16 @@ NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
    if (vmkStatus == VMK_OK) {
       ctrlr->osRes.intrType = type;
       ctrlr->osRes.numIntrs = numAllocated;
+      if (type == VMK_PCI_INTERRUPT_TYPE_MSI) {
+         vmkStatus = NVMEPCIEIntrRegister(ctrlr->osRes.device,
+                     ctrlr->osRes.intrArray[0],
+                     ctrlr,
+                     NVMEPCIEGetCtrlrName(ctrlr),
+                     NVMEPCIECtrlMsiAck,
+                     NVMEPCIECtrlMsiHandler);
+
+         vmk_IntrEnable(ctrlr->osRes.intrArray[0]);
+      }
    } else {
       ctrlr->osRes.intrType = VMK_PCI_INTERRUPT_TYPE_NONE;
       ctrlr->osRes.numIntrs = 0;

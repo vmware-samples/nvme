@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -13,6 +13,7 @@
 
 extern int nvmePCIEDma4KSwitch;
 extern vmk_uint32 nvmePCIEFakeAdminQSize;
+extern int nvmePCIEMsiEnbaled;
 
 VMK_NAMESPACE_REQUIRED(VMK_NAMESPACE_NVME, VMK_NAMESPACE_NVME_VERSION);
 static VMK_ReturnStatus RequestIoQueues(NVMEPCIEController *ctrlr,
@@ -47,8 +48,8 @@ QueryAdapter(vmk_NvmeAdapter adapter,
              vmk_NvmeAdapterQueryParams *params)
 {
    NVMEPCIEController *ctrlr = vmk_NvmeGetAdapterDriverData(adapter);
-   vmk_NvmeIdentifyController *identData;
-   VMK_ReturnStatus vmkStatus;
+   const vmk_NvmeIdentifyController *identData = NULL;
+   VMK_ReturnStatus vmkStatus = VMK_OK;
    vmk_uint8 *uid;
    int i;
 
@@ -56,14 +57,13 @@ QueryAdapter(vmk_NvmeAdapter adapter,
       case VMK_NVME_ADAPTER_QUERY_ADAPTER_UID:
          uid = *params->uidParams.uid;
 
-         identData = NVMEPCIEAlloc(sizeof(vmk_NvmeIdentifyController), 0);
-         if (identData == NULL) {
-            return VMK_NO_MEMORY;
+         if (ctrlr->osRes.vmkController == NULL) {
+            return VMK_NOT_READY;
          }
-         vmkStatus = NVMEPCIEIdentify(ctrlr,
-                                      VMK_NVME_CNS_IDENTIFY_CONTROLLER,
-                                      0,
-                                      (vmk_uint8 *)identData);
+         identData = vmk_NvmeGetControllerIdentifyData(ctrlr->osRes.vmkController);
+         if (identData == NULL) {
+            return VMK_NOT_READY;
+         }
          if (vmkStatus == VMK_OK) {
             if (identData->subnqn[0] == 'n') {
                vmk_Snprintf((char *)params->uidParams.uid,
@@ -96,7 +96,6 @@ QueryAdapter(vmk_NvmeAdapter adapter,
                }
             }
          }
-         NVMEPCIEFree(identData);
          return vmkStatus;
       default:
          return VMK_NOT_SUPPORTED;
@@ -235,24 +234,26 @@ ReallocIntr(NVMEPCIEController *ctrlr, int intrNum)
    VMK_ReturnStatus vmkStatus = VMK_OK;
    NVMEPCIEQueueInfo *adminq = &ctrlr->queueList[0];
 
-   NVMEPCIESuspendQueue(adminq);
-   NVMEPCIEIntrUnregister(ctrlr->osRes.intrArray[0], adminq);
-   NVMEPCIEIntrFree(ctrlr);
+   if (!nvmePCIEMsiEnbaled) {
+      NVMEPCIESuspendQueue(adminq);
+      NVMEPCIEIntrUnregister(ctrlr->osRes.intrArray[0], adminq);
+      NVMEPCIEIntrFree(ctrlr);
 
-   vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, intrNum);
-   if (vmkStatus != VMK_OK) {
-      EPRINT(ctrlr, "Failed to allocate %d interrupt cookies", intrNum);
-      return vmkStatus;
-   }
+      vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, intrNum);
+      if (vmkStatus != VMK_OK) {
+         EPRINT(ctrlr, "Failed to allocate MSIX %d interrupt cookies", intrNum);
+         return VMK_OK;
+      }
 
-   vmkStatus = NVMEPCIEIntrRegister(ctrlr->osRes.device,
-                                    ctrlr->osRes.intrArray[0],
-                                    adminq,
-                                    NVMEPCIEGetCtrlrName(ctrlr),
-                                    NVMEPCIEQueueIntrAck,
-                                    NVMEPCIEQueueIntrHandler);
-   if (vmkStatus != VMK_OK) {
-      EPRINT(ctrlr, "Failed to register interrupt for admin queue, 0x%x.", vmkStatus);
+      vmkStatus = NVMEPCIEIntrRegister(ctrlr->osRes.device,
+                                       ctrlr->osRes.intrArray[0],
+                                       adminq,
+                                       NVMEPCIEGetCtrlrName(ctrlr),
+                                       NVMEPCIEQueueIntrAck,
+                                       NVMEPCIEQueueIntrHandler);
+      if (vmkStatus != VMK_OK) {
+         EPRINT(ctrlr, "Failed to register interrupt for admin queue, 0x%x.", vmkStatus);
+      }
    }
 
    NVMEPCIEResumeQueue(adminq);
@@ -289,19 +290,24 @@ SetNumberIOQueues(vmk_NvmeController controller,
    }
 
    // Only reallocate intr in controller init or IO queue number is changed in reset.
-   if (ctrlr->osRes.numIntrs == 1 || ctrlr->osRes.numIntrs != 1 + nrIoQueues) {
-      vmkStatus = ReallocIntr(ctrlr, 1 + nrIoQueues);
-      if (vmkStatus != VMK_OK) {
-         EPRINT(ctrlr, "Failed to re-allocate %d interrupt cookie.", 1 + nrIoQueues);
-         return vmkStatus;
+   if (!nvmePCIEMsiEnbaled) {
+      if (ctrlr->osRes.numIntrs == 1 || ctrlr->osRes.numIntrs != 1 + nrIoQueues) {
+         vmkStatus = ReallocIntr(ctrlr, 1 + nrIoQueues);
+         if (vmkStatus != VMK_OK) {
+            EPRINT(ctrlr, "Failed to re-allocate %d interrupt cookie.", 1 + nrIoQueues);
+            return vmkStatus;
+         }
       }
+
+      nrIoQueues = ctrlr->osRes.numIntrs - 1;
+   } else {
+      nrIoQueues = 1;
    }
 
-   nrIoQueues = ctrlr->osRes.numIntrs - 1;
    vmkStatus = RequestIoQueues(ctrlr, &nrIoQueues);
-      if (vmkStatus != VMK_OK) {
-         EPRINT(ctrlr, "Failed to allocate hardware IO queues.");
-         return vmkStatus;
+   if (vmkStatus != VMK_OK) {
+      EPRINT(ctrlr, "Failed to allocate hardware IO queues.");
+      return vmkStatus;
    }
    *numQueuesAllocated = nrIoQueues;
    ctrlr->maxIoQueues = nrIoQueues;
@@ -429,9 +435,11 @@ static vmk_IntrCookie
 GetIntrCookie(vmk_NvmeController controller, vmk_NvmeQueueID qid)
 {
    NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
-   if (ctrlr->osRes.intrType != VMK_PCI_INTERRUPT_TYPE_MSIX ||
-       qid >= ctrlr->osRes.numIntrs) {
-      return VMK_INVALID_INTRCOOKIE;
+   if (!nvmePCIEMsiEnbaled) {
+      if (ctrlr->osRes.intrType != VMK_PCI_INTERRUPT_TYPE_MSIX ||
+          qid >= ctrlr->osRes.numIntrs) {
+         return VMK_INVALID_INTRCOOKIE;
+      }
    }
    return ctrlr->osRes.intrArray[qid];
 }
@@ -523,6 +531,26 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
       return vmkStatus;
    }
    VMK_ASSERT(vmkAdapter != NULL);
+
+#if NVME_ABORT == 1
+   vmkStatus = vmk_NvmeRegisterAdapterCapability(
+                  vmkAdapter,
+                  VMK_NVME_ADAPTER_CAP_NVME_ABORT,
+                  NULL);
+   if (vmkStatus == VMK_OK) {
+      IPRINT(ctrlr, "Abort capability is enabled.");
+      ctrlr->abortEnabled = VMK_TRUE;
+   } else if (vmkStatus == VMK_IS_DISABLED) {
+      IPRINT(ctrlr, "Abort capability is not enabled.");
+      ctrlr->abortEnabled = VMK_FALSE;
+      vmkStatus = VMK_OK;
+   } else {
+      EPRINT(ctrlr, "Failed to register abort capability,0x%x.", vmkStatus);
+      vmk_NvmeFreeAdapter(vmkAdapter);
+      vmk_DMAEngineDestroy(ctrlr->osRes.IODmaEngine);
+      return vmkStatus;
+   }
+#endif
 
    ctrlr->osRes.vmkAdapter = vmkAdapter;
    return VMK_OK;

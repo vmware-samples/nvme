@@ -1,7 +1,7 @@
 """
-********************************************************************************
-* Copyright (c) 2016-2020 VMware, Inc. All rights reserved.
-********************************************************************************
+* *******************************************************************************
+* Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
+* *******************************************************************************
 """
 # Driver definition for nvme driver.
 #
@@ -32,7 +32,7 @@ nvme_pcie_identification = {
    "binary compat"   : "yes",
    "summary"         : "Non-Volatile memory controller driver",
    "description"     : "Non-Volatile memory controller driver",
-   "version"         : "1.2.3.11",
+   "version"         : "1.2.3.14",
    "version_bump"    : 1,
    "license"         : VMK_MODULE_LICENSE_BSD,
    "vendor"          : "VMware",

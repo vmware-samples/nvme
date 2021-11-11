@@ -1,5 +1,5 @@
 DEV = {
-   "priority"                   : "default",
+   "priority"                   : "ihv",
    "bus type"                   : "pci",
    "device info"                : {
       "vendor list"                : [

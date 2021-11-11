@@ -20,6 +20,9 @@ VMK_MODPARAM(nvmePCIEDebugMask, int, "NVMe PCIe driver debug mask");
 int nvmePCIEDma4KSwitch = 0;
 VMK_MODPARAM(nvmePCIEDma4KSwitch, int, "NVMe PCIe 4k-alignment DMA");
 
+int nvmePCIEMsiEnbaled = 0;
+VMK_MODPARAM(nvmePCIEMsiEnbaled, int, "NVMe PCIe MSI interrupt enable");
+
 vmk_uint32 nvmePCIEFakeAdminQSize = 0;
 VMK_MODPARAM(nvmePCIEFakeAdminQSize, uint, "NVMe PCIe fake ADMIN queue size. 0's based");
 extern int nvmePCIEAdminQueueSize;

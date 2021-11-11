@@ -6,6 +6,18 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2021/2/5 1.2.3.14-1vmw
+
+   Fail the Attach() if interrupt allocation fails.
+
+2020/10/26 1.2.3.13-1vmw
+
+   Implement abort support.
+
+2020/9/17 1.2.3.12-1vmw
+
+   Enable MSI interrupt.
+
 2020/8/20 1.2.3.11-1vmw
 
    Set max transfer size as stripe size if config parameter nvmePCIEForceStripe is enabled.
