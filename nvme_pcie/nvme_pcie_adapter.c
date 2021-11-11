@@ -393,7 +393,8 @@ GetStripeSize(vmk_NvmeController controller)
    // So far, we only know the following Intel devices have stripe limitation.
    if (pciId->vendorID == 0x8086 && (pciId->deviceID == 0x0953 ||
                                      pciId->deviceID == 0x0a53 ||
-                                     pciId->deviceID == 0x0a54)) {
+                                     pciId->deviceID == 0x0a54 ||
+                                     pciId->deviceID == 0x0a55)) {
       ReadRegister64(controller, VMK_NVME_REG_CAP, (vmk_uint64 *)&cap);
       stripeSize = (1 << identData->vs[3]) << (cap.mpsmin + 12);
       VPRINT(ctrlr, "vendorID: 0x%x, deviceID: 0x%x, vs[3]: 0x%x, stripeSize: 0x%x",
