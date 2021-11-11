@@ -394,11 +394,14 @@ GetStripeSize(vmk_NvmeController controller)
    if (pciId->vendorID == 0x8086 && (pciId->deviceID == 0x0953 ||
                                      pciId->deviceID == 0x0a53 ||
                                      pciId->deviceID == 0x0a54 ||
-                                     pciId->deviceID == 0x0a55)) {
+                                     pciId->deviceID == 0x0a55 ||
+                                     pciId->deviceID == 0x0b60)) {
       ReadRegister64(controller, VMK_NVME_REG_CAP, (vmk_uint64 *)&cap);
-      stripeSize = (1 << identData->vs[3]) << (cap.mpsmin + 12);
-      VPRINT(ctrlr, "vendorID: 0x%x, deviceID: 0x%x, vs[3]: 0x%x, stripeSize: 0x%x",
-             pciId->vendorID, pciId->deviceID, identData->vs[3], stripeSize);
+      if (identData->mdts != 0) {
+         stripeSize = (1 << identData->mdts) << (cap.mpsmin + 12);
+      }
+      IPRINT(ctrlr, "vendorID: 0x%x, deviceID: 0x%x, mdts: 0x%x, vs[3]: 0x%x, stripeSize: 0x%x",
+             pciId->vendorID, pciId->deviceID, identData->mdts, identData->vs[3], stripeSize);
    }
 
    return stripeSize;

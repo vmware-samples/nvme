@@ -5,6 +5,10 @@
 This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
+2020/6/22 1.2.3.8-1vmw
+
+   Add Intel P5500/5600 device into stripe limitation list.
+
 2020/6/1 1.2.3.7-1vmw
 
    Add Intel P4600 device into stripe limitation list.
