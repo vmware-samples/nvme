@@ -1800,6 +1800,7 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
    int nsStatus = 0;
    VMK_ReturnStatus status;
    char deviceName[MAX_DEV_NAME_LEN];
+   int mdSize = 0;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:n:f:s:p:l:m:")) != -1) {
       switch (ch) {
@@ -1919,15 +1920,22 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
       goto out_free_idNs;
    }
 
-   if ((idNs->metaDataCap & 0x1) == 0 && m == 1) {
+   mdSize = idNs->lbaFmtSup[f].metaSize;
+
+   if ((idNs->metaDataCap & 0x1) == 0 && m == 1 && mdSize > 0) {
       Error("Invalid parameter: ms, namespace doesn't support metadata being tranferred"
             " as part of an extended data buffer.");
       goto out_free_idNs;
    }
 
-   if ((idNs->metaDataCap & 0x2) == 0 && m == 0) {
+   if ((idNs->metaDataCap & 0x2) == 0 && m == 0 && mdSize > 0) {
       Error("Invalid parameter: ms, namespace doesn't support metadata being tranferred"
             " as part of a separate buffer.");
+      goto out_free_idNs;
+   }
+
+   if (mdSize == 0 && p > 0) {
+      Error("Invalid parameter: pi, PI cannot be enabled with zero metadata size.");
       goto out_free_idNs;
    }
 
@@ -1946,13 +1954,13 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
       goto out_free_idNs;
    }
 
-   if ((idNs->dataProtCap & 0x8) == 0 && l == 1) {
+   if ((idNs->dataProtCap & 0x8) == 0 && l == 1 && p > 0) {
       Error("Invalid parameter: pil, namespace doesn't support PI data being transferred"
             " as first eight bytes of metadata.");
       goto out_free_idNs;
    }
 
-   if ((idNs->dataProtCap & 0x10) == 0 && l == 0) {
+   if ((idNs->dataProtCap & 0x10) == 0 && l == 0 && p > 0) {
       Error("Invalid parameter: pil, namespace doesn't support PI data being transferred"
             " as last eight bytes of metadata.");
       goto out_free_idNs;

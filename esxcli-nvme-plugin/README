@@ -6,6 +6,12 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2018/12/6 1.2.0.36-1vmw
+
+   Fix PR #2231620: Remove unnecessary checks for namespace format command.
+   1. Not check metadata settings if metadata size is 0.
+   2. Not check protection information location if protection information is not enabled.
+
 2018/8/23 1.2.0.35-1vmw
 
    Fix PR #2185293: Remove feature switch "NVME_NS_MGMT" and reference code in plugin.
