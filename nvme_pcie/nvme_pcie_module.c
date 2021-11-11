@@ -17,6 +17,8 @@ VMK_MODPARAM(nvmePCIELogLevel, int, "NVMe PCIe driver log level");
 int nvmePCIEDebugMask = 0;
 VMK_MODPARAM(nvmePCIEDebugMask, int, "NVMe PCIe driver debug mask");
 
+int nvmePCIEDma4KSwitch = 0;
+VMK_MODPARAM(nvmePCIEDma4KSwitch, int, "NVMe PCIe 4k-alignment DMA");
 /**
  * Global, static data that holds module/driver wide resources
  */

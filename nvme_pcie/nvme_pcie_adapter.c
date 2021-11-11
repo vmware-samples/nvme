@@ -11,6 +11,8 @@
 
 #include "nvme_pcie_int.h"
 
+extern int nvmePCIEDma4KSwitch;
+
 VMK_NAMESPACE_REQUIRED(VMK_NAMESPACE_NVME, VMK_NAMESPACE_NVME_VERSION);
 static VMK_ReturnStatus RequestIoQueues(NVMEPCIEController *ctrlr,
                                         vmk_uint32 *nrIoQueues);
@@ -448,7 +450,7 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
    constraints.sgElemStraddle = VMK_ADDRESS_MASK_32BIT + 1;
 
    // Customize for AWS EBS and local device, refer to PR #2126797 & PR #2196444.
-   if (NVMEPCIEIsEBSCustomDevice(ctrlr) || NVMEPCIEIsAWSLocalDevice(ctrlr)) {
+   if (NVMEPCIEIsEBSCustomDevice(ctrlr) || NVMEPCIEIsAWSLocalDevice(ctrlr) || nvmePCIEDma4KSwitch) {
       constraints.sgElemSizeMult = VMK_PAGE_SIZE;
       constraints.sgElemAlignment = VMK_PAGE_SIZE;
       WPRINT(ctrlr, "sgElemSizeMult: %d, sgElemAlignment: %d",
