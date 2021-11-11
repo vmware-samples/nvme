@@ -465,7 +465,7 @@ CmdInfoListDestroy(NVMEPCIEQueueInfo *qinfo)
    return VMK_OK;
 }
 
-#ifdef NVME_STATS
+#if NVME_STATS
 /**
  * Allocate and initialize object of NVMEPCIEQueueStats for queue
  *
@@ -496,6 +496,67 @@ QueueStatsDestroy(NVMEPCIEQueueInfo *qinfo)
    qinfo->stats = NULL;
    DPRINT_Q(ctrlr, "Free stats for queue %d", qinfo->id);
    return VMK_OK;
+}
+
+/**
+ * Walk through CQ, collect nvme-stats.
+ *
+ * @param[in] qinfo      Queue instance
+ * @param[in] countIntr  Whether to count interrupts
+ */
+static void
+NVMEPCIEStatsWalkThrough(NVMEPCIEQueueInfo *qinfo, vmk_Bool countIntr)
+{
+   NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   vmk_NvmeCompletionQueueEntry *cqEntry;
+   NVMEPCIEQueueStats *stats;
+   vmk_uint16 head, phase;
+   NVMEPCIECmdInfo *cmdInfo;
+   NVMEPCIECmdInfoList *cmdList;
+   vmk_TimerCycles ts;
+
+   if (!ctrlr->statsEnabled) {
+      return;
+   }
+   stats = qinfo->stats;
+   cmdList = qinfo->cmdList;
+   /**
+    * Walk through CQ, collect time stamp of arrival of entries.
+    * Iteration should soon be done as it's simple memory accessing.
+    * Take time stamp of very begining of iteration as precise
+    * value for all CQ entries to save calling of vmk_GetTimerCycles.
+    **/
+   head = stats->cqHead;
+   phase = stats->cqePhase;
+   ts = vmk_GetTimerCycles();
+
+   // In interruption mode, count interrupts while not in polling mode
+   if (countIntr) {
+      stats->intrCount ++;
+   }
+
+   while (1) {
+      cqEntry = &cqInfo->compq[head];
+      if (cqEntry->dw3.p != phase) {
+         break;
+      }
+      if (ctrlr->abortEnabled) {
+         cmdInfo = &cmdList->list[cqEntry->dw3.cid];
+      } else {
+         cmdInfo = &cmdList->list[cqEntry->dw3.cid - 1];
+      }
+      cmdInfo->doneByHwTs = ts;
+
+      if (++head >= cqInfo->qsize) {
+         head = 0;
+         phase = !phase;
+      }
+   }
+   if (!((head == stats->cqHead) && (stats->cqePhase == phase))) {
+      stats->cqHead = head;
+      stats->cqePhase = phase;
+   }
 }
 #endif
 
@@ -670,54 +731,10 @@ NVMEPCIECtrlMsiHandler(void *handlerData, vmk_IntrCookie intrCookie)
 VMK_ReturnStatus
 NVMEPCIEQueueIntrAck(void *handlerData, vmk_IntrCookie intrCookie)
 {
-#ifdef NVME_STATS
+#if NVME_STATS
    NVMEPCIEQueueInfo *qinfo = (NVMEPCIEQueueInfo *)handlerData;
-   NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
-   NVMEPCIEController *ctrlr = qinfo->ctrlr;
-   vmk_NvmeCompletionQueueEntry *cqEntry;
-   NVMEPCIEQueueStats *stats;
-   vmk_uint16 head, phase;
-   NVMEPCIECmdInfo *cmdInfo;
-   NVMEPCIECmdInfoList *cmdList;
-   vmk_TimerCycles ts;
 
-   if (!ctrlr->statsEnabled) {
-      return VMK_OK;
-   }
-   stats = qinfo->stats;
-   cmdList = qinfo->cmdList;
-   /**
-    * Walk through CQ, collect time stamp of arrival of entries.
-    * Iteration should soon be done as it's simple memory accessing.
-    * Take time stamp of very begining of iteration as precise
-    * value for all CQ entries to save calling of vmk_GetTimerCycles.
-    **/
-   head = stats->cqHead;
-   phase = stats->cqePhase;
-   ts = vmk_GetTimerCycles();
-   stats->intrCount ++;
-
-   while (1) {
-      cqEntry = &cqInfo->compq[head];
-      if (cqEntry->dw3.p != phase) {
-         break;
-      }
-      if (ctrlr->abortEnabled) {
-         cmdInfo = &cmdList->list[cqEntry->dw3.cid];
-      } else {
-         cmdInfo = &cmdList->list[cqEntry->dw3.cid - 1];
-      }
-      cmdInfo->doneByHwTs = ts;
-
-      if (++head >= cqInfo->qsize) {
-         head = 0;
-         phase = !phase;
-      }
-   }
-   if (!((head == stats->cqHead) && (stats->cqePhase == phase))) {
-      stats->cqHead = head;
-      stats->cqePhase = phase;
-   }
+   NVMEPCIEStatsWalkThrough(qinfo, VMK_TRUE);
 #endif
    return VMK_OK;
 }
@@ -1319,6 +1336,9 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
       NVMEPCIEStoragePollAccumCmd(qinfo, leastPoll);
 
       vmk_SpinlockLock(qinfo->cqInfo->lock);
+#if NVME_STATS
+      NVMEPCIEStatsWalkThrough(qinfo, VMK_FALSE);
+#endif
       ret += NVMEPCIEProcessCq(qinfo);
       vmk_SpinlockUnlock(qinfo->cqInfo->lock);
 
@@ -1344,6 +1364,9 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
        * Just invoke NVMEPCIEProcessCq() once again to avoid.
        */
       vmk_SpinlockLock(qinfo->cqInfo->lock);
+#if NVME_STATS
+      NVMEPCIEStatsWalkThrough(qinfo, VMK_FALSE);
+#endif
       NVMEPCIEProcessCq(qinfo);
       vmk_SpinlockUnlock(qinfo->cqInfo->lock);
    } else if (VMK_UNLIKELY(pollState == VMK_STORAGEPOLL_DISABLED)) {

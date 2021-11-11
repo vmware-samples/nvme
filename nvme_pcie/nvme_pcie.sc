@@ -32,7 +32,7 @@ nvme_pcie_identification = {
    "binary compat"   : "yes",
    "summary"         : "Non-Volatile memory controller driver",
    "description"     : "Non-Volatile memory controller driver",
-   "version"         : "1.2.3.17",
+   "version"         : "1.2.3.18",
    "version_bump"    : 1,
    "license"         : VMK_MODULE_LICENSE_BSD,
    "vendor"          : "VMware",

@@ -50,7 +50,7 @@ extern vmk_uint32 nvmePCIEPollThr;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.17"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.18"
 
 /**
  * Driver release number. This should always in sync with .sc file.
