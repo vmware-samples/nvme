@@ -5,6 +5,9 @@
 This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
+2020/9/9 1.2.0.39-1vmw
+   Fix PR #2637414: Make esxcli-nvme-plugin build in DDK environment.
+
 2020/5/29 1.2.0.38-1vmw
    Fix PR #2558475: Add a new item to output. Hexdump entire subnqn's content.
 

@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2014-2015 VMware, Inc. All rights reserved.
+ * Copyright (c) 2014-2020 VMware, Inc. All rights reserved.
  *****************************************************************************/
 
 /**
@@ -15,12 +15,10 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <math.h>
-#include <featureStateSwitch.h>
 
 #include <vmkapi.h>
 #include "esxcli_xml.h"
 #include "nvme_lib.h"
-#include "str.h"
 
 //#define PLUGIN_DEBUG
 
@@ -68,6 +66,7 @@ static const char *nvmNsRelPerf[] = {
 };
 
 #define HEX2CHAR(n) ((n >= 10) ? (n - 10 + 'A') : (n + '0'))
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 static void
 hexdumptoString(char *inbuff, int inlen, char *outbuff, int outlen)
@@ -122,6 +121,7 @@ PrintIdentifyCtrlr(struct iden_controller *id)
 {
    char* hexdumpbuff;
    char* readablebuff;
+   char err_str[64] = "(has unprintable characters)";
    int readbufflen;
    int hexbufflen;
 
@@ -232,7 +232,8 @@ PrintIdentifyCtrlr(struct iden_controller *id)
    if (readablebuff != NULL) {
       memcpy(readablebuff, id->subnqn, sizeof(id->subnqn));
       if (refineASCIIString(readablebuff, sizeof(id->subnqn))) {
-         Str_Strcat(readablebuff, "(has unprintable characters)", readbufflen);
+         memcpy(readablebuff + MIN(strlen(readablebuff), sizeof(id->subnqn)),
+                err_str, strlen(err_str) + 1);
       }
       PSTR("NVM Subsystem NVMe Qualified Name", readablebuff);
       free(readablebuff);
