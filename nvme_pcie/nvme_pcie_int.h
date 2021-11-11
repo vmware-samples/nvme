@@ -40,7 +40,7 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.4"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.5"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -295,7 +295,9 @@ NVMEPCIEIsEBSCustomDevice(NVMEPCIEController *ctrlr)
            /* r5.metal */
            (pciId->vendorID == 0x1d0f && pciId->deviceID == 0x0065) ||
            /* r5.xlarge  */
-           (pciId->vendorID == 0x1d0f && pciId->deviceID == 0x8061)
+           (pciId->vendorID == 0x1d0f && pciId->deviceID == 0x8061) ||
+           /* a1.metal   */
+           (pciId->vendorID == 0x1d0f && pciId->deviceID == 0x0061)
           );
 }
 

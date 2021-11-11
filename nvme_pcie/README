@@ -5,6 +5,10 @@
 This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
+2020/5/12 1.2.3.5-1vmw
+
+   Add AWS EBS devID '1d0f:0061' to the list of supported devices
+
 2020/5/9 1.2.3.4-1vmw
 
    Add module param nvmePCIEDma4KSwitch as DMA 4k-alignment switch.
