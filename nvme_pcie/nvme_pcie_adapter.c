@@ -15,7 +15,6 @@ extern int nvmePCIEDma4KSwitch;
 extern vmk_uint32 nvmePCIEFakeAdminQSize;
 extern int nvmePCIEMsiEnbaled;
 
-VMK_NAMESPACE_REQUIRED(VMK_NAMESPACE_NVME, VMK_NAMESPACE_NVME_VERSION);
 static VMK_ReturnStatus RequestIoQueues(NVMEPCIEController *ctrlr,
                                         vmk_uint32 *nrIoQueues);
 
