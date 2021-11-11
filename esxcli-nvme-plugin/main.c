@@ -4639,20 +4639,26 @@ NvmePlugin_DeviceFirmwareDownload(int argc, const char *argv[])
    int  ch;
    char *vmhba = NULL;
    char *fwPath = NULL;
-   void *fwBuf = NULL;
-   int  fwSize = 0;
    int  rc;
+   vmk_uint32  offset = 0;
+   vmk_uint32  xferSize = 0;
    struct nvme_adapter_list    list;
    struct nvme_handle          *handle;
    vmk_NvmeIdentifyController  *idCtrlr;
 
-   while ((ch = getopt(argc, (char *const*)argv, "A:f:")) != -1) {
+   while ((ch = getopt(argc, (char *const*)argv, "A:f:o:x:")) != -1) {
       switch (ch) {
          case 'A':
             vmhba = optarg;
             break;
 	 case 'f':
 	    fwPath = optarg;
+            break;
+         case 'o':
+            offset = atoi(optarg);
+            break;
+         case 'x':
+            xferSize = atoi(optarg);
 	    break;
          default:
             Error("Invalid parameter.");
@@ -4660,7 +4666,7 @@ NvmePlugin_DeviceFirmwareDownload(int argc, const char *argv[])
       }
    }
 
-   if (vmhba == NULL || fwPath == NULL) {
+   if (vmhba == NULL || fwPath == NULL || (offset & 0x3)) {
       Error("Invalid parameter.");
       return;
    }
@@ -4694,13 +4700,11 @@ NvmePlugin_DeviceFirmwareDownload(int argc, const char *argv[])
       goto out_free;
    }
 
-   rc = Nvme_FWLoadImage(fwPath, &fwBuf, &fwSize);
-   if (rc) {
-      Error("Failed to read firmware image file.");
-      goto out_free;
+   if (xferSize == 0) {
+      xferSize = FW_DOWNLOAD_XFER_SIZE;
    }
 
-   rc = Nvme_FWDownload(handle, fwBuf, fwSize);
+   rc = Nvme_FWLoadAndDownload(handle, fwPath, offset, xferSize);
    if (rc) {
       Error("Failed to download firmware, 0x%x", rc);
       goto out_free;
@@ -4713,9 +4717,6 @@ NvmePlugin_DeviceFirmwareDownload(int argc, const char *argv[])
    }
 
 out_free:
-   if (fwBuf) {
-      free(fwBuf);
-   }
    free(idCtrlr);
 
 out:

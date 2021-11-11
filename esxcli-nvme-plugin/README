@@ -5,31 +5,45 @@
 This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
+
+2021/10/26 1.2.0.47-1vmw
+
+   Fix PR #2863011: Fix the issue that large firmware image cannot be downloaded.
+
 2021/9/07 1.2.0.46-1vmw
+
    Remove example placeholder URLs in .sc file
 
 2021/7/29 1.2.0.45-1vmw
+
    Fix PR #2809120: Add a command to retrieve an arbitrary NVMe log page.
 
 2021/6/18 1.2.0.44-1vmw
+
    Fix PR #2787971: Add persistent event log support.
 
 2021/3/1 1.2.0.43-1vmw
+
    Fix PR #2717569: Add telemetry support for nvme pcie
 
 2020/9/29 1.2.0.42-1vmw
+
    Fix PR #2638853: remove dependency on old nvme driver.
 
 2020/9/24 1.2.0.41-1vmw
+
    Fix PR #2625463: Mark statusFlags as NS_UNALLOCATED if namespace is not found.
 
 2020/9/10 1.2.0.40-1vmw
+
    Fix PR #2634978: Increase default timeout to 60 seconds.
 
 2020/9/9 1.2.0.39-1vmw
+
    Fix PR #2637414: Make esxcli-nvme-plugin build in DDK environment.
 
 2020/5/29 1.2.0.38-1vmw
+
    Fix PR #2558475: Add a new item to output. Hexdump entire subnqn's content.
 
 2019/3/11 1.2.0.37-1vmw

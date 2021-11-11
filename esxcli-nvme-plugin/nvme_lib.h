@@ -24,7 +24,14 @@
  * for firmware download
  */
 //TODO: confirm max transfer size
-#define NVME_MAX_XFER_SIZE            (8*1024)
+/**
+ * NVMe spec 1.3 defines firmware Update Granularity (FWUG).
+ * It indicates the granularity and alignment requirement of
+ * the firmware image being updated by the Firmware Image
+ * Download command. The value is reported in 4 KiB units.
+ * So set the default transfer size to 4KB.
+ */
+#define FW_DOWNLOAD_XFER_SIZE (4 * 1024)
 #define MAX_FW_SLOT                   7
 #define FW_REV_LEN                    8
 #define MAX_ADAPTER_NAME_LEN  64
@@ -234,13 +241,12 @@ Nvme_NsSetStatus(struct nvme_handle *handle, int nsId, int status);
 /**
   * NVMe firmware operation interfaces
   */
-int
-Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size);
 
-int
-Nvme_FWDownload(struct nvme_handle *handle,
-                unsigned char *rom_buf,
-                int rom_size);
+int Nvme_FWLoadAndDownload(struct nvme_handle *handle, char *fwPath,
+                           int fwOffset, int xferSize);
+
+int Nvme_FWDownload(struct nvme_handle *handle, unsigned char *fwBuf,
+                    int fwSize, int fwOffset, int xferSize);
 
 int
 Nvme_FWFindSlot(struct nvme_handle *handle, int *slot);

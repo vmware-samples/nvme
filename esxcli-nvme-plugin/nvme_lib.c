@@ -728,16 +728,37 @@ int Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, int ns)
 }
 
 
-int Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size)
+/**
+ * Load the firmware image from the specified path and download it to a device.
+ *
+ * @param [in] handle handle to a device
+ * @param [in] fwPath Path of the firmware image
+ * @param [in] fwOffset Offset of the firmware image
+ * @param [in] xferSize Transfer size of each firmware dowonload command
+ *
+ * return 0 if successful
+ */
+int Nvme_FWLoadAndDownload(struct nvme_handle *handle,
+                           char *fwPath,
+                           int fwOffset,
+                           int xferSize)
 {
    int fd;
    struct stat	sb;
-   int fw_file_size;
+   vmk_uint32 fwSize, size, fwBufSize;
+   int offset;
+   void* fwBuf = NULL;
+   int rc = 0;
 
-   assert (fw_path && fw_buf && fw_size);
+   assert (fwPath);
+
+   if (fwOffset % 0x3) {
+      fprintf (stderr, "ERROR: Invalid offset.\n");
+      return -EINVAL;
+   }
 
    /* get fw binary */
-   fd = open (fw_path, O_RDONLY);
+   fd = open (fwPath, O_RDONLY);
    if (fd == -1) {
       fprintf (stderr, "ERROR: Failed to open firmware image.\n");
       return -ENOENT;
@@ -753,7 +774,7 @@ int Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size)
    }
 
    if (!S_ISREG (sb.st_mode)) {
-      fprintf (stderr, "ERROR: %s is not a file.\n", fw_path);
+      fprintf (stderr, "ERROR: %s is not a file.\n", fwPath);
       if (close (fd) == -1) {
          fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
          return -EBADF;
@@ -761,9 +782,36 @@ int Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size)
       return -EPERM;
    }
 
-   fw_file_size = (int)sb.st_size;
-   if ((*fw_buf = malloc(fw_file_size)) == NULL) {//need to free!!!!
-      fprintf (stderr, "ERROR: Failed to malloc %d bytes.\n", fw_file_size);
+   fwSize = (vmk_uint32)sb.st_size;
+   if ((fwSize == 0) || (fwSize & 0x3)) {
+      fprintf (stderr, "ERROR: Invalid firmware image size %d.\n", fwSize);
+      if (close (fd) == -1) {
+         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         return -EBADF;
+      }
+      return -EINVAL;
+   }
+
+   if (fwSize < xferSize) {
+      xferSize = fwSize;
+      printf ("Adjust xfersize to %d\n", fwSize);
+   }
+   fwBufSize = fwSize;
+   /* If allocation fails, try smaller buffer, but guarantee xfersize align.*/
+   while (fwBufSize >= xferSize) {
+      fwBuf = malloc(fwBufSize);
+      if (fwBuf != NULL) {
+         break;
+      }
+      if (fwBufSize > xferSize && fwBufSize / 2 < xferSize) {
+         fwBufSize = xferSize;
+      } else {
+         fwBufSize = fwBufSize / 2;
+         fwBufSize = fwBufSize / xferSize * xferSize;
+      }
+   }
+   if (fwBuf == NULL) {
+      fprintf (stderr, "ERROR: Failed to malloc %d bytes.\n", fwBufSize);
       if (close (fd) == -1) {
          fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
          return -EBADF;
@@ -772,55 +820,76 @@ int Nvme_FWLoadImage(char *fw_path, void **fw_buf, int *fw_size)
    }
 
    //read fw image from file
-   if ((*fw_size = read(fd, *fw_buf, fw_file_size)) < 0) {
-      fprintf(stderr, "ERROR: Failed to read firmware image: %s.\n", fw_path);
-      if (close (fd) == -1) {
-         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
-         return -EBADF;
+   for (offset = 0; offset < fwSize; offset += fwBufSize) {
+      size = fwSize - offset;
+      if (size > fwBufSize) {
+         size = fwBufSize;
       }
-      return -EIO;
-   }
-
+      if (read(fd, fwBuf, size) < 0) {
+         fprintf (stderr, "ERROR: Failed to read firmware data at offset 0x%x, size %d.\n",
+                  offset, size);
+         rc = -EIO;
+         break;
+      }
 #ifdef FIRMWARE_DUMP
-   printf ("Dump whole fw image: \n");
-   int i, j;
-   for(i=0; i<(*fw_size); i+=16) {
-      for(j=0; j<16 && (i+j<(*fw_size)); j++)
-         printf ("%4x  ", *(unsigned char *)(*fw_buf+i+j));
+      printf ("Dump fw image: \n");
+      int i, j;
+      for(i=0; i<size; i+=16) {
+         for(j=0; j<16 && (i+j<size); j++)
+            printf ("%4x  ", *(unsigned char *)(fwBuf+i+j));
+         printf ("\n");
+      }
       printf ("\n");
-   }
-   printf ("\n");
 #endif
+      rc = Nvme_FWDownload(handle, fwBuf, size, offset + fwOffset, xferSize);
+      if (rc) {
+         fprintf (stderr, "ERROR: Failed to download firmware data at offset %u, size %u.\n",
+                  offset, size);
+         break;
+      }
+   }
 
+   free(fwBuf);
    if (close (fd) == -1) {
       fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
       return -EBADF;
    }
 
-   return 0;
+   return rc;
 }
 
+
+/**
+ * Download all or  portion of an firmware image to a device.
+ *
+ * @param [in] handle handle to a device
+ * @param [in] fwBuf Data of the firmware image
+ * @param [in] fwSize Size of the firmware image
+ * @param [in] fwOffset Offset of the firmware image
+ * @param [in] xferSize Transfer size of each firmware dowonload command
+ *
+ * return 0 if successful
+ */
 int
 Nvme_FWDownload(struct nvme_handle *handle,
-                unsigned char *rom_buf,
-                int rom_size)
+                unsigned char *fwBuf,
+                int fwSize,
+                int fwOffset,
+                int xferSize)
 {
    NvmeUserIo uio;
-   int offset, size;
+   vmk_uint32 offset, size;
    int rc;
    void *chunk;
 
-   if ((chunk = malloc(NVME_MAX_XFER_SIZE)) == NULL) {
-      fprintf(stderr, "ERROR: Failed to malloc %d bytes.\n",
-              NVME_MAX_XFER_SIZE);
+   if ((chunk = malloc(xferSize)) == NULL) {
+      fprintf(stderr, "ERROR: Failed to malloc %d bytes.\n", xferSize);
       return -ENOMEM;
    }
 
-   for (offset = 0; offset < rom_size; offset += NVME_MAX_XFER_SIZE) {
-      size = ((rom_size-offset) >= NVME_MAX_XFER_SIZE) ?
-         NVME_MAX_XFER_SIZE : (rom_size-offset);
-      memcpy(chunk, rom_buf+offset, size);
-
+   for (offset = 0; offset < fwSize; offset += xferSize) {
+      size = ((fwSize-offset) >= xferSize) ? xferSize : (fwSize-offset);
+      memcpy(chunk, fwBuf+offset, size);
       memset(&uio, 0, sizeof(uio));
       uio.cmd.firmwareDownload.cdw0.opc =
          VMK_NVME_ADMIN_CMD_FIRMWARE_DOWNLOAD;
@@ -829,13 +898,15 @@ Nvme_FWDownload(struct nvme_handle *handle,
       uio.timeoutUs = FIRMWARE_DOWNLOAD_TIMEOUT;
       uio.cmd.firmwareDownload.cdw10.numd =
          (size / sizeof(vmk_uint32)) - 1;
-      uio.cmd.firmwareDownload.cdw11.ofst = offset / sizeof(vmk_uint32);
+      uio.cmd.firmwareDownload.cdw11.ofst = (fwOffset + offset) / sizeof(vmk_uint32);
       uio.addr = (vmk_uintptr_t)chunk;
       uio.length = size;
 
       rc = Nvme_AdminPassthru(handle, &uio);
       if (rc) {
          /* Failed to execute download firmware command. */
+         fprintf (stderr, "ERROR: Failed to download firmware data at offset %u, size %u.\n",
+                  offset, size);
          free(chunk);
          return rc;
       }

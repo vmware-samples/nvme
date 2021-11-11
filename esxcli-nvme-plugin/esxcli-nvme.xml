@@ -1454,6 +1454,12 @@
             <parameter name="firmware" type="string" required="true" shortname="f">
 	       <description>Firmware image path</description>
             </parameter>
+            <parameter name="offset" type="int" required="false" shortname="o">
+               <description>Firmware image offset. This parameter is needed if the firmware image is split across multiple files. The default value is 0.</description>
+            </parameter>
+            <parameter name="xfersize" type="int" required="false" shortname="x">
+               <description>Size to split each transfer. This parameter is needed if the device has special requirement on the firmware transfer size.</description>
+            </parameter>
          </input-spec>
          <output-spec>
             <list type="string" />
@@ -1461,7 +1467,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.download -A $val{adapter} -f $val{firmware}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.firmware.download -A $val{adapter} -f $val{firmware} $if{offset, -o $val{offset}} $if{xfersize, -x $val{xfersize}</execute>
       </command>
       <command path="nvme.device.firmware.activate">
          <description>Commit downloaded firmware image to a specific slot</description>
