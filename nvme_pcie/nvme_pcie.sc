@@ -104,7 +104,7 @@ nvme_pcie_vib_def = {
 nvme_pcie_vib =  defineModuleVib(nvme_pcie_vib_def)
 
 #
-# Build the Offline Bundle
+# Build the Component
 #
 from devkitUtilities import GenerateFullVibVersionNumber
 
@@ -149,4 +149,4 @@ nvme_pcie_bulletin_def = {
                       ],
    },
 }
-nvme_pcie_bundle =  defineOfflineBundle(nvme_pcie_bulletin_def)
+nvme_pcie_bundle =  defineComponent(nvme_pcie_bulletin_def)
