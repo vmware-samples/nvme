@@ -11,7 +11,7 @@
 #
 
 UWTOOL = esxcli-nvme-plugin
-UWTOOL_VERSION = 1.2.0.34-1vmw
+UWTOOL_VERSION = 1.2.0.35-1vmw
 
 # mgmtInterface.c is in DEV_COMMON_DIR, the build system looks
 # there for sources as well as here.

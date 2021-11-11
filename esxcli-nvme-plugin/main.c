@@ -4778,12 +4778,7 @@ NvmeLookupFunction(const char *op)
 static inline BOOL
 NvmeFunctionEnabled(int fnIdx)
 {
-   FeatureState_Init();
-
-   if (commands[fnIdx].type == NVME_NS_MGMT && !FEATURE_STATE_IS_ENABLED(NVME_NS_MGMT)) {
-      return false;
-   }
-
+   /* All functions are enabled by default. Return false to disable the specific one. */
    return true;
 }
 
