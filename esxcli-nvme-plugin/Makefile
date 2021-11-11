@@ -207,7 +207,11 @@ else
 ifeq ($(DESC_ESX_VERSION),7.0.2)
 VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_8_0_0
 else
+ifeq ($(DESC_ESX_VERSION),7.0.3)
 VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_9_0_0
+else
+VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_10_0_0
+endif
 endif
 endif
 endif
