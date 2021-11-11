@@ -373,10 +373,14 @@ QuiesceDevice(vmk_Device device)
       return vmkStatus;
    }
    if (VMK_TRUE == ctrlr->isRemoved) {
-      // for hotplug case, flush IO queue actively
-      MOD_IPRINT(" %d io queues to be flushed", ctrlr->numIoQueues);
-      for (qid = 0; qid < ctrlr->numIoQueues; qid ++) {
-         qinfo = &ctrlr->queueList[qid + 1];
+      /* For hotplug case, flush both Admin and IO queue actively.
+       * IO command is put to completion queue while
+       * admin command is done directly.
+       * Flush IO queues then Admin queue to make IO completion called first.
+       */
+      MOD_IPRINT(" %d queues to be flushed", ctrlr->numIoQueues + 1);
+      for (qid = 0; qid <= ctrlr->numIoQueues; qid ++) {
+         qinfo = &ctrlr->queueList[ctrlr->numIoQueues - qid];
          NVMEPCIESuspendQueue(qinfo);
          NVMEPCIEFlushQueue(qinfo, VMK_NVME_STATUS_VMW_QUIESCED);
       }
