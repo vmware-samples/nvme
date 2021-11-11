@@ -19,6 +19,10 @@ VMK_MODPARAM(nvmePCIEDebugMask, int, "NVMe PCIe driver debug mask");
 
 int nvmePCIEDma4KSwitch = 0;
 VMK_MODPARAM(nvmePCIEDma4KSwitch, int, "NVMe PCIe 4k-alignment DMA");
+
+vmk_uint32 nvmePCIEFakeAdminQSize = 0;
+VMK_MODPARAM(nvmePCIEFakeAdminQSize, uint, "NVMe PCIe fake ADMIN queue size. 0's based");
+extern int nvmePCIEAdminQueueSize;
 /**
  * Global, static data that holds module/driver wide resources
  */
@@ -31,6 +35,14 @@ static void LogHandleDestroy();
 static VMK_ReturnStatus MemPoolCreate();
 static void MemPoolDestroy();
 
+static void NVMEPCIEValidateModuleParameter()
+{
+   if (nvmePCIEFakeAdminQSize >= nvmePCIEAdminQueueSize) {
+      nvmePCIEFakeAdminQSize = (nvmePCIEAdminQueueSize - 1);
+      NVMEPCIELogNoHandle("change nvmePCIEFakeAdminQSize to 0x%x",
+         nvmePCIEFakeAdminQSize);
+   }
+}
 /**
  * Module entry point
  *
@@ -42,6 +54,7 @@ init_module(void)
    VMK_ReturnStatus vmkStatus;
 
    NVMEPCIELogNoHandle("Loading driver %s.", NVME_PCIE_DRIVER_IDENT);
+   NVMEPCIEValidateModuleParameter();
 
    /* Always initialize heap in the first place. */
    vmkStatus = HeapCreate();

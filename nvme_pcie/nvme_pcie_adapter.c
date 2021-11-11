@@ -12,6 +12,7 @@
 #include "nvme_pcie_int.h"
 
 extern int nvmePCIEDma4KSwitch;
+extern vmk_uint32 nvmePCIEFakeAdminQSize;
 
 VMK_NAMESPACE_REQUIRED(VMK_NAMESPACE_NVME, VMK_NAMESPACE_NVME_VERSION);
 static VMK_ReturnStatus RequestIoQueues(NVMEPCIEController *ctrlr,
@@ -113,15 +114,29 @@ vmk_NvmeAdapterOps nvmePCIEAdapterOps = {
 
 void Workaround4HW(NVMEPCIEController *ctrlr, vmk_NvmeRegisterID regID, vmk_uint32* regValue)
 {
-   if (NVME_PCIE_WKR_ALL_AWS == ctrlr->workaround) {
+   vmk_uint16 sqsize, cqsize;
+   if (VMK_UNLIKELY(NVME_PCIE_WKR_ALL_AWS == ctrlr->workaround)) {
       /*
-       * Force admin queue size to 4
        * AQA on Arm a1 returns queue size 2, which is insufficient.
        * AQA on AWS m5.xlarge or r5.metal is variable. It can't be predicated.
        */
-      if (VMK_NVME_REG_AQA == regID) {
-         WPRINT(ctrlr, "Raw AQA=0x%x, fake AQA=0x00030003", *regValue);
-         *regValue = 0x30003;
+      if (VMK_UNLIKELY(VMK_NVME_REG_AQA == regID)) {
+         if (VMK_LIKELY(nvmePCIEFakeAdminQSize == 0)) {
+            WPRINT(ctrlr, "Raw AQA=0x%x, fake AQA=0x000f000f", *regValue);
+            *regValue = 0xf000f;
+         } else {
+            WPRINT(ctrlr, "Raw AQA=0x%x, fake SQ,CQ size=%x", *regValue, nvmePCIEFakeAdminQSize);
+            *regValue = ((nvmePCIEFakeAdminQSize << 16) | nvmePCIEFakeAdminQSize);
+         }
+      }
+   } else {
+      if (VMK_UNLIKELY(nvmePCIEFakeAdminQSize && (VMK_NVME_REG_AQA == regID))) {
+         sqsize = (*regValue & 0xffff);
+         cqsize = (*regValue) >> 16;
+         if (cqsize >= nvmePCIEFakeAdminQSize &&  sqsize >= nvmePCIEFakeAdminQSize)  {
+            WPRINT(ctrlr, "Raw AQA=0x%x, fake SQ,CQ size=%x", *regValue, nvmePCIEFakeAdminQSize);
+            *regValue = ((nvmePCIEFakeAdminQSize << 16) | nvmePCIEFakeAdminQSize);
+         }
       }
    }
 }

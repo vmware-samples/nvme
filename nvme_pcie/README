@@ -5,6 +5,10 @@
 This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
+2020/5/12 1.2.3.6-1vmw
+
+   Add module param nvmePCIEFakeAdminQSize to fake ADMIN queue size.
+
 2020/5/12 1.2.3.5-1vmw
 
    Add AWS EBS devID '1d0f:0061' to the list of supported devices
