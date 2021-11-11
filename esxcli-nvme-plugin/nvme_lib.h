@@ -49,6 +49,31 @@
 #define NS_INACTIVE    0x2
 #define NS_ACTIVE      0x3
 
+#define NVME_LID_PERSISTENT_EVENT 0xd
+#define NVME_CTLR_IDENT_LPA_PERSISTENT_EVENT (0x1 << 4)
+#define NVME_PEL_ACTION_READ 0x0
+#define NVME_PEL_ACTION_ESTABLISH_AND_READ 0x1
+#define NVME_PEL_ACTION_RELEASE 0x2
+typedef struct nvme_persistent_event_log_header {
+   vmk_uint8 lid;
+   vmk_uint8 reserved1[3];
+   vmk_uint32 tnev;
+   vmk_uint64 tll;
+   vmk_uint8 revision;
+   vmk_uint8 reserved2;
+   vmk_uint16 thl;
+   vmk_uint64 timestamp;
+   vmk_uint8 poh[16];
+   vmk_uint64 pcc;
+   vmk_uint16 vid;
+   vmk_uint16 ssvid;
+   vmk_uint8 sn[20];
+   vmk_uint8 mn[40];
+   vmk_uint8 subnqn[256];
+   vmk_uint8 reserved3[108];
+   vmk_uint8 bitmap[32];
+} VMK_ATTRIBUTE_PACKED nvme_persistent_event_log_header;
+
 /**
  * Adapter instance list
  */
@@ -225,5 +250,8 @@ Nvme_FWActivate(struct nvme_handle *handle, int slot, int action, int *cmdStatus
 
 int Nvme_GetTelemetryData(struct nvme_handle *handle, char *telemetryPath,
                           int lid, int dataArea);
+
+int Nvme_GetPersistentEventLog(struct nvme_handle *handle, char *logPath,
+                               int action);
 
 #endif /* _NVME_LIB_H */

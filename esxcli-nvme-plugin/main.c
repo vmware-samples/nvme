@@ -2201,15 +2201,17 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
 {
    int ch;
    char *vmhba = NULL;
-   char *telemetryPath = NULL;
+   char *logPath = NULL;
    int  lid = -1;
    int  nsId = -1;
    int  elpe = -1;
    int  dataArea = -1;
+   int  action = -1;
    BOOL setNsid = 0;
    BOOL setElpe = 0;
    BOOL setDataarea = 0;
-   BOOL setTelemetrypath = 0;
+   BOOL setLogPath = 0;
+   BOOL setAction = 0;
    int  i, rc;
    struct nvme_adapter_list    list;
    struct nvme_handle          *handle;
@@ -2220,10 +2222,9 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       vmk_NvmeErrorInfoLogEntry errLog[MAX_ERROR_LOG_ENTRIES];
       vmk_NvmeSmartInfoEntry smartLog;
       vmk_NvmeFirmwareSlotInfo fwSlotLog;
-      vmk_NvmeTelemetryEntry telemetryLog;
    } log;
 
-   while ((ch = getopt(argc, (char *const*)argv, "A:l:n:e:t:d")) != -1) {
+   while ((ch = getopt(argc, (char *const*)argv, "A:l:n:e:d:a:p:")) != -1) {
       switch (ch) {
          case 'A':
             vmhba = optarg;
@@ -2239,13 +2240,17 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
             elpe = atoi(optarg);
             setElpe = 1;
             break;
-         case 't':
-            telemetryPath = optarg;
-            setTelemetrypath = 1;
-            break;
          case 'd':
             dataArea = atoi(optarg);
             setDataarea = 1;
+            break;
+         case 'p':
+            logPath = optarg;
+            setLogPath = 1;
+            break;
+         case 'a':
+            action = atoi(optarg);
+            setAction = 1;
             break;
          default:
             Error("Invalid parameter.");
@@ -2264,6 +2269,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       case VMK_NVME_LID_FW_SLOT:
       case VMK_NVME_LID_TELEMETRY_HOST_INITIATED:
       case VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED:
+      case NVME_LID_PERSISTENT_EVENT:
          break;
       default:
          Error("Not supported log type %d.", lid);
@@ -2293,12 +2299,29 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free;
    }
+
+   /* Check the controller capabilities: elpe, lpa. */
    maxErrorLogEntries = (int)idCtrlr->elpe + 1;
    if (maxErrorLogEntries > MAX_ERROR_LOG_ENTRIES) {
       maxErrorLogEntries = MAX_ERROR_LOG_ENTRIES;
    }
 
-  /* Check the optional parameters: nsId, eple, telemetryPath and dataArea. */
+   if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
+       lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
+      if (!(idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_TELEMETRY)) {
+         Error("Telemetry log page is not supported.");
+         goto out_free;
+      }
+   }
+
+   if (lid == NVME_LID_PERSISTENT_EVENT) {
+      if (!(idCtrlr->lpa & NVME_CTLR_IDENT_LPA_PERSISTENT_EVENT)) {
+         Error("Persistent event log page is not supported.");
+         goto out_free;
+      }
+   }
+
+  /* Check the optional parameters: nsId, elpe, logPath, dataArea and action. */
   if (setNsid) {
       if (lid == VMK_NVME_LID_SMART_HEALTH &&
           (idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_SMART_PER_NS)) {
@@ -2328,6 +2351,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
          goto out_free;
       }
    }
+
    if (setElpe) {
       if (lid == VMK_NVME_LID_ERROR_INFO) {
          if (elpe < 1 || elpe > maxErrorLogEntries) {
@@ -2346,38 +2370,42 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       }
    }
 
-   if (setTelemetrypath || setDataarea) {
-      if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
-          lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
-         if (!(idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_TELEMETRY)) {
-            Error("Telemetry log page is not supported.");
-            goto out_free;
-         } else {
-            if (!setTelemetrypath) {
-               Error("Missing required parameter -t when using -l %d", lid);
-               goto out_free;
-            } else if (!setDataarea) {
-               /* Choose data area 3 if not set */
-               dataArea = 3;
-            }
-         }
-      } else {
-         Error("Invalid parameter.");
+   if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
+       lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
+      if (!setDataarea) {
+         dataArea = 3;
+      }
+      if (dataArea < 1 || dataArea > 3) {
+         Error("Invalid data area %d", dataArea);
          goto out_free;
       }
-   } else {
-      if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
-          lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
-         Error("Missing required parameter -t when using -l %d", lid);
+      if (!setLogPath) {
+         Error("Missing required parameter -p when using -l %d", lid);
          goto out_free;
       }
    }
 
+   if (lid == NVME_LID_PERSISTENT_EVENT) {
+      if (!setAction) {
+         Error("Missing required parameter -a when using -l %d", lid);
+         goto out_free;
+      }
+      if (action > NVME_PEL_ACTION_RELEASE) {
+         Error("Invalid action %d", action);
+         goto out_free;
+      }
+      if (action != NVME_PEL_ACTION_RELEASE && !setLogPath) {
+         Error("Missing required parameter -p when using -l %d -a %d", lid, action);
+         goto out_free;
+      }
+   }
+
+   /* Get telemetry log. */
    if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED ||
        lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED) {
-      rc = Nvme_GetTelemetryData(handle, telemetryPath, lid, dataArea);
+      rc = Nvme_GetTelemetryData(handle, logPath, lid, dataArea);
       if (rc) {
-         Error("Failed to get telemetry data, %s.", strerror(rc));
+         Error("Failed to get telemetry data, 0x%x.", rc);
       } else {
          esxcli_xml_begin_output();
          xml_list_begin("string");
@@ -2388,6 +2416,26 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       goto out_free;
    }
 
+   /* Get persistent event log.*/
+   if (lid == NVME_LID_PERSISTENT_EVENT) {
+      rc = Nvme_GetPersistentEventLog(handle, logPath, action);
+      if (rc) {
+         Error("Failed to get persistent event log, 0x%x.", rc);
+      } else {
+         esxcli_xml_begin_output();
+         xml_list_begin("string");
+         if (action == NVME_PEL_ACTION_RELEASE) {
+            printf("<string>Release persistent event log reporting context successfully.</string>");
+         } else {
+            printf("<string>Download persistent event log successfully.</string>");
+         }
+         xml_list_end();
+         esxcli_xml_end_output();
+      }
+      goto out_free;
+   }
+
+   /* Get error, smart or firmware log. */
    memset(&uio, 0, sizeof(uio));
    uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
    uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;

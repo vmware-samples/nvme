@@ -11,7 +11,7 @@
 #
 
 UWTOOL = esxcli-nvme-plugin
-UWTOOL_VERSION = 1.2.0.43-1vmw
+UWTOOL_VERSION = 1.2.0.44-1vmw
 
 UWTOOL_SOURCES = main.c esxcli_xml.c nvme_lib.c
 

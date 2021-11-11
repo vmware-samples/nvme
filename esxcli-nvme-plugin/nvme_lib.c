@@ -1045,19 +1045,13 @@ Nvme_GetTelemetryData(struct nvme_handle *handle,
    int fd;
    int rc = -1;
    vmk_uint16 data1LB, data2LB, data3LB, dataLB;
-   int offset, size, maxXferSize, xferSize;
+   vmk_uint32 offset, size, maxXferSize, xferSize, numd;
    int ctrlRetry = 0;
    int genNumStart = -1;
    int genNumEnd = -1;
-
    NvmeUserIo uio;
    NvmeUserIo uioXferSize;
-   union {
-      vmk_NvmeErrorInfoLogEntry errLog;
-      vmk_NvmeSmartInfoEntry smartLog;
-      vmk_NvmeFirmwareSlotInfo fwSlotLog;
-      vmk_NvmeTelemetryEntry telemetryLog;
-   } log;
+   vmk_NvmeTelemetryEntry telemetryEntry;
    vmk_NvmeTelemetryEntry *telemetryLog;
 
    assert(telemetryPath);
@@ -1089,23 +1083,23 @@ retry:
    uio.cmd.getLogPage.cdw10.rae = 1;
    uio.cmd.getLogPage.lpo = 0;
    uio.length = sizeof(vmk_NvmeTelemetryEntry);
-   uio.addr = (vmk_uintptr_t)&log.telemetryLog;
+   uio.addr = (vmk_uintptr_t)&telemetryEntry;
    rc = Nvme_AdminPassthru(handle, &uio);
    if (rc) {
       if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED) {
-         fprintf (stderr, "Failed to create Telemetry Host-Initiated data.\n");
+         fprintf (stderr, "Failed to create Telemetry Host-Initiated data, 0x%x\n", rc);
       } else {
          fprintf (stderr,
-                  "Failed to get Telemetry Controller-Initiated log header.\n");
+                  "Failed to get Telemetry Controller-Initiated log header, 0x%x.\n", rc);
       }
       return rc;
    }
 
-   genNumStart = log.telemetryLog.dataGenNum;
+   genNumStart = telemetryEntry.dataGenNum;
 
-   data1LB = log.telemetryLog.dataArea1LB;
-   data2LB = log.telemetryLog.dataArea2LB;
-   data3LB = log.telemetryLog.dataArea3LB;
+   data1LB = telemetryEntry.dataArea1LB;
+   data2LB = telemetryEntry.dataArea2LB;
+   data3LB = telemetryEntry.dataArea3LB;
    assert(data3LB >= data2LB && data2LB >= data1LB);
    switch (dataArea) {
       case 1:
@@ -1118,7 +1112,7 @@ retry:
          dataLB = data3LB;
          break;
       default:
-         return -1;
+         return -EINVAL;
    }
 
    fd = open(telemetryPath, O_WRONLY|O_CREAT|O_TRUNC, 0666);
@@ -1127,11 +1121,11 @@ retry:
       return -ENOENT;
    }
    /* Write telemetry log header */
-   if (write(fd, (void *)&log.telemetryLog, sizeof(vmk_NvmeTelemetryEntry)) !=
+   if (write(fd, (void *)&telemetryEntry, sizeof(vmk_NvmeTelemetryEntry)) !=
        sizeof(vmk_NvmeTelemetryEntry)) {
       fprintf(stderr, "ERROR: Failed to write telemetry log header.\n");
       close(fd);
-      return -1;
+      return -EIO;
    }
 
    size = dataLB * NVME_TELEMETRY_DATA_BLK_SIZE;
@@ -1143,11 +1137,14 @@ retry:
    /* Get controller max transfer size */
    memset(&uioXferSize, 0, sizeof(uioXferSize));
    rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_MAX_XFER_LEN, &uioXferSize);
-   if (rc) {
+   if (rc || uioXferSize.status) {
       fprintf (stderr, "Failed to get max transfer size.\n");
-      rc = uioXferSize.status;
       close(fd);
-      return rc;
+      if (rc) {
+         return rc;
+      } else {
+         return uioXferSize.status;
+      }
    }
    maxXferSize = (uioXferSize.length / NVME_TELEMETRY_DATA_BLK_SIZE) *
                   NVME_TELEMETRY_DATA_BLK_SIZE;
@@ -1166,13 +1163,15 @@ retry:
       xferSize = ((size-offset) >= maxXferSize) ? maxXferSize : (size-offset);
 
       memset(&uio, 0, sizeof(uio));
+      numd = xferSize / 4 - 1;
       uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
       uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
       uio.direction = XFER_FROM_DEV;
       uio.timeoutUs = ADMIN_TIMEOUT;
       uio.cmd.getLogPage.cdw10.lid = lid;
       uio.cmd.getLogPage.cdw10.rae = 1;
-      uio.cmd.getLogPage.cdw10.numdl = (xferSize / sizeof(vmk_uint32)) - 1;
+      uio.cmd.getLogPage.cdw10.numdl = (vmk_uint16)(numd & 0xffff);
+      uio.cmd.getLogPage.cdw11.numdu = (vmk_uint16)((numd >> 16) & 0xffff);
       uio.cmd.getLogPage.lpo = offset + sizeof(vmk_NvmeTelemetryEntry);
       uio.addr = (vmk_uintptr_t)(&telemetryLog->dataBlocks[offset]);
       uio.length = xferSize;
@@ -1190,7 +1189,7 @@ retry:
       fprintf(stderr, "ERROR: Failed to write telemetry log to file.\n");
       free(telemetryLog);
       close(fd);
-      return -1;
+      return -EIO;
    }
 
    free(telemetryLog);
@@ -1214,14 +1213,14 @@ retry:
       uio.cmd.getLogPage.cdw10.rae = 1;
       uio.cmd.getLogPage.lpo = 0;
       uio.length = sizeof(vmk_NvmeTelemetryEntry);
-      uio.addr = (vmk_uintptr_t)&log.telemetryLog;
+      uio.addr = (vmk_uintptr_t)&telemetryEntry;
       rc = Nvme_AdminPassthru(handle, &uio);
       if (rc) {
          fprintf (stderr, "Failed to get"
                   " Data Generation Number after data collection is done.\n");
          return rc;
       }
-      genNumEnd = log.telemetryLog.dataGenNum;
+      genNumEnd = telemetryEntry.dataGenNum;
       if (genNumEnd != genNumStart) {
          fprintf(stderr, "Telemetry Controller-Initiated is not stable.\n");
          ctrlRetry ++;
@@ -1230,4 +1229,132 @@ retry:
    }
 
    return 0;
+}
+
+/**
+ * Download Persistent Event Log to specified path
+ *
+ * @param [in] handle handle to a device
+ * @param [in] logPath path to download the persistent event log
+ * @param [in] action action the controller shall take
+ *
+ * @return 0 if successful
+ */
+int
+Nvme_GetPersistentEventLog(struct nvme_handle *handle,
+                           char *logPath,
+                           int action)
+{
+
+   int fd;
+   int rc = -1;
+   NvmeUserIo uio;
+   vmk_uint32 offset, size, xferSize, maxXferSize, numd;
+   nvme_persistent_event_log_header logHeader;
+   vmk_uint8 *logData = NULL;
+
+   if (action > NVME_PEL_ACTION_RELEASE) {
+      return -EINVAL;
+   }
+   if (action != NVME_PEL_ACTION_RELEASE && logPath == NULL) {
+      return -EINVAL;
+   }
+
+   memset(&uio, 0, sizeof(uio));
+   rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_MAX_XFER_LEN, &uio);
+   if (rc || uio.status) {
+      fprintf (stderr, "Failed to get max transfer size.\n");
+      if (rc) {
+         return rc;
+      } else {
+         return uio.status;
+      }
+   }
+   maxXferSize = uio.length;
+
+   memset(&logHeader, 0, sizeof(logHeader));
+   memset(&uio, 0, sizeof(uio));
+   numd = sizeof(logHeader) / 4 - 1;
+   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
+   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
+   uio.direction = XFER_NO_DATA;
+   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.cmd.getLogPage.cdw10.lid = NVME_LID_PERSISTENT_EVENT;
+   uio.cmd.getLogPage.cdw10.lsp = action;
+   uio.direction = XFER_FROM_DEV;
+   uio.cmd.getLogPage.cdw10.numdl = (vmk_uint16)(numd & 0xffff);
+   uio.cmd.getLogPage.cdw11.numdu = (vmk_uint16)((numd >> 16) & 0xffff);
+   uio.length = sizeof(logHeader);
+   uio.addr = (vmk_uintptr_t)&logHeader;
+   rc = Nvme_AdminPassthru(handle, &uio);
+   if (rc) {
+      fprintf (stderr, "Failed to fetch persistent event log header, 0x%x.\n", rc);
+      return rc;
+   } else if (action == NVME_PEL_ACTION_RELEASE) {
+      return 0;
+   }
+
+   fd = open(logPath, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+   if (fd == -1) {
+      fprintf (stderr, "ERROR: Failed to open log path.\n");
+      return -ENOENT;
+   }
+
+   if (write(fd, (void *)&logHeader, sizeof(logHeader)) !=
+       sizeof(logHeader)) {
+      fprintf(stderr, "ERROR: Failed to write telemetry log header.\n");
+      close(fd);
+      return -EIO;
+   }
+
+   if (logHeader.tll <= sizeof(logHeader)) {
+      close(fd);
+      return 0;
+   }
+   size = logHeader.tll - sizeof(logHeader);
+   offset = sizeof(logHeader);
+   xferSize = (size > maxXferSize) ? maxXferSize: size;
+   logData = malloc(xferSize);
+   if (logData == NULL) {
+      fprintf(stderr, "ERROR: Failed to allocate data buffer.\n");
+      close(fd);
+      return -ENOMEM;
+   }
+   while (size > 0) {
+      xferSize = (size > maxXferSize) ? maxXferSize: size;
+      memset(&uio, 0, sizeof(uio));
+      memset(logData, 0, xferSize);
+      numd = xferSize / 4 - 1;
+      uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
+      uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
+      uio.direction = XFER_FROM_DEV;
+      uio.timeoutUs = ADMIN_TIMEOUT;
+      uio.cmd.getLogPage.cdw10.lid = NVME_LID_PERSISTENT_EVENT;
+      uio.cmd.getLogPage.cdw10.numdl = (vmk_uint16)(numd & 0xffff);
+      uio.cmd.getLogPage.cdw11.numdu = (vmk_uint16)((numd >> 16) & 0xffff);
+      uio.cmd.getLogPage.cdw10.lsp = NVME_PEL_ACTION_READ;
+      uio.cmd.getLogPage.lpo = offset;
+      uio.length = xferSize;
+      uio.addr = (vmk_uintptr_t)logData;
+      rc = Nvme_AdminPassthru(handle, &uio);
+      if (rc) {
+         fprintf (stderr, "Failed to fetch persistent event log at offset 0x%x, size %d, status 0x%x.\n",
+                  offset, xferSize, rc);
+         break;
+      }
+      if (write(fd, (void *)logData, xferSize) != xferSize) {
+         fprintf(stderr, "ERROR: Failed to write telemetry log at offset 0x%x, size %d.\n",
+                 offset, xferSize);
+         rc = -EIO;
+         break;
+      }
+      size = size - xferSize;
+      offset = offset + xferSize;
+   }
+
+   if (logData != NULL) {
+      free(logData);
+   }
+   close(fd);
+   return rc;
 }

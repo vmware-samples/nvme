@@ -76,13 +76,16 @@
          <description>NVMe firmware slot log page operations</description>
       </namespace>
       <namespace path="nvme.device.log.telemetry">
-         <description>NVMe Telemetry log page operations</description>
+         <description>NVMe telemetry log page operations</description>
       </namespace>
       <namespace path="nvme.device.log.telemetry.host">
-         <description>NVMe Telemetry Host-initiated log page operations</description>
+         <description>NVMe telemetry host-initiated log page operations</description>
       </namespace>
       <namespace path="nvme.device.log.telemetry.controller">
-         <description>NVMe Telemetry Controller-initiated log page operations</description>
+         <description>NVMe telemetry controller-initiated log page operations</description>
+      </namespace>
+      <namespace path="nvme.device.log.persistevent">
+         <description>NVMe persistent event log page operations</description>
       </namespace>
       <namespace path="nvme.device.firmware">
          <description>NVMe firmware operations</description>
@@ -621,12 +624,12 @@
             <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 3</execute>
       </command>
       <command path="nvme.device.log.telemetry.host.get">
-         <description>Get NVMe Telemetry Host-initiated Data</description>
+         <description>Get NVMe telemetry host-initiated data</description>
          <input-spec>
             <parameter name="adapter" type="string" required="true" shortname="A">
                <description>Adapter to operate on</description>
             </parameter>
-            <parameter name="telemetry" type="string" required="true" shortname="t">
+            <parameter name="path" type="string" required="true" shortname="p">
                <description>Telemetry log path</description>
             </parameter>
             <parameter name="data" type="int" required="false" shortname="d">
@@ -640,15 +643,15 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 7 -t $val{telemetry} $if{data, -d $val{data}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 7 -p $val{path} $if{data, -d $val{data}}</execute>
       </command>
       <command path="nvme.device.log.telemetry.controller.get">
-         <description>Get NVMe Telemetry Controller-initiated Data</description>
+         <description>Get NVMe telemetry controller-initiated data</description>
          <input-spec>
             <parameter name="adapter" type="string" required="true" shortname="A">
                <description>Adapter to operate on</description>
             </parameter>
-            <parameter name="telemetry" type="string" required="true" shortname="t">
+            <parameter name="path" type="string" required="true" shortname="p">
                <description>Telemetry log path</description>
             </parameter>
             <parameter name="data" type="int" required="false" shortname="d">
@@ -662,7 +665,28 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 8 -t $val{telemetry} $if{data, -d $val{data}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 8 -p $val{path} $if{data, -d $val{data}}</execute>
+      </command>
+      <command path="nvme.device.log.persistevent.get">
+         <description>Get NVMe persistent event log</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="action" type="int" required="true" shortname="a">
+               <description>Action the controller shall take during processing this command. 0: Read log data. 1: Establish context and read log data. 2: Release context.</description>
+            </parameter>
+            <parameter name="path" type="string" required="false" shortname="p">
+               <description>Persistent event log path. This parameter is required if the --action parameter is 0 or 1.</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -l 13 -a $val{action} $if{path, -p $val{path}}</execute>
       </command>
       <command path="nvme.device.feature.cap">
          <description>Get NVMe device feature supported capabilities information</description>
