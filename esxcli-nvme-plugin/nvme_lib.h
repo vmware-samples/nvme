@@ -265,4 +265,14 @@ int Nvme_GetPersistentEventLog(struct nvme_handle *handle, char *logPath,
                                int action);
 int Nvme_WriteRawDataToFile(void *data, int len, char *path);
 
+int Nvme_GetFeature(struct nvme_handle *handle, vmk_uint32 nsId, int fid,
+                    int select, vmk_uint32 cdw11, vmk_uint32 cdw12,
+                    vmk_uint32 cdw13, vmk_uint32 cdw14, vmk_uint32 cdw15,
+                    void *buf, vmk_uint32 len, vmk_uint32 *result);
+
+int Nvme_SetFeature(struct nvme_handle *handle, vmk_uint32 nsId, int fid,
+                    int sv, vmk_uint32 cdw11, vmk_uint32 cdw12,
+                    vmk_uint32 cdw13, vmk_uint32 cdw14, vmk_uint32 cdw15,
+                    void *buf, vmk_uint32 len);
+
 #endif /* _NVME_LIB_H */

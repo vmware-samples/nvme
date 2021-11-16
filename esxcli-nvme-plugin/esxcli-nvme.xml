@@ -754,6 +754,93 @@
          </format-parameters>
 	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.cap -A $val{adapter}</execute>
       </command>
+      <command path="nvme.device.feature.get">
+         <description>Get NVMe device feature</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="fid" type="string" required="true" shortname="f">
+               <description>Feature ID</description>
+            </parameter>
+            <parameter name="namespace" type="string" required="false" shortname="n">
+               <description>Namespace to operate on</description>
+            </parameter>
+            <parameter name="select" type="string" required="false" shortname="S">
+               <description>specify which value of the attributes to return, "current", "default", "saved"</description>
+            </parameter>
+            <parameter name="cdw11" type="string" required="false" shortname="c">
+               <description>Command Dword 11</description>
+            </parameter>
+            <parameter name="cdw12" type="string" required="false" shortname="w">
+               <description>Command Dword 12</description>
+            </parameter>
+            <parameter name="cdw13" type="string" required="false" shortname="x">
+               <description>Command Dword 13</description>
+            </parameter>
+            <parameter name="cdw14" type="string" required="false" shortname="y">
+               <description>Command Dword 14</description>
+            </parameter>
+            <parameter name="cdw15" type="string" required="false" shortname="z">
+               <description>Command Dword 15</description>
+            </parameter>
+            <parameter name="length" type="string" required="false" shortname="l">
+               <description>Feature data length.</description>
+            </parameter>
+            <parameter name="path" type="string" required="false" shortname="p">
+               <description>Data path. If set, the raw feature data will be wrote to the specified file. If not set, the feature data will be printed in hex format.</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 0 -A $val{adapter} -f $val{fid} $if{namespace, -n $val{namespace}} $if{select, -S $val{select}} $if{cdw11, -c $val{cdw11}} $if{cdw12, -w $val{cdw12}} $if{cdw13, -x $val{cdw13}} $if{cdw14, -y $val{cdw14}} $if{cdw15, -z $val{cdw15}} $if{length, -l $val{length}} $if{path, -p $val{path}}</execute>
+      </command>
+      <command path="nvme.device.feature.set">
+         <description>Set NVMe device feature</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="fid" type="string" required="true" shortname="f">
+               <description>Feature ID</description>
+            </parameter>
+            <parameter name="namespace" type="string" required="false" shortname="n">
+               <description>Namespace to operate on</description>
+            </parameter>
+            <parameter name="save" type="flag" required="false" shortname="S">
+               <description>save the attribute</description>
+            </parameter>
+            <parameter name="cdw11" type="string" required="false" shortname="c">
+               <description>Command Dword 11</description>
+            </parameter>
+            <parameter name="cdw12" type="string" required="false" shortname="w">
+               <description>Command Dword 12</description>
+            </parameter>
+            <parameter name="cdw13" type="string" required="false" shortname="x">
+               <description>Command Dword 13</description>
+            </parameter>
+            <parameter name="cdw14" type="string" required="false" shortname="y">
+               <description>Command Dword 14</description>
+            </parameter>
+            <parameter name="cdw15" type="string" required="false" shortname="z">
+               <description>Command Dword 15</description>
+            </parameter>
+            <parameter name="path" type="string" required="false" shortname="p">
+               <description>Feature data file path</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 0 -A $val{adapter} -f $val{fid} $if{namespace, -n $val{namespace}} $if{save, -S} $if{cdw11, -c $val{cdw11}} $if{cdw12, -w $val{cdw12}} $if{cdw13, -x $val{cdw13}} $if{cdw14, -y $val{cdw14}} $if{cdw15, -z $val{cdw15}} $if{path, -p $val{path}}</execute>
+      </command>
       <command path="nvme.device.feature.ar.get">
          <description>Get NVMe device feature arbitration information</description>
          <input-spec>
@@ -777,7 +864,7 @@
             <format-parameter name="header:Arbitration">Arbitration Info:</format-parameter>
             <format-parameter name="fields:Arbitration">Arbitration Burst,Low Priority Weight,Medium Priority Weight,High Priority Weight</format-parameter>
          </format-parameters>
-	 <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x1 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x1 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.ar.set">
          <description>Set NVMe device feature arbitration information</description>
@@ -811,7 +898,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0x1 $if{save, -S} -v $val{value} -x $val{value2} -y $val{value3} -z $val{value4}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0x1 $if{save, -S} -v $val{value} -x $val{value2} -y $val{value3} -z $val{value4}</execute>
       </command>
       <command path="nvme.device.feature.pm.get">
          <description>Get NVMe device feature power management information</description>
@@ -833,7 +920,7 @@
             <formatter>simple</formatter>
             <format-parameter name="header:PowerManagement">Power Management:</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x2 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x2 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.pm.set">
          <description>Set NVMe device feature power management information</description>
@@ -859,7 +946,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0x2 $if{save, -S} -v $val{value} $if{workload, -w $val{workload}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0x2 $if{save, -S} -v $val{value} $if{workload, -w $val{workload}}</execute>
       </command>
       <command path="nvme.device.feature.lba.get">
          <description>Get NVMe device feature LBA range type information</description>
@@ -892,7 +979,7 @@
             <format-parameter name="fields:LbaRangeList">Range Number, Type, Attr:Overwritten, Attr:Hidden, Starting LBA, Number of Logical Blocks, Unique Identifier</format-parameter>
             <format-parameter name="show-header:LbaRangeList">true</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -n $val{namespace} -f 0x3 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -n $val{namespace} -f 0x3 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.tt.get">
          <description>Get NVMe device feature temperature threshold information</description>
@@ -918,7 +1005,7 @@
             <format-parameter name="fields:TemperatureThreshold">Threshold Temperature Select, Under Temperature Threshold, Over Temperature Threshold</format-parameter>
             <format-parameter name="show-header:TemperatureThreshold">true</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x4 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x4 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.tt.set">
          <description>Set NVMe device feature temperature threshold information</description>
@@ -947,7 +1034,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0x4 $if{save, -S} -v $val{value} if{sensor, -s $val{sensor}} $if{under, -u}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0x4 $if{save, -S} -v $val{value} if{sensor, -s $val{sensor}} $if{under, -u}</execute>
       </command>
       <command path="nvme.device.feature.er.get">
          <description>Get NVMe device feature error recovery information</description>
@@ -972,7 +1059,7 @@
             <formatter>simple</formatter>
             <format-parameter name="header:ErrorRecovery">Error Recovery Info:</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} $if{namespace, -n $val{namespace}} -f 0x5 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} $if{namespace, -n $val{namespace}} -f 0x5 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.er.set">
          <description>Set NVMe device feature error recovery information</description>
@@ -1001,7 +1088,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} $if{namespace, -n $val{namespace}} -f 0x5 $if{save, -S} -v $val{value} $if{enable, -e $val{enable}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} $if{namespace, -n $val{namespace}} -f 0x5 $if{save, -S} -v $val{value} $if{enable, -e $val{enable}}</execute>
       </command>
       <command path="nvme.device.feature.vwc.get">
          <description>Get NVMe device feature volatile write cache information</description>
@@ -1022,7 +1109,7 @@
             <formatter>simple</formatter>
             <format-parameter name="header:VolatileWriteCache">Volatile Write Cache Info:</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x6 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x6 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.vwc.set">
          <description>Set NVMe device feature volatile write cache information</description>
@@ -1044,7 +1131,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0x6 $if{save, -S} -v $val{value}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0x6 $if{save, -S} -v $val{value}</execute>
       </command>
       <command path="nvme.device.feature.nq.get">
          <description>Get NVMe device feature number of queue information</description>
@@ -1067,7 +1154,7 @@
             <format-parameter name="header:NumberOfQueue">Number of Queue Info:</format-parameter>
             <format-parameter name="fields:NumberOfQueue">Number of Submission Queues Allocated,Number of Completion Queues Allocated</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x7 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x7 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.ic.get">
          <description>Get NVMe device feature interrupt coalescing information</description>
@@ -1090,7 +1177,7 @@
             <format-parameter name="header:InterruptCoalescing">InterruptCoalescing Info:</format-parameter>
             <format-parameter name="fields:InterruptCoalescing">Aggregation Threshold,Aggregation Time</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x8 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x8 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.ic.set">
          <description>Set NVMe device feature interrupt coalescing information</description>
@@ -1116,7 +1203,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0x8 $if{save, -S} -v $val{value} -x $val{value2}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0x8 $if{save, -S} -v $val{value} -x $val{value2}</execute>
       </command>
       <command path="nvme.device.feature.ivc.get">
          <description>Get NVMe device feature interrupt vector configuration information</description>
@@ -1141,7 +1228,7 @@
             <format-parameter name="header:InterruptVectorConfiguration">Interrupt Vector Configuration Info:</format-parameter>
             <format-parameter name="fields:InterruptVectorConfiguration">Interrupt Vector,Coalescing Disable</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x9 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x9 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.ivc.set">
          <description>Set NVMe device feature interrupt vector configuration information</description>
@@ -1167,7 +1254,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0x9 $if{save, -S} -v $val{value} -x $val{value2}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0x9 $if{save, -S} -v $val{value} -x $val{value2}</execute>
       </command>
       <command path="nvme.device.feature.wa.get">
          <description>Get NVMe device feature write atomicity information</description>
@@ -1188,7 +1275,7 @@
             <formatter>simple</formatter>
             <format-parameter name="header:WriteAtomicity">Write Atomicity Info:</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0xa $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0xa $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.wa.set">
          <description>Set NVMe device feature write atomicity information</description>
@@ -1210,7 +1297,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0xa $if{save, -S} -v $val{value}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0xa $if{save, -S} -v $val{value}</execute>
       </command>
       <command path="nvme.device.feature.aec.get">
          <description>Get NVMe device feature async event configuration information</description>
@@ -1242,7 +1329,7 @@
             <format-parameter name="header:AsyncEventConfiguration">Async Event Configuration Info:</format-parameter>
             <format-parameter name="fields:SMART">Available Spare Space,Temperature,Media Error,Read Only Mode,Backup Device Fail</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0xb $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0xb $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.aec.set">
          <description>Set NVMe device feature async event configuration information</description>
@@ -1272,7 +1359,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0xb $if{save, -S} -v $val{value} $if{nsnotices, -m $val{nsnotices}} $if{fwnotices, -w $val{fwnotices}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0xb $if{save, -S} -v $val{value} $if{nsnotices, -m $val{nsnotices}} $if{fwnotices, -w $val{fwnotices}}</execute>
       </command>
       <command path="nvme.device.feature.apst.get">
          <description>Get NVMe device feature autonomous power state transition information</description>
@@ -1304,7 +1391,7 @@
             <format-parameter name="fields:AutonomousPowerStateTransition">Autonomous Power State Transition Enable, Autonomous Power State Transition Data</format-parameter>
             <format-parameter name="fields:DataEntry">Power State,Idle Transition Power State,Idle Time Prior to Transition(milliseconds)</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0xc $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0xc $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.hmb.get">
          <description>Get NVMe device feature host memory buffer information</description>
@@ -1339,7 +1426,7 @@
             <format-parameter name="fields:Status">Enable Host Memory, Memory Return</format-parameter>
             <format-parameter name="fields:Data">Host Memory Buffer Size, Host Memory Descriptor List Address, Host Memory Descriptor List Entry Count</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0xd $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0xd $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.kat.get">
          <description>Get NVMe device feature keep alive timer information</description>
@@ -1360,7 +1447,7 @@
             <formatter>simple</formatter>
             <format-parameter name="header:KeepAliveTimer">Keep Alive Timer Info:</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0xf $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0xf $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.kat.set">
          <description>Set NVMe device feature keep alive timer information</description>
@@ -1381,7 +1468,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0xf $if{save, -S} -t $val{timeout}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0xf $if{save, -S} -t $val{timeout}</execute>
       </command>
       <command path="nvme.device.feature.spm.get">
          <description>Get NVMe device feature software progress marker information</description>
@@ -1402,7 +1489,7 @@
             <formatter>simple</formatter>
             <format-parameter name="header:SoftwareProgressMarker">Software Progress Marker Info:</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x80 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x80 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.feature.spm.set">
          <description>Set software progress marker feature information, will clear Pre-boot Software Load Count (PBSLC) to 0</description>
@@ -1420,7 +1507,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -A $val{adapter} -f 0x80 $if{save, -S}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0x80 $if{save, -S}</execute>
       </command>
       <command path="nvme.device.feature.hi.get">
          <description>Get NVMe device feature host identifier information</description>
@@ -1443,7 +1530,7 @@
             <format-parameter name="header:HostIdentifier">Host Identifier Info:</format-parameter>
             <format-parameter name="fields:HostIdentifier">Enable Extended Host Identifier, Host Identifier</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -A $val{adapter} -f 0x81 $if{select, -S $val{select}}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x81 $if{select, -S $val{select}}</execute>
       </command>
       <command path="nvme.device.firmware.download">
          <description>Download firmware image to the device</description>

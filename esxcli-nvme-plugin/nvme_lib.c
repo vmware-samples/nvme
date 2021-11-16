@@ -14,7 +14,6 @@
 #include <stdio.h>
 
 #include "nvme_lib.h"
-#include "str.h"
 
 
 /*****************************************************************************
@@ -1403,5 +1402,91 @@ int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid, void *logData
       xferOffset = xferOffset + xferSize;
    }
 
+   return rc;
+}
+
+int Nvme_GetFeature(struct nvme_handle *handle,
+                    vmk_uint32 nsId,
+                    int fid,
+                    int select,
+                    vmk_uint32 cdw11,
+                    vmk_uint32 cdw12,
+                    vmk_uint32 cdw13,
+                    vmk_uint32 cdw14,
+                    vmk_uint32 cdw15,
+                    void *buf,
+                    vmk_uint32 len,
+                    vmk_uint32 *result)
+{
+   int rc;
+   NvmeUserIo uio;
+   memset(&uio, 0, sizeof(uio));
+
+   if ((buf != NULL && len == 0) ||
+       (buf == NULL && len != 0) ||
+       result == NULL) {
+      return -EINVAL;
+   }
+
+   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
+   uio.cmd.getFeatures.nsid = nsId;
+   uio.cmd.getFeatures.cdw10.fid = fid;
+   uio.cmd.getFeatures.cdw10.sel = select;
+   uio.cmd.getFeatures.cdw11 = cdw11;
+   uio.cmd.getFeatures.cdw12 = cdw12;
+   uio.cmd.getFeatures.cdw13 = cdw13;
+   uio.cmd.getFeatures.cdw14 = cdw14;
+   uio.cmd.getFeatures.cdw15 = cdw15;
+   uio.direction = XFER_FROM_DEV;
+   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.addr = (vmk_uintptr_t)buf;
+   uio.length = len;
+   rc = Nvme_AdminPassthru(handle, &uio);
+   if (rc) {
+      fprintf (stderr, "Failed to get feature info\n");
+   } else {
+      *result = uio.comp.dw0;
+   }
+   return rc;
+}
+
+int Nvme_SetFeature(struct nvme_handle *handle,
+                    vmk_uint32 nsId,
+                    int fid,
+                    int save,
+                    vmk_uint32 cdw11,
+                    vmk_uint32 cdw12,
+                    vmk_uint32 cdw13,
+                    vmk_uint32 cdw14,
+                    vmk_uint32 cdw15,
+                    void *buf,
+                    vmk_uint32 len)
+{
+   int rc;
+   NvmeUserIo uio;
+   memset(&uio, 0, sizeof(uio));
+
+   if ((buf != NULL && len == 0) ||
+       (buf == NULL && len != 0)) {
+      return -EINVAL;
+   }
+
+   uio.cmd.setFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_SET_FEATURES;
+   uio.cmd.setFeatures.nsid = nsId;
+   uio.cmd.setFeatures.cdw10.fid = fid;
+   uio.cmd.setFeatures.cdw10.sv = save;
+   uio.cmd.setFeatures.cdw11.value = cdw11;
+   uio.cmd.setFeatures.cdw12 = cdw12;
+   uio.cmd.setFeatures.cdw13 = cdw13;
+   uio.cmd.setFeatures.cdw14 = cdw14;
+   uio.cmd.setFeatures.cdw15 = cdw15;
+   uio.direction = XFER_TO_DEV;
+   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.addr = (vmk_uintptr_t)buf;
+   uio.length = len;
+   rc = Nvme_AdminPassthru(handle, &uio);
+   if (rc) {
+      fprintf (stderr, "Failed to set feature info\n");
+   }
    return rc;
 }

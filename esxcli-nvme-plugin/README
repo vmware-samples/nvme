@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2021/11/3 1.2.0.48-1vmw
+
+   Fix PR #2868089: Add two commands to get/set an arbitrary NVMe feature.
+
 2021/10/26 1.2.0.47-1vmw
 
    Fix PR #2863011: Fix the issue that large firmware image cannot be downloaded.

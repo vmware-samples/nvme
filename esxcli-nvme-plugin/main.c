@@ -15,6 +15,9 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <math.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <vmkapi.h>
 #include "esxcli_xml.h"
@@ -448,9 +451,6 @@ PrintHex(void *data, int len)
       m = m - 16;
    }
    t = len - m;
-   esxcli_xml_begin_output();
-   xml_list_begin("string");
-   printf("<string>");
    for (i = 0; i < m; i +=16) {
       printf("%04x    %02x %02x %02x %02x %02x %02x %02x %02x "
              "%02x %02x %02x %02x %02x %02x %02x %02x\n",
@@ -464,9 +464,6 @@ PrintHex(void *data, int len)
       printf("%02x ", p[i]);
    }
    printf("%02x", p[i]);
-   printf("</string>");
-   xml_list_end();
-   esxcli_xml_end_output();
 }
 
 /**
@@ -633,11 +630,11 @@ htoi(const char* str, int *value)
  *         return -1 for failure cases, e.g. input string has illegal characters.
  */
 static int
-stoi(const char* str, int *value)
+stoi(const char* str, vmk_uint32 *value)
 {
-   int i = 0;
-   int n = 0;
-   int tmp = 0;
+   vmk_uint32 i = 0;
+   vmk_uint32 n = 0;
+   vmk_uint32 tmp = 0;
 
    if (str == NULL || value == NULL) {
       return -1;
@@ -2352,7 +2349,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
             setBuiltin = 1;
             break;
          case 'u':
-            builtin = atoi(optarg);
+            uuid = atoi(optarg);
             setUUID = 1;
             break;
          case 'p':
@@ -2453,7 +2450,13 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
                esxcli_xml_end_output();
             }
          } else {
+            esxcli_xml_begin_output();
+            xml_list_begin("string");
+            printf("<string>");
             PrintHex(logData, dataLen);
+            printf("</string>");
+            xml_list_end();
+            esxcli_xml_end_output();
          }
       }
       free(logData);
@@ -2706,71 +2709,308 @@ const char* strFeatErr(vmk_uint32 code) {
       default: return "Error";
    }
 }
+
 #define NVME_FEATURE_ERROR_STR strFeatErr((uio.comp.dw3.sct << 8) |  \
-                                          uio.comp.dw3.sc)
+      uio.comp.dw3.sc)
 
-void issueSetFeature(struct nvme_handle *handle,
-                     int nsId,
-                     int fid,
-                     int save,
-                     vmk_uint32 dw11,
-                     vmk_uint32 dw12,
-                     vmk_uint32 dw13,
-                     vmk_uint32 dw14,
-                     vmk_uint32 dw15,
-                     vmk_uint8 *buf,
-                     vmk_uint32 len)
+void
+GetFeature(struct nvme_handle *handle,
+           int fid,
+           int select,
+           vmk_uint32 nsId,
+           int argc,
+           const char **argv)
 {
-   int rc;
-   NvmeUserIo uio;
-   memset(&uio, 0, sizeof(uio));
+   int rc, ch;
+   vmk_uint32 value = 0;
+   vmk_uint32 cdw11 = 0;
+   vmk_uint32 cdw12 = 0;
+   vmk_uint32 cdw13 = 0;
+   vmk_uint32 cdw14 = 0;
+   vmk_uint32 cdw15 = 0;
+   vmk_uint32 dataLen = 0;
+   char *cdw11Str = NULL;
+   char *cdw12Str = NULL;
+   char *cdw13Str = NULL;
+   char *cdw14Str = NULL;
+   char *cdw15Str = NULL;
+   char *dataLenStr = NULL;
+   char *dataPath = NULL;
+   vmk_uint8 *featureData = NULL;
 
-   uio.cmd.setFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_SET_FEATURES;
-   uio.cmd.setFeatures.nsid = nsId;
-   uio.cmd.setFeatures.cdw10.fid = fid;
-   uio.cmd.setFeatures.cdw10.sv = save;
-   uio.cmd.setFeatures.cdw11 = (vmk_NvmeSetFeaturesCdw11)dw11;
-   uio.cmd.setFeatures.cdw12 = dw12;
-   uio.cmd.setFeatures.cdw13 = dw13;
-   uio.cmd.setFeatures.cdw14 = dw14;
-   uio.cmd.setFeatures.cdw15 = dw15;
-   uio.direction = XFER_TO_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.addr = (vmk_uintptr_t)buf;
-   uio.length = len;
-   rc = Nvme_AdminPassthru(handle, &uio);
+   optind = 1;
+   while ((ch = getopt(argc, (char *const*)argv, ":c:w:x:y:z:l:p:")) != -1) {
+      switch (ch) {
+         case 'c':
+            cdw11Str = optarg;
+            break;
+         case 'w':
+            cdw12Str = optarg;
+            break;
+         case 'x':
+            cdw13Str = optarg;
+            break;
+         case 'y':
+            cdw14Str = optarg;
+            break;
+         case 'z':
+            cdw15Str = optarg;
+            break;
+         case 'l':
+            dataLenStr = optarg;
+            break;
+         case 'p':
+            dataPath = optarg;
+            break;
+      }
+   }
+
+   if (cdw11Str != NULL) {
+      rc = stoi(cdw11Str, &cdw11);
+      if (rc) {
+         Error("Invalid command dword 11.");
+         return;
+      }
+   }
+
+   if (cdw12Str != NULL) {
+      rc = stoi(cdw12Str, &cdw12);
+      if (rc) {
+         Error("Invalid command dword 12.");
+         return;
+      }
+   }
+
+   if (cdw13Str != NULL) {
+      rc = stoi(cdw13Str, &cdw13);
+      if (rc) {
+         Error("Invalid command dword 13.");
+         return;
+      }
+   }
+
+   if (cdw14Str != NULL) {
+      rc = stoi(cdw14Str, &cdw14);
+      if (rc) {
+         Error("Invalid command dword 14.");
+         return;
+      }
+   }
+
+   if (cdw15Str != NULL) {
+      rc = stoi(cdw15Str, &cdw15);
+      if (rc) {
+         Error("Invalid command dword 15.");
+         return;
+      }
+   }
+
+   if (dataLenStr != NULL) {
+      rc = stoi(dataLenStr, &dataLen);
+      if (rc) {
+         Error("Invalid data length.");
+         return;
+      }
+   }
+
+   if (dataLen != 0) {
+      featureData = malloc(dataLen);
+      if (featureData == NULL) {
+         Error("Failed to malloc %d bytes.", dataLen);
+         return;
+      }
+   }
+
+   rc = Nvme_GetFeature(handle, nsId, fid, select, cdw11, cdw12, cdw13,
+                        cdw14, cdw15, featureData, dataLen, &value);
+
    if (rc) {
-      Error("Failed to set feature info, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
+   } else {
+      if (featureData != NULL && dataPath != NULL) {
+         rc = Nvme_WriteRawDataToFile(featureData, dataLen, dataPath);
+      }
+      if (rc) {
+         Error("Failed to write featurea data, 0x%x", rc);
+      } else {
+         esxcli_xml_begin_output();
+         xml_list_begin("string");
+         printf("<string>");
+         printf("Feature value: 0x%x\n", value);
+         if (featureData != NULL) {
+            if (dataPath != NULL) {
+               printf("Write feature data to file successfully.\n");
+            } else {
+               printf("Feature data:\n");
+               PrintHex(featureData, dataLen);
+            }
+         }
+         printf("</string>");
+         xml_list_end();
+         esxcli_xml_end_output();
+      }
+   }
+
+   if (featureData != NULL) {
+      free(featureData);
+   }
+}
+
+void
+SetFeature(struct nvme_handle *handle,
+           int fid,
+           int save,
+           vmk_uint32 nsId,
+           int argc,
+           const char **argv)
+{
+   int rc, ch, fd;
+   struct stat sb;
+   vmk_uint32 cdw11 = 0;
+   vmk_uint32 cdw12 = 0;
+   vmk_uint32 cdw13 = 0;
+   vmk_uint32 cdw14 = 0;
+   vmk_uint32 cdw15 = 0;
+   vmk_uint32 dataLen = 0;
+   char *cdw11Str = NULL;
+   char *cdw12Str = NULL;
+   char *cdw13Str = NULL;
+   char *cdw14Str = NULL;
+   char *cdw15Str = NULL;
+   char *dataPath = NULL;
+   vmk_uint8 *featureData = NULL;
+
+   optind = 1;
+   while ((ch = getopt(argc, (char *const*)argv, ":c:w:x:y:z:p:")) != -1) {
+      switch (ch) {
+         case 'c':
+            cdw11Str = optarg;
+            break;
+         case 'w':
+            cdw12Str = optarg;
+            break;
+         case 'x':
+            cdw13Str = optarg;
+            break;
+         case 'y':
+            cdw14Str = optarg;
+            break;
+         case 'z':
+            cdw15Str = optarg;
+            break;
+         case 'p':
+            dataPath = optarg;
+            break;
+      }
+   }
+
+   if (cdw11Str != NULL) {
+      rc = stoi(cdw11Str, &cdw11);
+      if (rc) {
+         Error("Invalid command dword 11.");
+         return;
+      }
+   }
+
+   if (cdw12Str != NULL) {
+      rc = stoi(cdw12Str, &cdw12);
+      if (rc) {
+         Error("Invalid command dword 12.");
+         return;
+      }
+   }
+
+   if (cdw13Str != NULL) {
+      rc = stoi(cdw13Str, &cdw13);
+      if (rc) {
+         Error("Invalid command dword 13.");
+         return;
+      }
+   }
+
+   if (cdw14Str != NULL) {
+      rc = stoi(cdw14Str, &cdw14);
+      if (rc) {
+         Error("Invalid command dword 14.");
+         return;
+      }
+   }
+
+   if (cdw15Str != NULL) {
+      rc = stoi(cdw15Str, &cdw15);
+      if (rc) {
+         Error("Invalid command dword 15.");
+         return;
+      }
+   }
+
+   if (dataPath != NULL) {
+      fd = open(dataPath, O_RDONLY);
+      if (fd == -1) {
+         Error("Failed to open data file %s.", dataPath);
+         return;
+      }
+      if (fstat (fd, &sb) == -1) {
+         Error("Failed to get file size.");
+         close(fd);
+         return;
+      }
+      if (!S_ISREG (sb.st_mode)) {
+         Error("%s is not a file.", dataPath);
+         close(fd);
+         return;
+      }
+      dataLen = (vmk_uint32)sb.st_size;
+      if (dataLen == 0) {
+         Error("Invalid data length.");
+         close(fd);
+         return;
+      }
+      featureData = malloc(dataLen);
+      if (featureData == NULL) {
+         Error("Failed to malloc %d bytes.", dataLen);
+         close(fd);
+         return;
+      }
+      if (read(fd, featureData, dataLen) < dataLen) {
+         Error("Failed to read data.");
+         free(featureData);
+         close(fd);
+         return;
+      }
+   }
+
+   rc = Nvme_SetFeature(handle, nsId, fid, save, cdw11, cdw12, cdw13,
+                        cdw14, cdw15, featureData, dataLen);
+
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
    } else {
       esxcli_xml_begin_output();
       xml_list_begin("string");
-      xml_format("string", "Feature set successfully!");
+      printf("<string>");
+      printf("Feature set successfully!\n");
+      printf("</string>");
       xml_list_end();
       esxcli_xml_end_output();
+   }
+
+   if (featureData != NULL) {
+      free(featureData);
    }
 }
 
 void getFeature_01h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_ARBITRATION;
-   uio.cmd.getFeatures.cdw10.sel = select;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_ARBITRATION, select,
+                        0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
 
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("Arbitration");
    PINT("Arbitration Burst", value & 0x7);
@@ -2868,31 +3108,24 @@ setFeature_01h(struct nvme_handle *handle,
       }
    }
    dw11 = burst | (low << 8) | (mid << 16) | (high << 24);
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_ARBITRATION,
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_ARBITRATION,
       save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_02h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_POWER_MANAGEMENT;
-   uio.cmd.getFeatures.cdw10.sel = select;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_POWER_MANAGEMENT,
+                        select, 0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
 
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("PowerManagement");
    PINT("Power State", value & 0x1f);
@@ -2963,35 +3196,25 @@ void setFeature_02h(struct nvme_handle *handle, int save, int nsId, int argc, co
       }
    }
    dw11 = powerState | (workload << 5);
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_POWER_MANAGEMENT,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_POWER_MANAGEMENT,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_03h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc, numRanges, i;
-   NvmeUserIo uio;
    vmk_uint8 buf[4096];
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_LBA_RANGE_TYPE;
-   uio.cmd.getFeatures.cdw10.sel = select;
-   uio.addr = (vmk_uintptr_t)buf;
-   uio.length = 4096;
-   uio.cmd.getFeatures.nsid = nsId;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, nsId, VMK_NVME_FEATURE_ID_LBA_RANGE_TYPE,
+                        select, 0, 0, 0, 0, 0, buf, 4096, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
 
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    numRanges = value & 0x3f;
    xml_list_begin("structure");
@@ -3060,16 +3283,9 @@ void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
 {
    int rc;
    vmk_uint32 sensor = 0, overThreshold = 0, underThreshold = 0;
+   vmk_uint32 cdw11 = 0, value = 0;
    vmk_NvmeIdentifyController idCtrlr;
    vmk_NvmeSmartInfoEntry smartLog;
-
-   NvmeUserIo uio;
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_TEMP_THRESHOLD;
-   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
@@ -3094,20 +3310,22 @@ void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
          }
       }
       if (sensor != 0 || idCtrlr.wctemp != 0) {
-         uio.cmd.getFeatures.cdw11 = (sensor | 0x10) << 16;
-         rc = Nvme_AdminPassthru(handle, &uio);
+         cdw11 = (sensor | 0x10) << 16;
+         rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_TEMP_THRESHOLD,
+                              select, cdw11, 0, 0, 0, 0, NULL, 0, &value);
          if (rc) {
             continue;
          }
-         underThreshold = uio.comp.dw0 & 0xffff;
+         underThreshold = value & 0xffff;
       }
 
-      uio.cmd.getFeatures.cdw11 = sensor << 16;
-      rc = Nvme_AdminPassthru(handle, &uio);
+      cdw11 = sensor << 16;
+      rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_TEMP_THRESHOLD,
+                           select, cdw11, 0, 0, 0, 0, NULL, 0, &value);
       if (rc) {
          continue;
       }
-      overThreshold = uio.comp.dw0 & 0xffff;
+      overThreshold = value & 0xffff;
 
       xml_struct_begin("TemperatureThreshold");
       if (sensor == 0) {
@@ -3198,23 +3416,17 @@ void setFeature_04h(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
    dw11 = threshold | (sensor << 16) | under << 20;
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_TEMP_THRESHOLD,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_TEMP_THRESHOLD,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_05h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
    vmk_NvmeIdentifyController idCtrlr;
-
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_ERROR_RECOVERY;
-   uio.cmd.getFeatures.cdw10.sel = select;
-   uio.cmd.getFeatures.nsid = nsId;
 
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
@@ -3236,15 +3448,13 @@ void getFeature_05h(struct nvme_handle *handle, int select, int nsId)
       }
    }
 
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, nsId, VMK_NVME_FEATURE_ID_ERROR_RECOVERY,
+                        select, 0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
 
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("ErrorRecovery");
    PINT("Time Limited Error Recovery", value & 0xffff);
@@ -3344,22 +3554,17 @@ setFeature_05h(struct nvme_handle *handle,
       }
    }
    dw11 = time | (dulbe << 16);
-   issueSetFeature(handle, nsId, VMK_NVME_FEATURE_ID_ERROR_RECOVERY,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, nsId, VMK_NVME_FEATURE_ID_ERROR_RECOVERY,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_06h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
    vmk_NvmeIdentifyController idCtrlr;
-
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_VOLATILE_WRITE_CACHE;
-   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
@@ -3372,15 +3577,12 @@ void getFeature_06h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_VOLATILE_WRITE_CACHE,
+                        select, 0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
-
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("VolatileWriteCache");
@@ -3436,31 +3638,23 @@ setFeature_06h(struct nvme_handle *handle,
       return;
    }
    dw11 = enable;
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_VOLATILE_WRITE_CACHE,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_VOLATILE_WRITE_CACHE,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_07h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_NUM_QUEUE;
-   uio.cmd.getFeatures.cdw10.sel = select;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_NUM_QUEUE,
+                        select, 0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
-
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("NumberOfQueue");
@@ -3473,24 +3667,13 @@ void getFeature_07h(struct nvme_handle *handle, int select, int nsId)
 void getFeature_08h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_INT_COALESCING;
-   uio.cmd.getFeatures.cdw10.sel = select;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_INT_COALESCING,
+                        select, 0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
       Error("Failed to get feature, 0x%x.", rc);
       return;
    }
-
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("InterruptCoalescing");
@@ -3511,6 +3694,7 @@ setFeature_08h(struct nvme_handle *handle,
    char *timeStr = NULL;
    char *thresholdStr = NULL;
    vmk_uint32 dw11;
+   int rc;
 
    optind = 1;
    while ((ch = getopt(argc, (char *const*)argv, ":v:x:")) != -1) {
@@ -3547,22 +3731,17 @@ setFeature_08h(struct nvme_handle *handle,
       return;
    }
    dw11 = threshold | (time << 8);
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_INT_COALESCING,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_INT_COALESCING,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
 {
-   int value, rc, vectNum, i;
-   NvmeUserIo uio;
+   int value, rc, vectNum, i, cdw11;
    NvmeUserIo uioVect;
-
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_INT_VECTOR_CONFIG;
-   uio.cmd.getFeatures.cdw10.sel = select;
 
    memset(&uioVect, 0, sizeof(uioVect));
    rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_INT_VECT_NUM, &uioVect);
@@ -3576,12 +3755,12 @@ void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_begin_output();
    xml_list_begin("structure");
    for (i = 0; i < vectNum; i++) {
-      uio.cmd.getFeatures.cdw11 = i & 0xffff;
-      rc = Nvme_AdminPassthru(handle, &uio);
+      cdw11 = i & 0xffff;
+      rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_INT_VECTOR_CONFIG,
+                           select, cdw11, 0, 0, 0, 0, NULL, 0, &value);
       if (rc) {
          continue;
       }
-      value = uio.comp.dw0;
       xml_struct_begin("InterruptVectorConfiguration");
       PINT("Interrupt Vector", value & 0xffff);
       PBOOL("Coalescing Disable", value & 0x10000);
@@ -3662,31 +3841,23 @@ setFeature_09h(struct nvme_handle *handle,
 
 
    dw11 = vector | (disable << 16);
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_INT_VECTOR_CONFIG,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_INT_VECTOR_CONFIG,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_0ah(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_WRITE_ATOMICITY;
-   uio.cmd.getFeatures.cdw10.sel = select;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_WRITE_ATOMICITY,
+                        select, 0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
-
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("WriteAtomicity");
@@ -3705,6 +3876,7 @@ setFeature_0ah(struct nvme_handle *handle,
    int   ch, disable = 0;
    char *disableStr = NULL;
    vmk_uint32 dw11;
+   int rc;
 
    optind = 1;
    while ((ch = getopt(argc, (char *const*)argv, ":v:")) != -1) {
@@ -3732,31 +3904,24 @@ setFeature_0ah(struct nvme_handle *handle,
    }
 
    dw11 = disable;
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_WRITE_ATOMICITY,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_WRITE_ATOMICITY,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
+
 }
 
 void getFeature_0bh(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_ASYNC_EVENT_CONFIG;
-   uio.cmd.getFeatures.cdw10.sel = select;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_ASYNC_EVENT_CONFIG,
+                        select, 0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
-
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("AsyncEventConfiguration");
@@ -3856,26 +4021,18 @@ setFeature_0bh(struct nvme_handle *handle,
    }
 
    dw11 = smart | (namespace << 8) | (firmware << 9);
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_ASYNC_EVENT_CONFIG,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_ASYNC_EVENT_CONFIG,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc, i;
-   NvmeUserIo uio;
    vmk_NvmeIdentifyController idCtrlr;
    vmk_uint64 buf[32];
-
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid =
-      VMK_NVME_FEATURE_ID_AUTONOMOUS_POWER_STATE_TRANS;
-   uio.cmd.getFeatures.cdw10.sel = select;
-   uio.addr = (vmk_uintptr_t)buf;
-   uio.length = 256;
 
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
@@ -3889,14 +4046,13 @@ void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_AUTONOMOUS_POWER_STATE_TRANS,
+                        select, 0, 0, 0, 0, 0, buf, 256, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
 
-   value = uio.comp.dw0;
    Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("AutonomousPowerStateTransition");
@@ -3920,18 +4076,8 @@ void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
 void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
    vmk_uint32 buf[1024];
    vmk_NvmeIdentifyController idCtrlr;
-
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_HOST_MEMORY_BUFFER;
-   uio.cmd.getFeatures.cdw10.sel = select;
-   uio.addr = (vmk_uintptr_t)buf;
-   uio.length = 4096;
 
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
@@ -3945,15 +4091,13 @@ void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_HOST_MEMORY_BUFFER,
+                        select, 0, 0, 0, 0, 0, buf, 4096, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
 
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("HostMemoryBuffer");
    xml_field_begin("Host Memory Buffer Status");
@@ -4059,32 +4203,23 @@ setFeature_0fh(struct nvme_handle *handle,
    }
 
    dw11 = timeout;
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_KEEP_ALIVE_TIMER,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_KEEP_ALIVE_TIMER,
+                        save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x.", rc);
+   }
 }
 
 void getFeature_80h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid =
-      VMK_NVME_FEATURE_ID_SOFTWARE_PROGRESS_MARKER;
-   uio.cmd.getFeatures.cdw10.sel = select;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_SOFTWARE_PROGRESS_MARKER,
+                        select, 0, 0, 0, 0, 0, NULL, 0, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
-
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("SoftwareProgressMarker");
@@ -4101,36 +4236,27 @@ setFeature_80h(struct nvme_handle *handle,
                const char **argv)
 {
    vmk_uint32 dw11;
+   int rc;
 
    dw11 = 0;
-   issueSetFeature(handle, 0, VMK_NVME_FEATURE_ID_SOFTWARE_PROGRESS_MARKER,
-                   save, dw11, 0, 0, 0, 0, NULL, 0);
+   rc  = Nvme_SetFeature(handle, 0, VMK_NVME_FEATURE_ID_SOFTWARE_PROGRESS_MARKER,
+                         save, dw11, 0, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x", rc);
+   }
 }
 
 void getFeature_81h(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
    vmk_uint8 buf[16];
 
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_HOST_ID;
-   uio.cmd.getFeatures.cdw10.sel = select;
-   uio.addr = (vmk_uintptr_t)buf;
-   uio.length = 16;
-
-   rc = Nvme_AdminPassthru(handle, &uio);
-
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_HOST_ID,
+                        select, 0, 0, 0, 0, 0, buf, 16, &value);
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
-
-   value = uio.comp.dw0;
-   Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("HostIdentifier");
@@ -4357,20 +4483,24 @@ NvmePlugin_DeviceFeatureCap(int argc, const char *argv[])
 
    Nvme_Close(handle);
 }
+
 void
 NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
 {
-   int                      ch, fid, rc, nsId = 0;
+   int                      ch, fid, rc = 0;
+   vmk_uint32               nsId = 0;
    const char              *vmhba = NULL;
    const char              *ftr = NULL;
    const char              *sel = NULL;
    const char              *ns  = NULL;
    struct nvme_adapter_list list;
    struct nvme_handle      *handle;
-   struct Feature          *feature;
+   struct Feature          *feature = NULL;
    int                      select;
+   int                      builtin = 0;
+   BOOL                     setBuiltin = 0;
 
-   while ((ch = getopt(argc, (char*const*)argv, ":A:f:n:S:")) != -1) {
+   while ((ch = getopt(argc, (char*const*)argv, "-:A:f:n:S:b:")) != -1) {
       switch (ch) {
          case 'A':
             vmhba = optarg;
@@ -4387,35 +4517,39 @@ NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
          case 'S':
             sel = optarg;
             break;
+
+         case 'b':
+            setBuiltin = 1;
+            builtin = atoi(optarg);
+            break;
       }
    }
 
-   if (vmhba == NULL || ftr == NULL) {
-      Error("vmhba or ftr null");
+   if (vmhba == NULL || ftr == NULL || setBuiltin == 0) {
+      Error("Missing required parameters.");
       return;
    }
 
-   errno = 0;
-   fid = strtol(ftr, NULL, 0);
-   if (errno) {
-      Error("Invalid feature id.");
+   rc = stoi(ftr, &fid);
+   if (rc) {
+      Error("Invalid feature ID.");
       return;
    }
 
    if (ns != NULL) {
-      errno = 0;
-      nsId = strtol(ns, NULL, 0);
-      if (errno || nsId <= 0) {
-         Error("Invalid namespace id.");
+      rc = stoi(ns, &nsId);
+      if (rc) {
+         Error("Invalid namespace ID.");
          return;
       }
    }
 
-   feature = LookupFeature(fid);
-
-   if (!feature) {
-      Error("Invalid feature name!");
-      return;
+   if (builtin) {
+      feature = LookupFeature(fid);
+      if (!feature) {
+         Error("Invalid feature name!");
+         return;
+      }
    }
 
    select = LookupSelect(sel);
@@ -4437,7 +4571,7 @@ NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
       return;
    }
 
-   if (nsId > 0) {
+   if (nsId > 0 && nsId != VMK_NVME_DEFAULT_NSID) {
       rc = Nvme_ValidNsId(handle, nsId);
       if (rc == -1) {
          Error("Failed to validate nsId %d.", nsId);
@@ -4458,10 +4592,14 @@ NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
       }
    }
 
-   if (feature->getFeature) {
-      feature->getFeature(handle, select, nsId);
+   if (builtin) {
+      if (feature->getFeature) {
+         feature->getFeature(handle, select, nsId);
+      } else {
+         Error("Invalid operation: Not allow to get feature %s.", feature->desc);
+      }
    } else {
-      Error("Invalid operation: Not allow to get feature %s.", feature->desc);
+      GetFeature(handle, fid, select, nsId, argc, argv);
    }
 
 out:
@@ -4471,7 +4609,8 @@ out:
 void
 NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
 {
-   int                      ch, fid, rc, nsId = 0;
+   int                      ch, fid, rc = 0;
+   vmk_uint32               nsId = 0;
    const char              *vmhba = NULL;
    const char              *ftr = NULL;
    const char              *ns  = NULL;
@@ -4479,9 +4618,11 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
    struct nvme_handle           *handle;
    vmk_NvmeIdentifyController   idCtrlr;
    int                          save = 0;
-   struct Feature               *feature;
+   struct Feature               *feature = NULL;
+   BOOL                         setBuiltin = 0;
+   int                          builtin = 0;
 
-   while ((ch = getopt(argc, (char*const*)argv, "-:A:f:n:S")) != -1) {
+   while ((ch = getopt(argc, (char*const*)argv, "-:A:f:n:b:S")) != -1) {
       switch (ch) {
          case 'A':
             vmhba = optarg;
@@ -4495,38 +4636,42 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
             ns = optarg;
             break;
 
+         case 'b':
+            setBuiltin = 1;
+            builtin = atoi(optarg);
+            break;
+
          case 'S':
             save = 1;
             break;
       }
    }
 
-   if (vmhba == NULL || ftr == NULL) {
+   if (vmhba == NULL || ftr == NULL || setBuiltin == 0) {
       Error("Invalid argument.");
       return;
    }
 
-   errno = 0;
-   fid = strtol(ftr, NULL, 0);
-   if (errno) {
-      Error("Invalid feature id.");
+   rc = stoi(ftr, &fid);
+   if (rc) {
+      Error("Invalid feature ID.");
       return;
    }
 
    if (ns != NULL) {
-      errno = 0;
-      nsId = strtol(ns, NULL, 0);
-      if (errno || nsId <= 0) {
-         Error("Invalid namespace id.");
+      rc = stoi(ns, &nsId);
+      if (rc) {
+         Error("Invalid namespace ID.");
          return;
       }
    }
 
-   feature = LookupFeature(fid);
-
-   if (!feature) {
-      Error("Invalid feature name!");
-      return;
+   if (builtin) {
+      feature = LookupFeature(fid);
+      if (!feature) {
+         Error("Invalid feature name!");
+         return;
+      }
    }
 
    // do stuff for nvme device namespace list -A vmhbax.
@@ -4553,7 +4698,7 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
       goto out;
    }
 
-   if (nsId > 0) {
+   if (nsId > 0 && nsId != VMK_NVME_DEFAULT_NSID) {
       rc = Nvme_ValidNsId(handle, nsId);
       if (rc == -1) {
          Error("Failed to validate nsId %d.", nsId);
@@ -4574,10 +4719,14 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
       }
    }
 
-   if (feature->setFeature) {
-      feature->setFeature(handle, save, nsId, argc, argv);
+   if (builtin) {
+      if (feature->setFeature) {
+         feature->setFeature(handle, save, nsId, argc, argv);
+      } else {
+         Error("Invalid operation: Not allow to set feature %s.", feature->desc);
+      }
    } else {
-      Error("Invalid operation: Not allow to set feature %s.", feature->desc);
+      SetFeature(handle, fid, save, nsId, argc, argv);
    }
 
 out:
