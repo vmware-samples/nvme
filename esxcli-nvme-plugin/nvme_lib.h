@@ -6,6 +6,36 @@
 #define _NVME_LIB_H
 
 #include "nvme_mgmt.h"
+#include <syslog.h>
+
+typedef enum {
+   NVME_LOG_ERR,
+   NVME_LOG_INFO,
+   NVME_LOG_DEBUG,
+} NvmeCliLogLevel;
+
+extern int logLevel;
+
+#define LogError(fmt, args...)                                                 \
+   do {                                                                        \
+      if (logLevel >= NVME_LOG_ERR) {                                          \
+         syslog(LOG_ERR, "%s:%d: " fmt, __FUNCTION__, __LINE__, ##args);       \
+      }                                                                        \
+   } while (0)
+
+#define LogInfo(fmt, args...)                                                  \
+   do {                                                                        \
+      if (logLevel >= NVME_LOG_INFO) {                                         \
+         syslog(LOG_INFO, "%s:%d: " fmt, __FUNCTION__, __LINE__, ##args);      \
+      }                                                                        \
+   } while (0)
+
+#define LogDebug(fmt, args...)                                                 \
+   do {                                                                        \
+      if (logLevel >= NVME_LOG_DEBUG) {                                        \
+         syslog(LOG_INFO, "%s:%d: " fmt, __FUNCTION__, __LINE__, ##args);      \
+      }                                                                        \
+   } while (0)
 
 /**
  * Command timeout in microseconds

@@ -23,29 +23,11 @@
 #include "esxcli_xml.h"
 #include "nvme_lib.h"
 
-//#define PLUGIN_DEBUG
-
-#ifdef PLUGIN_DEBUG
-#define Debug(fmt, ...) \
-   do {                             \
-      printf(fmt, ##__VA_ARGS__);   \
-   } while (0)
-#else
-#define Debug(fmt, ...)
-#endif
-
 #define Error(fmt, ...) \
    do {                             \
       printf("ERROR: ");   \
       printf(fmt, ##__VA_ARGS__);   \
    } while (0)
-
-
-#define PrintString(fmt, ...)      \
-   do {                             \
-      printf(fmt, ##__VA_ARGS__);   \
-   } while (0)
-
 
 typedef enum __bool {false = 0, true,} BOOL;
 /* We assume the command and device name length is less than 150 and 100 */
@@ -3774,7 +3756,7 @@ void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
    }
 
    vectNum = uioVect.length;
-   Debug("vectNum: %d\n", vectNum);
+   LogDebug("vectNum: %d.", vectNum);
    esxcli_xml_begin_output();
    xml_list_begin("structure");
    for (i = 0; i < vectNum; i++) {
@@ -4094,7 +4076,6 @@ void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   Debug("value = %x\n", value);
    esxcli_xml_begin_output();
    xml_struct_begin("AutonomousPowerStateTransition");
    PBOOL("Autonomous Power State Transition Enable", value & 0x1);
@@ -4191,7 +4172,6 @@ void getFeature_0fh(struct nvme_handle *handle, int select, int nsId)
    }
 
    value = uio.comp.dw0;
-   Debug("value = %x\n", value);
 
    esxcli_xml_begin_output();
    xml_struct_begin("KeepAliveTimer");
@@ -4472,7 +4452,6 @@ NvmePlugin_DeviceFeatureCap(int argc, const char *argv[])
    const char               *vmhba = NULL;
    struct nvme_adapter_list list;
    struct nvme_handle       *handle;
-   NvmeUserIo               uio;
    vmk_uint8                buf[4096];
 
    while ((ch = getopt(argc, (char*const*)argv, ":A:")) != -1) {
@@ -4504,26 +4483,18 @@ NvmePlugin_DeviceFeatureCap(int argc, const char *argv[])
    esxcli_xml_begin_output();
    xml_list_begin("structure");
    for (i = 0; i < NUM_FEATURES; i++) {
-      memset(&uio, 0, sizeof(uio));
-      uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-      uio.direction = XFER_FROM_DEV;
-      uio.timeoutUs = ADMIN_TIMEOUT;
-      uio.cmd.getFeatures.cdw10.fid = features[i].fid;
-      uio.cmd.getFeatures.cdw10.sel = 0x3;
       if (features[i].useBufferLen > 0) {
-         uio.addr = (vmk_uintptr_t)buf;
-         uio.length = features[i].useBufferLen;
+         rc = Nvme_GetFeature(handle, 0, features[i].fid, 0x3, 0, 0, 0, 0, 0,
+                              buf, features[i].useBufferLen, &value);
+      } else {
+         rc = Nvme_GetFeature(handle, 0, features[i].fid, 0x3, 0, 0, 0, 0, 0,
+                              NULL, 0, &value);
       }
 
-      rc = Nvme_AdminPassthru(handle, &uio);
-
       if (rc) {
-         Debug("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
          continue;
       }
 
-      value = uio.comp.dw0;
-      Debug("value = %x\n", value);
       xml_struct_begin("Feature");
       PSTR("Feature Identifier", features[i].desc);
       PBOOL("saveable", value & 0x1);
@@ -5516,7 +5487,7 @@ int
 main(int argc, const char * argv[]) {
 
    const char        *op;
-   int                rc;
+   int                rc = 0;
    int                fnIdx;
 
    if (argc < 3) {
@@ -5536,6 +5507,7 @@ main(int argc, const char * argv[]) {
    argc -= 2;
    argv += 2;
 
+   LogInfo("Call command %s", op);
    fnIdx = NvmeLookupFunction(op);
    if (fnIdx == -1) {
       Error("Invalid parameter.\n");
@@ -5550,7 +5522,7 @@ main(int argc, const char * argv[]) {
    }
 
    commands[fnIdx].fn(argc, argv);
-   rc = 0;
+   LogInfo("Command %s done.", op);
 
 out:
    return rc;

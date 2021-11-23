@@ -21,7 +21,7 @@
  ****************************************************************************/
 
 struct nvme_adapter_list adapterList;
-
+int logLevel = NVME_LOG_ERR;
 
 /*****************************************************************************
  * NVMe Management Ops
@@ -103,6 +103,7 @@ Nvme_Open(struct nvme_adapter_list *adapters, const char *name)
 
    handle = (struct nvme_handle *)malloc(sizeof(*handle));
    if (!handle) {
+      LogError("Failed to allocate nvme device handle.");
       return NULL;
    }
 
@@ -116,6 +117,7 @@ Nvme_Open(struct nvme_adapter_list *adapters, const char *name)
 
    rc = vmk_MgmtUserInit(&signature, 0LL, &handle->handle);
    if (rc) {
+      LogError("Failed to init mgmt, 0x%x.", rc);
       free(handle);
       return NULL;
    }
@@ -151,11 +153,11 @@ Nvme_WriteRawDataToFile(void *data, int len, char* path)
    }
    fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0666);
    if (fd == -1) {
-      fprintf (stderr, "ERROR: Failed to open path.\n");
+      LogError("Failed to open file %s.", path);
       return -ENOENT;
    }
    if (write(fd, data, len) != len) {
-      fprintf(stderr, "ERROR: Failed to write data.\n");
+      LogError("Failed to write data to file.");
       close(fd);
       return -EIO;
    }
@@ -182,6 +184,7 @@ Nvme_GetAdapterList(struct nvme_adapter_list *list)
 
    rc = vmk_MgmtUserInit(&globalSignature, 0LL, &driverHandle);
    if (rc) {
+      LogError("Failed to init mgmt, 0x%x.", rc);
       return rc;
    }
 
@@ -189,6 +192,7 @@ Nvme_GetAdapterList(struct nvme_adapter_list *list)
       NVME_MGMT_GLOBAL_CB_LISTADAPTERS,
       &list->count, &list->adapters);
    if (rc) {
+      LogError("Failed to invoke mgmt callback, 0x%x.", rc);
       vmk_MgmtUserDestroy(driverHandle);
       return rc;
    }
@@ -227,14 +231,23 @@ int
 Nvme_Ioctl(struct nvme_handle *handle, int cmd, NvmeUserIo *uio)
 {
    int ioctlCmd;
+   int rc;
 
    assert(handle);
    assert(uio);
 
    ioctlCmd = cmd;
 
-   return vmk_MgmtUserCallbackInvoke(handle->handle, 0LL,
+   LogDebug("%s, ioctl cmd %d, uio %p, ns %d",
+            handle->name, cmd, uio, uio->namespaceID);
+   rc = vmk_MgmtUserCallbackInvoke(handle->handle, 0LL,
       NVME_MGMT_CB_IOCTL, &ioctlCmd, uio);
+   if (rc) {
+      LogError("Failed to invoke mgmt callback, 0x%x.", rc);
+   } else {
+      LogDebug("uio status 0x%x", uio->status);
+   }
+   return rc;
 }
 
 /**
@@ -248,16 +261,37 @@ Nvme_Ioctl(struct nvme_handle *handle, int cmd, NvmeUserIo *uio)
 int
 Nvme_AdminPassthru(struct nvme_handle *handle, NvmeUserIo *uio)
 {
-   int rc;
+   int rc, i;
+   vmk_uint32 *ptr;
 
+   LogDebug("%s, uio %p, opc 0x%x, timeout %lu, addr 0x%lx, length %d",
+            handle->name, uio, uio->cmd.cmd.cdw0.opc, uio->timeoutUs,
+            uio->addr, uio->length);
+   ptr = (vmk_uint32 *)&uio->cmd.cmd;
+   for (i = 0; i < sizeof(uio->cmd)/sizeof(vmk_uint32); i += 4) {
+       LogDebug("%02x: %08x %08x %08x %08x", i,
+                ptr[i], ptr[i+1], ptr[i+2], ptr[i+3]);
+   }
    rc = Nvme_Ioctl(handle, NVME_IOCTL_ADMIN_CMD, uio);
 
    /**
     * If the command has been successfully submitted to driver, the actual
     * return code for the admin command is returned in uio->status field.
     */
+   if (rc || uio->status) {
+      LogError("Admin passthru failed on %s, opc 0x%x, rc 0x%x, status 0x%x, comp 0x%x.",
+               handle->name, uio->cmd.cmd.cdw0.opc, rc, uio->status,
+               ((uio->comp.dw3.sct << 8) | uio->comp.dw3.sc));
+   }
+
    if (!rc) {
       rc = uio->status;
+   }
+
+   ptr = (vmk_uint32 *)&uio->comp;
+   for (i = 0; i < sizeof(uio->comp)/sizeof(vmk_uint32); i += 4) {
+       LogDebug("%02x: %08x %08x %08x %08x", i,
+                ptr[i], ptr[i+1], ptr[i+2], ptr[i+3]);
    }
 
    return rc;
@@ -329,6 +363,7 @@ Nvme_NsMgmtAttachSupport(struct nvme_handle *handle)
 
    id = malloc(sizeof(*id));
    if (id == NULL) {
+      LogError("Failed to allocate identify data.");
       return -1;
    }
 
@@ -364,6 +399,7 @@ Nvme_ValidNsId(struct nvme_handle *handle, int nsId)
 
    idCtrlr = malloc(sizeof(*idCtrlr));
    if (idCtrlr == NULL) {
+      LogError("Failed to allocate identify data.");
       return -1;
    }
 
@@ -413,6 +449,7 @@ Nvme_AllocatedNsId(struct nvme_handle *handle, int nsId)
 
    nsList = malloc(sizeof(*nsList));
    if (nsList == NULL) {
+      LogError("Failed to allocate ns list.");
       rc = -1;
       goto out;
    }
@@ -471,6 +508,7 @@ Nvme_AttachedNsId(struct nvme_handle *handle, int nsId)
 
    nsList = malloc(sizeof(*nsList));
    if (nsList == NULL) {
+      LogError("Failed to allocate ns list.");
       rc = -1;
       goto out;
    }
@@ -752,30 +790,30 @@ int Nvme_FWLoadAndDownload(struct nvme_handle *handle,
    assert (fwPath);
 
    if (fwOffset % 0x3) {
-      fprintf (stderr, "ERROR: Invalid offset.\n");
+      LogError("Invalid offset 0x%x.", fwOffset);
       return -EINVAL;
    }
 
    /* get fw binary */
    fd = open (fwPath, O_RDONLY);
    if (fd == -1) {
-      fprintf (stderr, "ERROR: Failed to open firmware image.\n");
+      LogError("Failed to open firmware image %s.", fwPath);
       return -ENOENT;
    }
 
-   if (fstat (fd, &sb) == -1) {
-      fprintf (stderr, "ERROR: Failed to call fstat.\n");
+   if (fstat(fd, &sb) == -1) {
+      LogError("Failed to call fstat.");
       if (close (fd) == -1) {
-         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         LogError("Failed to close fd: %d.", fd);
          return -EBADF;
       }
       return -EPERM;
    }
 
    if (!S_ISREG (sb.st_mode)) {
-      fprintf (stderr, "ERROR: %s is not a file.\n", fwPath);
+      LogError("%s is not a file.", fwPath);
       if (close (fd) == -1) {
-         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         LogError("Failed to close fd: %d.", fd);
          return -EBADF;
       }
       return -EPERM;
@@ -783,17 +821,17 @@ int Nvme_FWLoadAndDownload(struct nvme_handle *handle,
 
    fwSize = (vmk_uint32)sb.st_size;
    if ((fwSize == 0) || (fwSize & 0x3)) {
-      fprintf (stderr, "ERROR: Invalid firmware image size %d.\n", fwSize);
+      LogError("Invalid firmware image size 0x%x.", fwSize);
       if (close (fd) == -1) {
-         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         LogError("Failed to close fd: %d.", fd);
          return -EBADF;
       }
       return -EINVAL;
    }
 
    if (fwSize < xferSize) {
+      LogDebug("Adjust xferSize %u to %u", xferSize, fwSize);
       xferSize = fwSize;
-      printf ("Adjust xfersize to %d\n", fwSize);
    }
    fwBufSize = fwSize;
    /* If allocation fails, try smaller buffer, but guarantee xfersize align.*/
@@ -810,14 +848,16 @@ int Nvme_FWLoadAndDownload(struct nvme_handle *handle,
       }
    }
    if (fwBuf == NULL) {
-      fprintf (stderr, "ERROR: Failed to malloc %d bytes.\n", fwBufSize);
+      LogError("Failed to malloc %d bytes.", fwBufSize);
       if (close (fd) == -1) {
-         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         LogError("Failed to close fd: %d.", fd);
          return -EBADF;
       }
       return -ENOMEM;
    }
 
+   LogDebug("firmware size %u, buf size %u, xferSize %u",
+            fwSize, fwBufSize, xferSize);
    //read fw image from file
    for (offset = 0; offset < fwSize; offset += fwBufSize) {
       size = fwSize - offset;
@@ -825,24 +865,20 @@ int Nvme_FWLoadAndDownload(struct nvme_handle *handle,
          size = fwBufSize;
       }
       if (read(fd, fwBuf, size) < 0) {
-         fprintf (stderr, "ERROR: Failed to read firmware data at offset 0x%x, size %d.\n",
+         LogError("Failed to read firmware data at offset 0x%x, size 0x%x.",
                   offset, size);
          rc = -EIO;
          break;
       }
-#ifdef FIRMWARE_DUMP
-      printf ("Dump fw image: \n");
+      LogDebug("Dump fw image:");
       int i, j;
-      for(i=0; i<size; i+=16) {
-         for(j=0; j<16 && (i+j<size); j++)
-            printf ("%4x  ", *(unsigned char *)(fwBuf+i+j));
-         printf ("\n");
+      for(i = 0; i < size; i += 16) {
+         for(j = 0; j < 16 && (i+j<size); j++)
+            LogDebug("%04x  ", *(unsigned char *)(fwBuf+i+j));
       }
-      printf ("\n");
-#endif
       rc = Nvme_FWDownload(handle, fwBuf, size, offset + fwOffset, xferSize);
       if (rc) {
-         fprintf (stderr, "ERROR: Failed to download firmware data at offset %u, size %u.\n",
+         LogError("Failed to download firmware data at offset 0x%x, size 0x%x.",
                   offset, size);
          break;
       }
@@ -850,7 +886,7 @@ int Nvme_FWLoadAndDownload(struct nvme_handle *handle,
 
    free(fwBuf);
    if (close (fd) == -1) {
-      fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+      LogError("Failed to close fd: %d.", fd);
       return -EBADF;
    }
 
@@ -882,7 +918,7 @@ Nvme_FWDownload(struct nvme_handle *handle,
    void *chunk;
 
    if ((chunk = malloc(xferSize)) == NULL) {
-      fprintf(stderr, "ERROR: Failed to malloc %d bytes.\n", xferSize);
+      LogError("Failed to malloc %d bytes.", xferSize);
       return -ENOMEM;
    }
 
@@ -904,7 +940,7 @@ Nvme_FWDownload(struct nvme_handle *handle,
       rc = Nvme_AdminPassthru(handle, &uio);
       if (rc) {
          /* Failed to execute download firmware command. */
-         fprintf (stderr, "ERROR: Failed to download firmware data at offset %u, size %u.\n",
+         LogError("Failed to download firmware data at offset 0x%x, size 0x%x.",
                   offset, size);
          free(chunk);
          return rc;
@@ -1135,8 +1171,8 @@ Nvme_GetTelemetryData(struct nvme_handle *handle,
 retry:
    if (lid == VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED &&
        ctrlRetry > 3) {
-      fprintf(stderr, "ERROR: Telemetry Controller-Initiated data is not"
-                      " stable, please try later.\n");
+      LogError("Telemetry Controller-Initiated data is not"
+               " stable, please try later.");
       return -1;
    }
 
@@ -1151,10 +1187,9 @@ retry:
                         sizeof(vmk_NvmeTelemetryEntry), 0, 1, lsp, 0, 0);
    if (rc) {
       if (lid == VMK_NVME_LID_TELEMETRY_HOST_INITIATED) {
-         fprintf (stderr, "Failed to create Telemetry Host-Initiated data, 0x%x\n", rc);
+         LogError("Failed to create Telemetry Host-Initiated data, 0x%x.", rc);
       } else {
-         fprintf (stderr,
-                  "Failed to get Telemetry Controller-Initiated log header, 0x%x.\n", rc);
+         LogError("Failed to get Telemetry Controller-Initiated log header, 0x%x.", rc);
       }
       return rc;
    }
@@ -1181,13 +1216,13 @@ retry:
 
    fd = open(telemetryPath, O_WRONLY|O_CREAT|O_TRUNC, 0666);
    if (fd == -1) {
-      fprintf (stderr, "ERROR: Failed to open telemetry path.\n");
+      LogError("Failed to open telemetry path %s.", telemetryPath);
       return -ENOENT;
    }
    /* Write telemetry log header */
    if (write(fd, (void *)&telemetryEntry, sizeof(vmk_NvmeTelemetryEntry)) !=
        sizeof(vmk_NvmeTelemetryEntry)) {
-      fprintf(stderr, "ERROR: Failed to write telemetry log header.\n");
+      LogError("Failed to write telemetry log header.");
       close(fd);
       return -EIO;
    }
@@ -1200,9 +1235,9 @@ retry:
 
    if ((telemetryLog = (vmk_NvmeTelemetryEntry *)malloc(
                         sizeof(vmk_NvmeTelemetryEntry) + size)) == NULL) {
-      fprintf(stderr, "ERROR: Failed to malloc %d bytes.\n", size);
+      LogError("Failed to malloc %u bytes.", size);
       if (close (fd) == -1) {
-         fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+         LogError("Failed to close fd: %d.", fd);
          return -EBADF;
       }
       return -ENOMEM;
@@ -1213,14 +1248,14 @@ retry:
                         sizeof(vmk_NvmeTelemetryEntry), 1, 0, 0, 0);
    if (rc) {
       /* Failed to execute get telemetry log command. */
-      fprintf(stderr, "ERROR: Failed to get telemetry log.\n");
+      LogError("Failed to get telemetry log.");
       free(telemetryLog);
       close(fd);
       return rc;
    }
 
    if (write(fd, (void *)telemetryLog->dataBlocks, size) != size) {
-      fprintf(stderr, "ERROR: Failed to write telemetry log to file.\n");
+      LogError("Failed to write telemetry log to file.");
       free(telemetryLog);
       close(fd);
       return -EIO;
@@ -1228,7 +1263,7 @@ retry:
 
    free(telemetryLog);
    if (close (fd) == -1) {
-      fprintf (stderr, "ERROR: Failed to close fd: %d.\n", fd);
+      LogError("Failed to close fd: %d.", fd);
       return -EBADF;
    }
 
@@ -1240,13 +1275,13 @@ retry:
       rc = Nvme_GetLogPage(handle, lid, VMK_NVME_DEFAULT_NSID, &telemetryEntry,
                            sizeof(vmk_NvmeTelemetryEntry), 0, 1, 0, 0, 0);
       if (rc) {
-         fprintf (stderr, "Failed to get"
-                  " Data Generation Number after data collection is done.\n");
+         LogError("Failed to get"
+                  " Data Generation Number after data collection is done.");
          return rc;
       }
       genNumEnd = telemetryEntry.dataGenNum;
       if (genNumEnd != genNumStart) {
-         fprintf(stderr, "Telemetry Controller-Initiated is not stable.\n");
+         LogError("Telemetry Controller-Initiated is not stable.");
          ctrlRetry ++;
          goto retry;
       }
@@ -1287,7 +1322,7 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
                         VMK_NVME_DEFAULT_NSID, &logHeader,
                         sizeof(logHeader), 0, 0, action, 0, 0);
    if (rc) {
-      fprintf (stderr, "Failed to fetch persistent event log header, 0x%x.\n", rc);
+      LogError("Failed to fetch persistent event log header, 0x%x.", rc);
       return rc;
    } else if (action == NVME_PEL_ACTION_RELEASE) {
       return 0;
@@ -1295,13 +1330,13 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
 
    fd = open(logPath, O_WRONLY|O_CREAT|O_TRUNC, 0666);
    if (fd == -1) {
-      fprintf (stderr, "ERROR: Failed to open log path.\n");
+      LogError("Failed to open log path.");
       return -ENOENT;
    }
 
    if (write(fd, (void *)&logHeader, sizeof(logHeader)) !=
        sizeof(logHeader)) {
-      fprintf(stderr, "ERROR: Failed to write telemetry log header.\n");
+      LogError("Failed to write telemetry log header.");
       close(fd);
       return -EIO;
    }
@@ -1314,7 +1349,7 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
    offset = sizeof(logHeader);
    logData = malloc(size);
    if (logData == NULL) {
-      fprintf(stderr, "ERROR: Failed to allocate data buffer.\n");
+      LogError("Failed to allocate data buffer.");
       close(fd);
       return -ENOMEM;
    }
@@ -1324,7 +1359,7 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
                         VMK_NVME_DEFAULT_NSID, logData, size,
                         offset, 0, NVME_PEL_ACTION_READ, 0, 0);
    if (rc) {
-      fprintf (stderr, "Failed to fetch persistent event log at size %d, status 0x%x.\n",
+      LogError("Failed to fetch persistent event log at size %d, status 0x%x.",
                size, rc);
       free(logData);
       close(fd);
@@ -1332,7 +1367,7 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
    }
 
    if (write(fd, (void *)logData, size) != size) {
-      fprintf(stderr, "ERROR: Failed to write telemetry log size %d.\n", size);
+      LogError("Failed to write telemetry log size %d.", size);
       rc = -EIO;
    }
 
@@ -1350,7 +1385,7 @@ int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid, void *logData
    vmk_uint32 xferSize, maxXferSize, numd, size;
 
    if (dataLen % 4) {
-      fprintf (stderr, "The data length should be a multiple of 4.\n");
+      LogError("Invalid log data length %u.", dataLen);
       return -EINVAL;
    }
 
@@ -1360,7 +1395,7 @@ int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid, void *logData
       memset(&uio, 0, sizeof(uio));
       rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_MAX_XFER_LEN, &uio);
       if (rc || uio.status) {
-         fprintf (stderr, "Failed to get max transfer size.\n");
+         LogError("Failed to get max transfer size.");
          if (rc) {
             return rc;
          } else {
@@ -1393,8 +1428,8 @@ int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid, void *logData
       uio.addr = (vmk_uintptr_t)(logData + xferOffset);
       rc = Nvme_AdminPassthru(handle, &uio);
       if (rc) {
-         fprintf (stderr, "Failed to fetch log %d at offset 0x%lx, "
-                  "size %d, status 0x%x.\n",
+         LogError("Failed to fetch log %d at offset 0x%lx, "
+                  "size %d, status 0x%x.",
                   lid, offset + xferOffset, xferSize, rc);
          break;
       }
@@ -1442,10 +1477,9 @@ int Nvme_GetFeature(struct nvme_handle *handle,
    uio.addr = (vmk_uintptr_t)buf;
    uio.length = len;
    rc = Nvme_AdminPassthru(handle, &uio);
-   if (rc) {
-      fprintf (stderr, "Failed to get feature info\n");
-   } else {
+   if (!rc) {
       *result = uio.comp.dw0;
+      LogDebug("Feature %d value 0x%x", fid, uio.comp.dw0);
    }
    return rc;
 }
@@ -1485,8 +1519,8 @@ int Nvme_SetFeature(struct nvme_handle *handle,
    uio.addr = (vmk_uintptr_t)buf;
    uio.length = len;
    rc = Nvme_AdminPassthru(handle, &uio);
-   if (rc) {
-      fprintf (stderr, "Failed to set feature info\n");
+   if (!rc) {
+      LogDebug("Feature %d value 0x%x", fid, uio.comp.dw0);
    }
    return rc;
 }
