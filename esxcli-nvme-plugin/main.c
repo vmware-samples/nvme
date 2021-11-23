@@ -3112,6 +3112,12 @@ setFeature_01h(struct nvme_handle *handle,
       save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -3200,6 +3206,12 @@ void setFeature_02h(struct nvme_handle *handle, int save, int nsId, int argc, co
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -3262,23 +3274,6 @@ void getFeature_03h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-int getSmartLog(struct nvme_handle *handle, vmk_NvmeSmartInfoEntry *smartLog)
-{
-   int rc;
-   NvmeUserIo uio;
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
-   uio.cmd.getLogPage.nsid = VMK_NVME_DEFAULT_NSID;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getLogPage.cdw10.lid = VMK_NVME_LID_SMART_HEALTH;
-   uio.cmd.getLogPage.cdw10.numdl = sizeof(vmk_NvmeSmartInfoEntry) / 4 - 1;
-   uio.length = sizeof(vmk_NvmeSmartInfoEntry);
-   uio.addr = (vmk_uintptr_t)smartLog;
-   rc = Nvme_AdminPassthru(handle, &uio);
-   return rc;
-}
-
 void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
 {
    int rc;
@@ -3293,9 +3288,11 @@ void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   rc = getSmartLog(handle, &smartLog);
+   rc = Nvme_GetLogPage(handle, VMK_NVME_LID_SMART_HEALTH,
+                        VMK_NVME_DEFAULT_NSID, &smartLog,
+                        sizeof(vmk_NvmeSmartInfoEntry), 0, 0, 0, 0, 0);
    if (rc) {
-      Error("Failed to get log info, %s.", strerror(rc));
+      Error("Failed to get smart log, 0x%x.", rc);
       return;
    }
 
@@ -3399,9 +3396,11 @@ void setFeature_04h(struct nvme_handle *handle, int save, int nsId, int argc, co
       return;
    }
 
-   rc = getSmartLog(handle, &smartLog);
+   rc = Nvme_GetLogPage(handle, VMK_NVME_LID_SMART_HEALTH,
+                        VMK_NVME_DEFAULT_NSID, &smartLog,
+                        sizeof(vmk_NvmeSmartInfoEntry), 0, 0, 0, 0, 0);
    if (rc) {
-      Error("Failed to get log info, %s.", strerror(rc));
+      Error("Failed to get smart log, 0x%x.", rc);
       return;
    }
 
@@ -3420,6 +3419,12 @@ void setFeature_04h(struct nvme_handle *handle, int save, int nsId, int argc, co
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -3558,6 +3563,12 @@ setFeature_05h(struct nvme_handle *handle,
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -3642,6 +3653,12 @@ setFeature_06h(struct nvme_handle *handle,
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -3735,6 +3752,12 @@ setFeature_08h(struct nvme_handle *handle,
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -3845,6 +3868,12 @@ setFeature_09h(struct nvme_handle *handle,
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -3908,6 +3937,12 @@ setFeature_0ah(struct nvme_handle *handle,
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 
 }
@@ -4025,6 +4060,12 @@ setFeature_0bh(struct nvme_handle *handle,
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -4207,6 +4248,12 @@ setFeature_0fh(struct nvme_handle *handle,
                         save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x.", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
@@ -4243,6 +4290,12 @@ setFeature_80h(struct nvme_handle *handle,
                          save, dw11, 0, 0, 0, 0, NULL, 0);
    if (rc) {
       Error("Failed to set feature, 0x%x", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
    }
 }
 
