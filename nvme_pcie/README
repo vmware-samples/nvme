@@ -6,6 +6,85 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2021/10/14 1.2.3.18-1vmw
+
+   Add nvme-stats support for StoragePoll.
+
+2021/7/14 1.2.3.17-1vmw
+
+   Enable StoragePoll.
+
+2021/5/19 1.2.3.16-1vmw
+
+   Implement nvme-stats support.
+
+2021/4/19 1.2.3.15-1vmw
+
+   Fix PSOD while hotplug happened during controller reset
+
+2021/2/5 1.2.3.14-1vmw
+
+   Fail the Attach() if interrupt allocation fails.
+
+2020/10/26 1.2.3.13-1vmw
+
+   Implement abort support.
+
+2020/9/17 1.2.3.12-1vmw
+
+   Enable MSI interrupt.
+
+2020/8/20 1.2.3.11-1vmw
+
+   Set max transfer size as stripe size if config parameter nvmePCIEForceStripe is enabled.
+
+2020/7/16 1.2.3.10-1vmw
+
+   Flush admin queue while quiesce NVMe PCIe device for hotplug case.
+
+2020/6/24 1.2.3.9-1vmw
+
+   Set DMA constraint to 4k-alignment for controller with small queue size.
+
+2020/6/22 1.2.3.8-1vmw
+
+   Add Intel P5500/5600 device into stripe limitation list.
+
+2020/6/1 1.2.3.7-1vmw
+
+   Add Intel P4600 device into stripe limitation list.
+
+2020/5/12 1.2.3.6-1vmw
+
+   Add module param nvmePCIEFakeAdminQSize to fake ADMIN queue size.
+
+2020/5/12 1.2.3.5-1vmw
+
+   Add AWS EBS devID '1d0f:0061' to the list of supported devices
+
+2020/5/9 1.2.3.4-1vmw
+
+   Add module param nvmePCIEDma4KSwitch as DMA 4k-alignment switch.
+
+2020/3/9 1.2.3.3-1vmw
+
+   Avoid MMIO access if the device is removed.
+
+2020/3/6 1.2.3.2-1vmw
+
+   Make controller's numIoQueues atomic.
+
+2020/2/27 1.2.3.1-1vmw
+
+   Support doorbell stride.
+
+2019/12/23 1.2.2.12-1vmw
+
+   Eliminate queue full issue by following changes:
+   1. Set cmdInfo list size as sqsize-1.
+   2. Update sqHead in each command completion instead of at the end of loop of processCq.
+   3. Free cmdInfo before invoking vmkCmd->done.
+
 2019/3/1 1.2.2.11-1vmw
 
    Fix a cmdInfo not being released issue in sync command submission.

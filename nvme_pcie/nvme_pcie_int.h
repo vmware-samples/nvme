@@ -1,6 +1,7 @@
-/*******************************************************************************
- * Copyright (c) 2016  VMware, Inc. All rights reserved.
- *******************************************************************************/
+/*****************************************************************************
+ * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
+ * -- VMware Confidential
+ *****************************************************************************/
 
 /*
  * @file: nvme_pcie_int.h --
@@ -31,6 +32,16 @@
 #include "nvme_pcie_os.h"
 #include "nvme_pcie_debug.h"
 
+#define NVME_ABORT 1
+#define NVME_STATS 1
+#define NVME_PCIE_STORAGE_POLL 1
+
+#if NVME_PCIE_STORAGE_POLL
+extern int nvmePCIEPollEnabled;
+extern vmk_uint64 nvmePCIEPollInterval;
+extern vmk_uint32 nvmePCIEPollThr;
+#endif
+
 /**
  * Driver name. This should be the name of the SC file.
  */
@@ -39,7 +50,7 @@
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.2.11"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.18"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -71,6 +82,11 @@
 #define NVME_PCIE_PRP_ENTRY_SIZE sizeof(vmk_uint64)
 #define NVME_PCIE_MAX_PRPS (VMK_PAGE_SIZE/NVME_PCIE_PRP_ENTRY_SIZE)
 #define NVME_PCIE_MAX_TRANSFER_SIZE (NVME_PCIE_MAX_PRPS * VMK_PAGE_SIZE)
+
+#define NVME_PCIE_SG_MAX_ENTRIES 32
+
+#define NVME_PCIE_SYNC_CMD_NUM 10
+#define NVME_PCIE_SYNC_CMD_ID 0xffff
 
 typedef struct NVMEPCIEController NVMEPCIEController;
 typedef struct NVMEPCIECmdInfo NVMEPCIECmdInfo;
@@ -149,6 +165,11 @@ typedef struct NVMEPCIECmdInfo {
    vmk_atomic32 atomicStatus;
    /** point to next free cmdInfo */
    vmk_uint32 freeLink;
+#ifdef NVME_STATS
+   vmk_TimerCycles sendToHwTs;
+   vmk_TimerCycles doneByHwTs;
+   vmk_Bool statsOn;
+#endif
 } NVMEPCIECmdInfo;
 
 typedef union NVMEPCIEPendingCmdInfo {
@@ -164,10 +185,16 @@ typedef union NVMEPCIEPendingCmdInfo {
  */
 typedef struct NVMEPCIECmdInfoList {
    vmk_Lock lock;
-   int nrAct;
+   /**
+    * Record active commands
+    *
+    * It can help StoragePoll to switch from interruption mode to poll.
+    */
+   vmk_atomic32 nrAct;
    NVMEPCIEPendingCmdInfo pendingFreeCmdList;
    vmk_uint32 freeCmdList;
    NVMEPCIECmdInfo *list;
+   int idCount;
 } NVMEPCIECmdInfoList;
 
 typedef enum NVMEPCIEQueueState {
@@ -175,6 +202,13 @@ typedef enum NVMEPCIEQueueState {
    NVME_PCIE_QUEUE_SUSPENDED,
    NVME_PCIE_QUEUE_ACTIVE,
 } NVMEPCIEQueueState;
+
+typedef struct NVMEPCIEQueueStats {
+   vmk_uint64 intrCount;
+   /* Additional tracker for CQ entries. */
+   vmk_uint16 cqHead;
+   vmk_uint16 cqePhase;
+} NVMEPCIEQueueStats;
 
 /**
  * Queue info
@@ -187,6 +221,20 @@ typedef struct NVMEPCIEQueueInfo {
    NVMEPCIESubQueueInfo *sqInfo;
    NVMEPCIECompQueueInfo *cqInfo;
    NVMEPCIECmdInfoList *cmdList;
+   NVMEPCIEQueueStats *stats;
+   /** Help to ensure vmk_IntrEnable/Disable appear in pairs. */
+   vmk_atomic8 isIntrEnabled;
+#if NVME_PCIE_STORAGE_POLL
+   /**
+    * Whether pollHandler is enabled or not
+    *
+    * We cannot use lock to wrap 'vmk_StoragePollEnable()', because
+    * it will create a high priority system world inside.
+    */
+   vmk_atomic8 isPollHdlrEnabled;
+   // StoragePoll handler. Set as NULL, if failed to create
+   vmk_StoragePoll pollHandler;
+#endif
 } NVMEPCIEQueueInfo;
 
 /* to mark the special device needs some workaround */
@@ -203,12 +251,18 @@ typedef struct NVMEPCIEController {
    int bar;
    int barSize;
    vmk_VA regs;
-   vmk_uint32 numIoQueues;
+   vmk_atomic32 numIoQueues;
    vmk_uint32 maxIoQueues;
    NVMEPCIECtrlrOsResources osRes;
    NVMEPCIEQueueInfo *queueList;
    vmk_Bool isRemoved;
-   NVMEPCIEWorkaround workaround; 
+   vmk_Bool abortEnabled;
+   NVMEPCIEWorkaround workaround;
+   vmk_uint32 dstrd;
+   vmk_Bool statsEnabled;
+#if NVME_PCIE_STORAGE_POLL
+   vmk_Bool pollEnabled;
+#endif
 } NVMEPCIEController;
 
 /**
@@ -226,10 +280,11 @@ NVMEPCIEGetCtrlrName(NVMEPCIEController *ctrlr)
 static inline vmk_ByteCount
 NVMEPCIEQueueAllocSize(void)
 {
-   return (sizeof(NVMEPCIEQueueInfo) +
-           sizeof(NVMEPCIESubQueueInfo) +
+   vmk_uint32 numCmdInfo =
+      NVME_PCIE_MAX_IO_QUEUE_SIZE * 2 + NVME_PCIE_SYNC_CMD_NUM;
+   return (sizeof(NVMEPCIEQueueInfo) + sizeof(NVMEPCIESubQueueInfo) +
            sizeof(NVMEPCIECompQueueInfo) +
-           sizeof(NVMEPCIECmdInfo) * NVME_PCIE_MAX_IO_QUEUE_SIZE +
+           sizeof(NVMEPCIECmdInfo) * numCmdInfo +
            vmk_SpinlockAllocSize(VMK_SPINLOCK) * 3);
 }
 
@@ -292,7 +347,9 @@ NVMEPCIEIsEBSCustomDevice(NVMEPCIEController *ctrlr)
            /* r5.metal */
            (pciId->vendorID == 0x1d0f && pciId->deviceID == 0x0065) ||
            /* r5.xlarge  */
-           (pciId->vendorID == 0x1d0f && pciId->deviceID == 0x8061)
+           (pciId->vendorID == 0x1d0f && pciId->deviceID == 0x8061) ||
+           /* a1.metal   */
+           (pciId->vendorID == 0x1d0f && pciId->deviceID == 0x0061)
           );
 }
 
@@ -311,6 +368,21 @@ NVMEPCIEIsAWSLocalDevice(NVMEPCIEController *ctrlr)
            /* AWS EC2 */
            (pciId->vendorID == 0x1d0f && pciId->deviceID == 0xcd00)
           );
+}
+
+/**
+ * Return true if controller mqes is smaller than 32.
+ *
+ * Add this special case to customize DMA constraints
+ * sgElemAlignment & sgElemSizeMult to avoid io split number
+ * greater than controller queue size.
+ */
+static inline vmk_Bool
+NVMEPCIEIsSmallQsize(NVMEPCIEController *ctrlr)
+{
+   vmk_uint64 cap = NVMEPCIEReadq(ctrlr->regs + VMK_NVME_REG_CAP);
+
+   return (((vmk_NvmeRegCap *)&cap)->mqes < NVME_PCIE_SG_MAX_ENTRIES);
 }
 
 static inline void
@@ -339,7 +411,7 @@ VMK_ReturnStatus NVMEPCIEStopQueue(NVMEPCIEQueueInfo *qinfo,
                                    vmk_NvmeStatus status);
 VMK_ReturnStatus NVMEPCIEResumeQueue(NVMEPCIEQueueInfo *qinfo);
 void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo);
-void NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo);
+vmk_uint32 NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo);
 
 /** vmk nvme adapter and controller init/cleanup functions */
 VMK_ReturnStatus NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr);
@@ -362,11 +434,39 @@ VMK_ReturnStatus NVMEPCIEIdentify(NVMEPCIEController *ctrlr,
                                   vmk_uint32 nsID,
                                   vmk_uint8 *data);
 
+VMK_INLINE void NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo);
+
+VMK_INLINE void NVMEPCIEDisableIntr(NVMEPCIEQueueInfo *qinfo,
+                                    vmk_Bool intrSync);
+
+#if NVME_PCIE_STORAGE_POLL
+vmk_uint32 NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,
+                                 vmk_uint32 leastPoll,
+                                 vmk_uint32 budget);
+void NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,
+                                 vmk_uint32 leastPoll);
+void NVMEPCIEStoragePollSetup(NVMEPCIEController *ctrlr);
+/**
+ * For NVMEPCIEStoragePollCreate/NVMEPCIEStoragePollEnable,
+ * If one queue failed to create or enable its poll handler,
+ * this queue will return to interruption mode and do not panic.
+ */
+void NVMEPCIEStoragePollCreate(NVMEPCIEQueueInfo *qinfo);
+void NVMEPCIEStoragePollEnable(NVMEPCIEQueueInfo *qinfo);
+void NVMEPCIEStoragePollDisable(NVMEPCIEQueueInfo *qinfo);
+void NVMEPCIEStoragePollDestory(NVMEPCIEQueueInfo *qinfo);
+#endif
+
 /** Interrupt functions */
 VMK_ReturnStatus NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
                                    vmk_PCIInterruptType type,
                                    vmk_uint32 numDesired);
 void NVMEPCIEIntrFree(NVMEPCIEController *ctrlr);
+
+VMK_ReturnStatus NVMEPCIECtrlMsiAck(void *handlerData,
+                                     vmk_IntrCookie intrCookie);
+void NVMEPCIECtrlMsiHandler(void *handlerData,
+                              vmk_IntrCookie intrCookie);
 
 VMK_ReturnStatus NVMEPCIEQueueIntrAck(void *handlerData,
                                       vmk_IntrCookie intrCookie);

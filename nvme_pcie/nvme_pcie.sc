@@ -1,3 +1,8 @@
+"""
+* *******************************************************************************
+* Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
+* *******************************************************************************
+"""
 # Driver definition for nvme driver.
 #
 # When developing a driver for release through the async program:
@@ -27,7 +32,7 @@ nvme_pcie_identification = {
    "binary compat"   : "yes",
    "summary"         : "Non-Volatile memory controller driver",
    "description"     : "Non-Volatile memory controller driver",
-   "version"         : "1.2.2.11",
+   "version"         : "1.2.3.18",
    "version_bump"    : 1,
    "license"         : VMK_MODULE_LICENSE_BSD,
    "vendor"          : "VMware",
@@ -41,10 +46,10 @@ nvme_pcie_identification = {
 module_def = {
    "identification"  : nvme_pcie_identification,
    "source files"    : [ "nvme_pcie_module.c",
-                         "nvme_pcie_os.c",
-                         "nvme_pcie_driver.c",
-                         "nvme_pcie_adapter.c",
-                         "nvme_pcie.c",
+                        "nvme_pcie_os.c",
+                        "nvme_pcie_driver.c",
+                        "nvme_pcie_adapter.c",
+                        "nvme_pcie.c",
                          "nvme_pcie_debug.c"
                        ],
    "includes"        : [
@@ -104,7 +109,7 @@ nvme_pcie_vib_def = {
 nvme_pcie_vib =  defineModuleVib(nvme_pcie_vib_def)
 
 #
-# Build the Offline Bundle
+# Build the Component
 #
 from devkitUtilities import GenerateFullVibVersionNumber
 
@@ -129,11 +134,12 @@ nvme_pcie_bulletin_def = {
       #'releaseType' : 'extension',
       #'urgency'     : 'important',
 
-      'kbUrl'       : 'http://kb.vmware.com/kb/example.html',
+      # If a Knowledge Base (KB) article is needed for this component set it below.
+      #'kbUrl'       : 'http://kb.vmware.com/kb/example.html',
 
       'componentNameSpec' : { 'name' : 'VMware-NVMe-PCIe',
-                              'uistring' : 'VMware NVMe PCI Express \
-                                            Storage Driver'
+                              'uistring' : 'VMware NVMe PCI Express '
+                                           'Storage Driver'
                             },
 
       'componentVersionSpec' : { 'version' : fullVersion,
@@ -149,4 +155,4 @@ nvme_pcie_bulletin_def = {
                       ],
    },
 }
-nvme_pcie_bundle =  defineOfflineBundle(nvme_pcie_bulletin_def)
+nvme_pcie_bundle =  defineComponent(nvme_pcie_bulletin_def)

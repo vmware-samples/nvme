@@ -1,11 +1,7 @@
-/*******************************************************************************
- * Portions Copyright (c) 2013-2015  VMware, Inc. All rights reserved.
- *
- * Portions Copyright (c) 2012-2014, Micron Technology, Inc.
- *
- * Portions Copyright (c) 2012-2013  Integrated Device Technology, Inc.
- * All rights reserved.
- *******************************************************************************/
+/*****************************************************************************
+ * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
+ * -- VMware Confidential
+ *****************************************************************************/
 
 /*
  * @file: nvme_pcie_driver.c --
@@ -30,6 +26,8 @@ static VMK_ReturnStatus SetupAdminQueue(NVMEPCIEController *ctrlr);
 static void DestroyAdminQueue(NVMEPCIEController *ctrlr);
 extern void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo);
 extern void NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status);
+extern int nvmePCIEMsiEnbaled;
+
 /**
  * Wait for CSTS.RDY to become expected value
  *
@@ -98,6 +96,20 @@ NVMEPCIEHwStop(NVMEPCIEController *ctrlr)
    return vmkStatus;
 }
 
+VMK_ReturnStatus
+NVMEPCIEGetCtrlrCap(NVMEPCIEController *ctrlr)
+{
+   vmk_uint64 cap;
+
+   cap = NVMEPCIEReadq(ctrlr->regs + VMK_NVME_REG_CAP);
+   ctrlr->dstrd = ((vmk_NvmeRegCap *)&cap)->dstrd;
+   if (ctrlr->dstrd != 0) {
+      IPRINT(ctrlr, "Controller doorbell stride %d", ctrlr->dstrd);
+   }
+
+   return VMK_OK;
+}
+
 /**
  * attachDevice callback of driver ops
  */
@@ -129,6 +141,8 @@ AttachDevice(vmk_Device device)
    /** Generate a unique name for this controller */
    vmk_NameFormat(&ctrlr->name, "nvme_pcie%02d%02d%02d%02d", ctrlr->osRes.sbdf.seg,
                   ctrlr->osRes.sbdf.bus, ctrlr->osRes.sbdf.dev, ctrlr->osRes.sbdf.fn);
+
+   NVMEPCIEGetCtrlrCap(ctrlr);
 
    /** Initialize DMA facilities (dma engine, sg handle, etc.) */
    vmkStatus = DmaInit(ctrlr);
@@ -361,10 +375,14 @@ QuiesceDevice(vmk_Device device)
       return vmkStatus;
    }
    if (VMK_TRUE == ctrlr->isRemoved) {
-      // for hotplug case, flush IO queue actively
-      MOD_IPRINT(" %d io queues to be flushed", ctrlr->numIoQueues);
-      for (qid = 0; qid < ctrlr->numIoQueues; qid ++) {
-         qinfo = &ctrlr->queueList[qid + 1];
+      /* For hotplug case, flush both Admin and IO queue actively.
+       * IO command is put to completion queue while
+       * admin command is done directly.
+       * Flush IO queues then Admin queue to make IO completion called first.
+       */
+      MOD_IPRINT(" %d queues to be flushed", ctrlr->numIoQueues + 1);
+      for (qid = 0; qid <= ctrlr->numIoQueues; qid ++) {
+         qinfo = &ctrlr->queueList[ctrlr->numIoQueues - qid];
          NVMEPCIESuspendQueue(qinfo);
          NVMEPCIEFlushQueue(qinfo, VMK_NVME_STATUS_VMW_QUIESCED);
       }
@@ -671,10 +689,18 @@ SetupAdminQueue(NVMEPCIEController *ctrlr)
 {
    VMK_ReturnStatus vmkStatus;
 
-   vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, 1);
-   if (vmkStatus != VMK_OK) {
-      EPRINT(ctrlr, "Failed to allocate admin queue interrupt, 0x%x.", vmkStatus);
-      return vmkStatus;
+   if (!nvmePCIEMsiEnbaled) {
+      vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, 1);
+      if (vmkStatus != VMK_OK) {
+         EPRINT(ctrlr, "Failed to allocate msix admin queue interrupt, 0x%x.", vmkStatus);
+         return vmkStatus;
+      }
+   } else{
+      vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSI, 1);
+      if (vmkStatus != VMK_OK) {
+         EPRINT(ctrlr, "Failed to allocate msi admin queue interrupt, 0x%x.", vmkStatus);
+         return vmkStatus;
+      }
    }
 
    vmkStatus = NVMEPCIEQueueCreate(ctrlr, 0, nvmePCIEAdminQueueSize);

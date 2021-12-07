@@ -1,11 +1,7 @@
-/*******************************************************************************
- * Portions Copyright (c) 2013-2015  VMware, Inc. All rights reserved.
- *
- * Portions Copyright (c) 2012-2014, Micron Technology, Inc.
- *
- * Portions Copyright (c) 2012-2013  Integrated Device Technology, Inc.
- * All rights reserved.
- *******************************************************************************/
+/*****************************************************************************
+ * Copyright (c) 2016, 2018, 2020-2021 VMware, Inc. All rights reserved.
+ * -- VMware Confidential
+ *****************************************************************************/
 
 /*
  * @file: nvme_pcie_os.c --
@@ -313,9 +309,26 @@ NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
 
    if (vmkStatus == VMK_OK) {
       ctrlr->osRes.intrType = type;
+#if NVME_PCIE_STORAGE_POLL
+      ctrlr->pollEnabled = ((type == VMK_PCI_INTERRUPT_TYPE_MSIX) &&
+                            nvmePCIEPollEnabled) ? VMK_TRUE : VMK_FALSE;
+#endif
       ctrlr->osRes.numIntrs = numAllocated;
+      if (type == VMK_PCI_INTERRUPT_TYPE_MSI) {
+         vmkStatus = NVMEPCIEIntrRegister(ctrlr->osRes.device,
+                     ctrlr->osRes.intrArray[0],
+                     ctrlr,
+                     NVMEPCIEGetCtrlrName(ctrlr),
+                     NVMEPCIECtrlMsiAck,
+                     NVMEPCIECtrlMsiHandler);
+
+         vmk_IntrEnable(ctrlr->osRes.intrArray[0]);
+      }
    } else {
       ctrlr->osRes.intrType = VMK_PCI_INTERRUPT_TYPE_NONE;
+#if NVME_PCIE_STORAGE_POLL
+      ctrlr->pollEnabled = VMK_FALSE;
+#endif
       ctrlr->osRes.numIntrs = 0;
       NVMEPCIEFree(ctrlr->osRes.intrArray);
       ctrlr->osRes.intrArray = NULL;

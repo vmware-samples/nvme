@@ -1,6 +1,7 @@
-/*******************************************************************************
- * Copyright (c) 2016  VMware, Inc. All rights reserved.
- *******************************************************************************/
+/*****************************************************************************
+ * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
+ * -- VMware Confidential
+ *****************************************************************************/
 
 /*
  * @file: nvme_pcie_module.c --
@@ -16,6 +17,35 @@ VMK_MODPARAM(nvmePCIELogLevel, int, "NVMe PCIe driver log level");
 int nvmePCIEDebugMask = 0;
 VMK_MODPARAM(nvmePCIEDebugMask, int, "NVMe PCIe driver debug mask");
 
+int nvmePCIEDma4KSwitch = 0;
+VMK_MODPARAM(nvmePCIEDma4KSwitch, int, "NVMe PCIe 4k-alignment DMA");
+
+int nvmePCIEMsiEnbaled = 0;
+VMK_MODPARAM(nvmePCIEMsiEnbaled, int, "NVMe PCIe MSI interrupt enable");
+
+vmk_uint32 nvmePCIEFakeAdminQSize = 0;
+VMK_MODPARAM(nvmePCIEFakeAdminQSize, uint, "NVMe PCIe fake ADMIN queue size. 0's based");
+
+#if NVME_PCIE_STORAGE_POLL
+int nvmePCIEPollEnabled = 1;
+VMK_MODPARAM(nvmePCIEPollEnabled, int, "NVMe PCIe hybrid poll enable,"
+                                       " MSIX interrupt must be enabled."
+                                       " Default enabled.");
+
+vmk_uint32 nvmePCIEPollThr = 30;
+VMK_MODPARAM(nvmePCIEPollThr, uint, "NVMe PCIe hybrid poll threshold of"
+                                    " automatic switch from interrupt to poll."
+                                    " Valid if poll enabled. Default 30 OIO"
+                                    " commands per IO queue.");
+
+vmk_uint64 nvmePCIEPollInterval = 0;
+VMK_MODPARAM(nvmePCIEPollInterval, uint, "NVMe PCIe hybrid poll least interval"
+                                         " between each poll in microseconds."
+                                         " Valid if poll enabled. Default"
+                                         " 0us.");
+#endif
+
+extern int nvmePCIEAdminQueueSize;
 /**
  * Global, static data that holds module/driver wide resources
  */
@@ -28,6 +58,14 @@ static void LogHandleDestroy();
 static VMK_ReturnStatus MemPoolCreate();
 static void MemPoolDestroy();
 
+static void NVMEPCIEValidateModuleParameter()
+{
+   if (nvmePCIEFakeAdminQSize >= nvmePCIEAdminQueueSize) {
+      nvmePCIEFakeAdminQSize = (nvmePCIEAdminQueueSize - 1);
+      NVMEPCIELogNoHandle("change nvmePCIEFakeAdminQSize to 0x%x",
+         nvmePCIEFakeAdminQSize);
+   }
+}
 /**
  * Module entry point
  *
@@ -39,6 +77,7 @@ init_module(void)
    VMK_ReturnStatus vmkStatus;
 
    NVMEPCIELogNoHandle("Loading driver %s.", NVME_PCIE_DRIVER_IDENT);
+   NVMEPCIEValidateModuleParameter();
 
    /* Always initialize heap in the first place. */
    vmkStatus = HeapCreate();
