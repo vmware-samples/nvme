@@ -753,7 +753,11 @@ NVMEPCIEQueueIntrHandler(void *handlerData, vmk_IntrCookie intrCookie)
    NVMEPCIEQueueInfo *qinfo = (NVMEPCIEQueueInfo *)handlerData;
 #if NVME_PCIE_STORAGE_POLL
    vmk_Bool pollEnabled = qinfo->ctrlr->pollEnabled;
+#if NVME_PCIE_BLOCKSIZE_AWARE
+   vmk_Bool blkSizeAwarePollEnabled = qinfo->ctrlr->blkSizeAwarePollEnabled;
+#endif
    vmk_atomic32 *nrActPtr = &qinfo->cmdList->nrAct;
+   vmk_atomic32 *nrActSmallPtr = &qinfo->cmdList->nrActSmall;
    vmk_StoragePollState pollState = VMK_STORAGEPOLL_DISABLED;
 #endif
 
@@ -774,10 +778,18 @@ NVMEPCIEQueueIntrHandler(void *handlerData, vmk_IntrCookie intrCookie)
       /**
        * Activate polling by determining OIO
        *
-       * If OIO is adequate, it is appropriate to replace a large quantity
-       * of interrupts by polling.
+       * 1. If OIO is adequate, it is appropriate to replace a large quantity
+       *    of interrupts by polling
+       * 2. If the number of small block size OIO is less than half of total
+       *    OIO, use interruption to avoid inefficiency.
        */
+#if NVME_PCIE_BLOCKSIZE_AWARE
+      if ((vmk_AtomicRead32(nrActPtr) < nvmePCIEPollThr) ||
+          (blkSizeAwarePollEnabled && (vmk_AtomicRead32(nrActPtr) >
+           (vmk_AtomicRead32(nrActSmallPtr) << 1)))) {
+#else
       if (vmk_AtomicRead32(nrActPtr) < nvmePCIEPollThr) {
+#endif
          vmk_SpinlockLock(qinfo->cqInfo->lock);
          NVMEPCIEProcessCq(qinfo);
          vmk_SpinlockUnlock(qinfo->cqInfo->lock);
@@ -952,6 +964,52 @@ NVMEPCIEPutCmdInfo(NVMEPCIEQueueInfo *qinfo, NVMEPCIECmdInfo *cmdInfo)
 }
 
 /**
+ * Get block size of a 'vmk_NvmeCommand' type command
+ *
+ * @param[in] vmkCmd  'vmk_NvmeCommand' type command
+ *
+ * @return    0       Cannot get block size of this command
+ * @return    Not 0   Block size of this command
+ */
+vmk_uint16
+NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd)
+{
+   vmk_uint16 bs = 0;
+
+   if (vmkCmd == NULL) {
+      return 0;
+   }
+
+   switch (vmkCmd->nvmeCmd.cdw0.opc)
+   {
+      case VMK_NVME_NVM_CMD_READ:
+         bs = (((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb) >> 1;
+         break;
+
+      case VMK_NVME_NVM_CMD_WRITE:
+         bs = (((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb) >> 1;
+         break;
+
+      case VMK_NVME_NVM_CMD_COMPARE:
+         bs = (((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb) >> 1;
+         break;
+
+      case VMK_NVME_NVM_CMD_WRITE_ZEROES:
+         bs = (((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb) >> 1;
+         break;
+
+      default:
+         /**
+          * Other types of commands don't have 'nlb' field, remains 'bs'
+          * as 0 to claim unavailable.
+          */
+         break;
+   }
+
+   return bs;
+}
+
+/**
  * Submit a command to a queue
  *
  * @param[in] ctrlr   Controller instance
@@ -970,6 +1028,9 @@ NVMEPCIESubmitAsyncCommand(NVMEPCIEController *ctrlr,
    NVMEPCIEQueueInfo *qinfo;
    vmk_NvmeStatus nvmeStatus;
    vmk_uint16 cid;
+#if NVME_PCIE_BLOCKSIZE_AWARE
+   vmk_uint16 bs = NVMEPCIEGetCmdBlockSize(vmkCmd);
+#endif
 
    qinfo = &ctrlr->queueList[qid];
    vmk_AtomicInc32(&qinfo->refCount);
@@ -997,6 +1058,13 @@ NVMEPCIESubmitAsyncCommand(NVMEPCIEController *ctrlr,
       return VMK_FAILURE;
    }
 
+#if NVME_PCIE_BLOCKSIZE_AWARE
+   if (ctrlr->blkSizeAwarePollEnabled && (bs > 0) &&
+       (bs <= NVME_PCIE_SMALL_BLOCKSIZE)) {
+      vmk_AtomicInc32(&qinfo->cmdList->nrActSmall);
+   }
+#endif
+
    cmdInfo->vmkCmd = vmkCmd;
    cmdInfo->type = NVME_PCIE_ASYNC_CONTEXT;
 
@@ -1005,6 +1073,12 @@ NVMEPCIESubmitAsyncCommand(NVMEPCIEController *ctrlr,
    if (VMK_UNLIKELY(nvmeStatus != VMK_NVME_STATUS_VMW_WOULD_BLOCK)) {
       vmkCmd->nvmeStatus = nvmeStatus;
       WPRINT(ctrlr, "Failed to issue command %d, 0x%x", cmdInfo->cmdId, nvmeStatus);
+#if NVME_PCIE_BLOCKSIZE_AWARE
+      if (qinfo->ctrlr->blkSizeAwarePollEnabled && (bs > 0) &&
+          (bs <= NVME_PCIE_SMALL_BLOCKSIZE)) {
+         vmk_AtomicDec32(&qinfo->cmdList->nrActSmall);
+      }
+#endif
       NVMEPCIEPutCmdInfo(qinfo, cmdInfo);
       vmk_AtomicDec32(&qinfo->refCount);
       return VMK_FAILURE;
@@ -1191,6 +1265,13 @@ NVMEPCIECompleteAsyncCommand(NVMEPCIEQueueInfo *qinfo,
    vmk_NvmeCommand *vmkCmd = cmdInfo->vmkCmd;
    vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_PCIE_CMD_STATUS_DONE);
    NVMEPCIEDumpCommand(qinfo->ctrlr, vmkCmd);
+#if NVME_PCIE_BLOCKSIZE_AWARE
+   vmk_uint16 bs = NVMEPCIEGetCmdBlockSize(vmkCmd);
+   if (qinfo->ctrlr->blkSizeAwarePollEnabled && (bs > 0) &&
+       (bs <= NVME_PCIE_SMALL_BLOCKSIZE)) {
+      vmk_AtomicDec32(&qinfo->cmdList->nrActSmall);
+   }
+#endif
    NVMEPCIEPutCmdInfo(qinfo, cmdInfo);
    vmkCmd->done(vmkCmd);
 }
@@ -2014,6 +2095,7 @@ NVMEPCIEInitQueue(NVMEPCIEQueueInfo *qinfo)
 
    /** Reset cmd info list */
    cmdList->nrAct = 0;
+   cmdList->nrActSmall = 0;
    cmdList->freeCmdList = 0;
    vmk_AtomicWrite64(&cmdList->pendingFreeCmdList.atomicComposite, 0);
    cmdInfo = cmdList->list;

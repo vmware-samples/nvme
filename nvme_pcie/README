@@ -6,6 +6,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2021/12/14 1.2.3.19-1vmw
+
+   Enable Block Size Aware Polling to improve large block size I/O performance.
+
 2021/10/14 1.2.3.18-1vmw
 
    Add nvme-stats support for StoragePoll.

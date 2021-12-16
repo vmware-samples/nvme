@@ -312,6 +312,11 @@ NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
 #if NVME_PCIE_STORAGE_POLL
       ctrlr->pollEnabled = ((type == VMK_PCI_INTERRUPT_TYPE_MSIX) &&
                             nvmePCIEPollEnabled) ? VMK_TRUE : VMK_FALSE;
+#if NVME_PCIE_BLOCKSIZE_AWARE
+      ctrlr->blkSizeAwarePollEnabled = ((ctrlr->pollEnabled) &&
+                                        nvmePCIEBlkSizeAwarePollEnabled) ?
+                                       VMK_TRUE : VMK_FALSE;
+#endif
 #endif
       ctrlr->osRes.numIntrs = numAllocated;
       if (type == VMK_PCI_INTERRUPT_TYPE_MSI) {

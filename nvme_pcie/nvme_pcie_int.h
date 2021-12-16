@@ -34,12 +34,14 @@
 
 #define NVME_ABORT 1
 #define NVME_STATS 1
-#define NVME_PCIE_STORAGE_POLL 1
 
 #if NVME_PCIE_STORAGE_POLL
 extern int nvmePCIEPollEnabled;
 extern vmk_uint64 nvmePCIEPollInterval;
 extern vmk_uint32 nvmePCIEPollThr;
+#if NVME_PCIE_BLOCKSIZE_AWARE
+extern int nvmePCIEBlkSizeAwarePollEnabled;
+#endif
 #endif
 
 /**
@@ -50,7 +52,7 @@ extern vmk_uint32 nvmePCIEPollThr;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.18"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.19"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -191,6 +193,13 @@ typedef struct NVMEPCIECmdInfoList {
     * It can help StoragePoll to switch from interruption mode to poll.
     */
    vmk_atomic32 nrAct;
+   /**
+    * Record small block size active commands
+    *
+    * The range of small block size is (0, NVME_PCIE_SMALL_BLOCKSIZE].
+    * It can help StoragePoll to switch from interruption mode to poll.
+    */
+   vmk_atomic32 nrActSmall;
    NVMEPCIEPendingCmdInfo pendingFreeCmdList;
    vmk_uint32 freeCmdList;
    NVMEPCIECmdInfo *list;
@@ -262,6 +271,9 @@ typedef struct NVMEPCIEController {
    vmk_Bool statsEnabled;
 #if NVME_PCIE_STORAGE_POLL
    vmk_Bool pollEnabled;
+#endif
+#if NVME_PCIE_BLOCKSIZE_AWARE
+   vmk_Bool blkSizeAwarePollEnabled;
 #endif
 } NVMEPCIEController;
 
@@ -438,6 +450,8 @@ VMK_INLINE void NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo);
 
 VMK_INLINE void NVMEPCIEDisableIntr(NVMEPCIEQueueInfo *qinfo,
                                     vmk_Bool intrSync);
+
+VMK_INLINE vmk_uint16 NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd);
 
 #if NVME_PCIE_STORAGE_POLL
 vmk_uint32 NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,

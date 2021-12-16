@@ -43,6 +43,13 @@ VMK_MODPARAM(nvmePCIEPollInterval, uint, "NVMe PCIe hybrid poll least interval"
                                          " between each poll in microseconds."
                                          " Valid if poll enabled. Default"
                                          " 0us.");
+
+#if NVME_PCIE_BLOCKSIZE_AWARE
+int nvmePCIEBlkSizeAwarePollEnabled = 1;
+VMK_MODPARAM(nvmePCIEBlkSizeAwarePollEnabled, int, "NVMe PCIe block size aware"
+                                                   " poll enable. Valid if poll"
+                                                   " enabled. Default enabled.");
+#endif
 #endif
 
 extern int nvmePCIEAdminQueueSize;
