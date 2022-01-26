@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2022/1/25 1.2.0.51-1vmw
+
+   Replace "disable" with "deactivate" in xml file.
+
 2021/11/23 1.2.0.50-1vmw
 
    Print the logs to syslog.

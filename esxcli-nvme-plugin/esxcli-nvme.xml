@@ -1071,14 +1071,14 @@
                <description>Namespace to operate on, 0 will be passed as default value, if not set</description>
             </parameter>
             <parameter name="save" type="flag" required="false" shortname="S">
-               <description>save the attribute</description>
+               <description>Save the attribute</description>
             </parameter>
             <parameter name="value" type="int" required="true" shortname="v">
                <description>Time limited error recovery value to be set</description>
                <constraint type="range"> <range min="0" max="65535"/> </constraint>
             </parameter>
             <parameter name="enable" type="int" required="false" shortname="e">
-               <description>deallocated or unwritten logical block error enable value to be set, 0 for false (disable), 1 for true (enable), 0 will be passed as default value, if not set</description>
+               <description>Deallocated or unwritten logical block error enable value to be set. The default value is 0.</description>
                <constraint type="range"> <range min="0" max="1"/> </constraint>
             </parameter>
          </input-spec>
@@ -1121,7 +1121,7 @@
                <description>save the attribute</description>
             </parameter>
             <parameter name="value" type="int" required="true" shortname="v">
-               <description>Volitale write cache enable value to be set, 0 for false (disable), 1 for true (enable)</description>
+               <description>Volitale write cache enable value to be set</description>
                <constraint type="range"> <range min="0" max="1"/> </constraint>
             </parameter>
          </input-spec>
@@ -1219,14 +1219,14 @@
             <list type="structure">
                <structure typeName="InterruptVectorConfiguration">
                   <field name="Interrupt Vector"> <int/> </field>
-                  <field name="Coalescing Disable"> <bool/> </field>
+                  <field name="Coalescing Deactivate"> <bool/> </field>
                </structure>
             </list>
          </output-spec>
          <format-parameters>
             <formatter>simple</formatter>
             <format-parameter name="header:InterruptVectorConfiguration">Interrupt Vector Configuration Info:</format-parameter>
-            <format-parameter name="fields:InterruptVectorConfiguration">Interrupt Vector,Coalescing Disable</format-parameter>
+            <format-parameter name="fields:InterruptVectorConfiguration">Interrupt Vector,Coalescing Deactivate</format-parameter>
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x9 $if{select, -S $val{select}}</execute>
       </command>
@@ -1237,14 +1237,14 @@
                <description>Adapter to operate on</description>
             </parameter>
             <parameter name="save" type="flag" required="false" shortname="S">
-               <description>save the attribute</description>
+               <description>Save the attribute</description>
             </parameter>
             <parameter name="value" type="int" required="true" shortname="v">
                <description>Interrupt vector value to be set</description>
                <constraint type="range"> <range min="0" max="65535"/> </constraint>
             </parameter>
              <parameter name="value2" type="int" required="true" shortname="x">
-               <description>Coalescing disable value to be set, 0 for false (enable), 1 for true (disable)</description>
+               <description>Coalescing deactivate value to be set,  0 for false (activate), 1 for true (deactivate)</description>
                <constraint type="range"> <range min="0" max="1"/> </constraint>
             </parameter>
          </input-spec>
@@ -1268,7 +1268,7 @@
          </input-spec>
          <output-spec>
             <structure typeName="WriteAtomicity">
-               <field name="Disable Normal"> <bool/> </field>
+               <field name="Deactivate Normal"> <bool/> </field>
             </structure>
          </output-spec>
          <format-parameters>
@@ -1284,10 +1284,10 @@
                <description>Adapter to operate on</description>
             </parameter>
             <parameter name="save" type="flag" required="false" shortname="S">
-               <description>save the attribute</description>
+               <description>Save the attribute</description>
             </parameter>
             <parameter name="value" type="int" required="true" shortname="v">
-               <description>Disable Normal value to be set, 0 for false (enable), 1 for true (disable)</description>
+               <description>Deactivate Normal value to be set, 0 for false (activate), 1 for true (deactivate)</description>
                <constraint type="range"> <range min="0" max="1"/> </constraint>
             </parameter>
          </input-spec>
@@ -1692,7 +1692,7 @@ Debug level(hex int format). When log level is 5, this value is used to manupula
                <description>Adapter to operate on</description>
             </parameter>
             <parameter name="timeout" type="int" required="true" shortname="t">
-	       <description>IO timeout seconds for internal checker. Maximum timeout value is 40. 0: disable timeout checker.</description>
+               <description>IO timeout seconds for internal checker. Maximum timeout value is 40. 0: deactivate timeout checker.</description>
             </parameter>
          </input-spec>
          <output-spec>

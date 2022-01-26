@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2014-2021 VMware, Inc. All rights reserved.
+ * Copyright (c) 2014-2022 VMware, Inc. All rights reserved.
  *****************************************************************************/
 
 /**
@@ -3768,7 +3768,7 @@ void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
       }
       xml_struct_begin("InterruptVectorConfiguration");
       PINT("Interrupt Vector", value & 0xffff);
-      PBOOL("Coalescing Disable", value & 0x10000);
+      PBOOL("Coalescing Deactivate", value & 0x10000);
       xml_struct_end();
    }
    xml_list_end();
@@ -3872,7 +3872,7 @@ void getFeature_0ah(struct nvme_handle *handle, int select, int nsId)
 
    esxcli_xml_begin_output();
    xml_struct_begin("WriteAtomicity");
-   PBOOL("Disable Normal", value & 0x1);
+   PBOOL("Deactivate Normal", value & 0x1);
    xml_struct_end();
    esxcli_xml_end_output();
 }
