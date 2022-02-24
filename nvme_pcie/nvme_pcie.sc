@@ -1,6 +1,6 @@
 """
 * *******************************************************************************
-* Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
+* Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
 * *******************************************************************************
 """
 # Driver definition for nvme driver.
@@ -111,7 +111,7 @@ nvme_pcie_vib =  defineModuleVib(nvme_pcie_vib_def)
 #
 # Build the Component
 #
-from devkitUtilities import GenerateFullVibVersionNumber
+from devkitUtilities import GenerateFullVibVersionNumber, IsDevKit
 
 fullVersion = GenerateFullVibVersionNumber(nvme_pcie_identification['version'],
                                            nvme_pcie_identification['vendor_code'],
@@ -156,3 +156,8 @@ nvme_pcie_bulletin_def = {
    },
 }
 nvme_pcie_bundle =  defineComponent(nvme_pcie_bulletin_def)
+
+# TODO: Remove as part of cleanup ESXLCM-8596. Needed now to keep unified
+# components separate.
+if not IsDevKit():
+   defineComponent(nvme_pcie_bulletin_def, unified=True)
