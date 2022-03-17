@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -39,6 +39,8 @@
 extern int nvmePCIEPollEnabled;
 extern vmk_uint64 nvmePCIEPollInterval;
 extern vmk_uint32 nvmePCIEPollThr;
+// IOPs threshold to enable polling per queue, currently 100k
+#define NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE (100 * 1024)
 #if NVME_PCIE_BLOCKSIZE_AWARE
 extern int nvmePCIEBlkSizeAwarePollEnabled;
 #endif
@@ -52,7 +54,7 @@ extern int nvmePCIEBlkSizeAwarePollEnabled;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.3.19"
+#define NVME_PCIE_DRIVER_VERSION "1.2.3.20"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -89,6 +91,9 @@ extern int nvmePCIEBlkSizeAwarePollEnabled;
 
 #define NVME_PCIE_SYNC_CMD_NUM 10
 #define NVME_PCIE_SYNC_CMD_ID 0xffff
+
+// Time interval (one second) of recording IOPs for a queue
+#define NVME_PCIE_IOPS_RECORD_FREQ VMK_USEC_PER_SEC
 
 typedef struct NVMEPCIEController NVMEPCIEController;
 typedef struct NVMEPCIECmdInfo NVMEPCIECmdInfo;
@@ -244,6 +249,14 @@ typedef struct NVMEPCIEQueueInfo {
    // StoragePoll handler. Set as NULL, if failed to create
    vmk_StoragePoll pollHandler;
 #endif
+   /**
+    * Will update per second by 'iopsTimer'
+    *
+    * 'iopsLastSec' and 'numCmdComplThisSec' are valid only when
+    * 'iopsTimerQueue' and 'iopsTimer' are not NULL
+    */
+   vmk_atomic32 iopsLastSec;
+   vmk_atomic32 numCmdComplThisSec;
 } NVMEPCIEQueueInfo;
 
 /* to mark the special device needs some workaround */
@@ -269,6 +282,10 @@ typedef struct NVMEPCIEController {
    NVMEPCIEWorkaround workaround;
    vmk_uint32 dstrd;
    vmk_Bool statsEnabled;
+   // Timer queue to record IOPs
+   vmk_TimerQueue iopsTimerQueue;
+   // Timer hanndler to record IOPs
+   vmk_Timer iopsTimer;
 #if NVME_PCIE_STORAGE_POLL
    vmk_Bool pollEnabled;
 #endif
@@ -469,6 +486,12 @@ void NVMEPCIEStoragePollCreate(NVMEPCIEQueueInfo *qinfo);
 void NVMEPCIEStoragePollEnable(NVMEPCIEQueueInfo *qinfo);
 void NVMEPCIEStoragePollDisable(NVMEPCIEQueueInfo *qinfo);
 void NVMEPCIEStoragePollDestory(NVMEPCIEQueueInfo *qinfo);
+vmk_Bool NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo);
+#endif
+
+#if NVME_PCIE_BLOCKSIZE_AWARE
+VMK_INLINE vmk_Bool
+NVMEPCIEStoragePollBlkSizeAwareSwitch(NVMEPCIEQueueInfo *qinfo);
 #endif
 
 /** Interrupt functions */
