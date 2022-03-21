@@ -463,12 +463,11 @@ VMK_ReturnStatus NVMEPCIEIdentify(NVMEPCIEController *ctrlr,
                                   vmk_uint32 nsID,
                                   vmk_uint8 *data);
 
-VMK_INLINE void NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo);
+void NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo);
 
-VMK_INLINE void NVMEPCIEDisableIntr(NVMEPCIEQueueInfo *qinfo,
-                                    vmk_Bool intrSync);
+void NVMEPCIEDisableIntr(NVMEPCIEQueueInfo *qinfo, vmk_Bool intrSync);
 
-VMK_INLINE vmk_uint16 NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd);
+vmk_uint16 NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd);
 
 #if NVME_PCIE_STORAGE_POLL
 vmk_uint32 NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,
@@ -490,8 +489,7 @@ vmk_Bool NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo);
 #endif
 
 #if NVME_PCIE_BLOCKSIZE_AWARE
-VMK_INLINE vmk_Bool
-NVMEPCIEStoragePollBlkSizeAwareSwitch(NVMEPCIEQueueInfo *qinfo);
+vmk_Bool NVMEPCIEStoragePollBlkSizeAwareSwitch(NVMEPCIEQueueInfo *qinfo);
 #endif
 
 /** Interrupt functions */

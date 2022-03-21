@@ -943,7 +943,7 @@ NVMEPCIEPutCmdInfo(NVMEPCIEQueueInfo *qinfo, NVMEPCIECmdInfo *cmdInfo)
  * @return    0       Cannot get block size of this command
  * @return    Not 0   Block size of this command
  */
-vmk_uint16
+inline vmk_uint16
 NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd)
 {
    vmk_uint16 bs = 0;
@@ -1643,7 +1643,7 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
  *
  * @return                 Whether to switch to polling mode
  */
-VMK_INLINE vmk_Bool
+inline vmk_Bool
 NVMEPCIEStoragePollBlkSizeAwareSwitch(NVMEPCIEQueueInfo *qinfo)
 {
    vmk_Bool blkSizeAwarePollEnabled = qinfo->ctrlr->blkSizeAwarePollEnabled;
@@ -1671,7 +1671,7 @@ NVMEPCIEStoragePollBlkSizeAwareSwitch(NVMEPCIEQueueInfo *qinfo)
  *
  * @param[in]  qinfo       Queue instance
  */
-void
+inline void
 NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo)
 {
    NVMEPCIEController *ctrlr = qinfo->ctrlr;
@@ -1695,7 +1695,7 @@ NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo)
  * @param[in]  intrSync    Whether to synchronize interrupt cookie binding to
  *                         the queue
  */
-void
+inline void
 NVMEPCIEDisableIntr(NVMEPCIEQueueInfo *qinfo, vmk_Bool intrSync)
 {
    NVMEPCIEController *ctrlr = qinfo->ctrlr;
