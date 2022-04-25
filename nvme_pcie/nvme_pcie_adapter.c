@@ -746,7 +746,6 @@ NVMEPCIEStartIOPsTimer(NVMEPCIEController *ctrlr)
                                  VMK_LOCKDOMAIN_INVALID,
                                  VMK_SPINLOCK_UNRANKED,
                                  &ctrlr->iopsTimer);
-      VMK_ASSERT(ctrlr->iopsTimer != VMK_INVALID_TIMER);
 
       if (status != VMK_OK) {
          EPRINT(ctrlr, "Failed to start IOPs timer! %s.",

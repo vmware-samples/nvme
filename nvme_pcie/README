@@ -6,6 +6,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2022/4/21 1.2.3.21-1vmw
+
+   Fix PR #2959131: Redundant VMK_ASSERT causes PSOD when creating iopsTimer fails.
+
 2022/3/8 1.2.3.20-1vmw
 
    Fix PR #2929220: Polling not enabled for Optane SSDs.
