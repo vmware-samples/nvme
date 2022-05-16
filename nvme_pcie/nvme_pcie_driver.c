@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -635,7 +635,6 @@ DmaInit(NVMEPCIEController *ctrlr)
    props.module = vmk_ModuleCurrentID;
    props.flags = VMK_DMA_ENGINE_FLAGS_COHERENT;
    props.device = ctrlr->osRes.device;
-   props.bounce = NULL;
    props.constraints = &constraints;
    vmk_NameInitialize(&props.name, "nvmePCIEDmaEngine");
 

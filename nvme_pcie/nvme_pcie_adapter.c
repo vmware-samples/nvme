@@ -593,7 +593,6 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
    props.flags = VMK_DMA_ENGINE_FLAGS_COHERENT;
    props.device = ctrlr->osRes.device;
    props.constraints = &constraints;
-   props.bounce = NULL;
    vmkStatus = vmk_DMAEngineCreate(&props, &ctrlr->osRes.IODmaEngine);
    if (vmkStatus != VMK_OK) {
       return vmkStatus;
