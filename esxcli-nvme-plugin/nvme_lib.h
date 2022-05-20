@@ -1,5 +1,5 @@
 /*********************************************************************************
- * Copyright (c) 2013-2021 VMware, Inc. All rights reserved.
+ * Copyright (c) 2013-2022 VMware, Inc. All rights reserved.
  * ******************************************************************************/
 
 #ifndef _NVME_LIB_H
@@ -14,7 +14,8 @@ typedef enum {
    NVME_LOG_DEBUG,
 } NvmeCliLogLevel;
 
-extern int logLevel;
+extern vmk_uint32 logLevel;
+extern vmk_uint64 adminTimeout;
 
 #define LogError(fmt, args...)                                                 \
    do {                                                                        \

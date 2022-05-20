@@ -53,6 +53,10 @@ static const char *nvmNsRelPerf[] = {
 #define HEX2CHAR(n) ((n >= 10) ? (n - 10 + 'A') : (n + '0'))
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 
+#define CONFIG_FILE "/tmp/esxcli-nvme-plugin.config"
+#define CONFIG_FILE_LEN 128
+#define CONFIG_FILE_FORMAT "logLevel=%u, adminTimeout=%lu"
+
 static void
 hexdumptoString(char *inbuff, int inlen, char *outbuff, int outlen)
 {
@@ -557,85 +561,41 @@ ExecuteCommand(const char* cmd)
 }
 
 /**
- * Convert hex string to integer.
+ * Convert string to unsigned long.
  *
  * @param [in] str
- * @param [out] value
+ * @param [in] base
+ * @param [in] maxLimit
+ * @param [out] status
  *
- * @retval return 0 when successful.
- *         return -1 for failure cases, e.g. input string has illegal characters.
+ * @retval return uint64 value if the string is parsed successfully, otherwise 0.
  */
-static int
-htoi(const char* str, int *value)
+static vmk_uint64
+stoul(const char* str, int base, vmk_uint64 maxLimit, int *status)
 {
-   int i = 0;
-   int n = 0;
-   int v = 0;
-   int tmp = 0;
+   char *ep;
+   vmk_uint64 val = 0;
+   int rc = 0;
 
-   if (str == NULL || value == NULL) {
-      return -1;
+   errno = 0;
+   val = strtoul(str, &ep, base);
+   if (errno != 0) {
+      rc = errno;
+   } else if (ep[0] != 0) {
+      rc = EINVAL;
+   } else if (val > maxLimit) {
+      rc = ERANGE;
    }
 
-   n = strlen(str);
-   if (n > 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
-      i = 2;
-   }
-   if (n - i > sizeof(int) * 2 || n - i == 0) {
-      return -1;
+   if (status != NULL) {
+      *status = rc;
    }
 
-   while (i < n) {
-      if (str[i] >= '0' && str[i] <= '9') {
-         v = str[i] - '0';
-      } else if (str[i] >= 'a' && str[i] <= 'f') {
-         v = str[i] - 'a' + 10;
-      } else if (str[i] >= 'A' && str[i] <= 'F') {
-         v = str[i] - 'A' + 10;
-      } else {
-         return -1;
-      }
-      tmp = (tmp << 4) | (v & 0xf);
-      i = i + 1;
+   if (errno) {
+      return 0;
+   } else {
+      return val;
    }
-   *value = tmp;
-   return 0;
-}
-
-/**
- * Convert string to integer.
- *
- * @param [in] str
- * @param [out] value
- *
- * @retval return 0 when successful.
- *         return -1 for failure cases, e.g. input string has illegal characters.
- */
-static int
-stoi(const char* str, vmk_uint32 *value)
-{
-   vmk_uint32 i = 0;
-   vmk_uint32 n = 0;
-   vmk_uint32 tmp = 0;
-
-   if (str == NULL || value == NULL) {
-      return -1;
-   }
-
-   n = strlen(str);
-   if (n > 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
-      return htoi(str, value);
-   }
-
-   while (i < n) {
-      if (str[i] < '0' || str[i] > '9') {
-         return -1;
-      }
-      tmp = tmp * 10 + (str[i] - '0');
-      i = i + 1;
-   }
-   *value = tmp;
-   return 0;
 }
 
 static int
@@ -648,7 +608,6 @@ GetCtrlrId(struct nvme_handle *handle)
    if (idCtrlr == NULL) {
       return -1;
    }
-
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
    if (rc != 0) {
       free(idCtrlr);
@@ -659,7 +618,6 @@ GetCtrlrId(struct nvme_handle *handle)
    free(idCtrlr);
    return rc;
 }
-
 
 void
 NvmePlugin_DeviceList(int argc, const char *argv[])
@@ -2354,7 +2312,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       Error("Missing required parameter -i.");
       return;
    } else {
-      rc = stoi(lidStr, &lid);
+      lid = stoul(lidStr, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid log page ID %s.", lidStr);
          return;
@@ -2647,7 +2605,6 @@ out:
    Nvme_Close(handle);
 }
 
-
 static int
 LookupSelect(const char *sel)
 {
@@ -2748,7 +2705,7 @@ GetFeature(struct nvme_handle *handle,
    }
 
    if (cdw11Str != NULL) {
-      rc = stoi(cdw11Str, &cdw11);
+      cdw11 = stoul(cdw11Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 11.");
          return;
@@ -2756,7 +2713,7 @@ GetFeature(struct nvme_handle *handle,
    }
 
    if (cdw12Str != NULL) {
-      rc = stoi(cdw12Str, &cdw12);
+      cdw12 = stoul(cdw12Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 12.");
          return;
@@ -2764,7 +2721,7 @@ GetFeature(struct nvme_handle *handle,
    }
 
    if (cdw13Str != NULL) {
-      rc = stoi(cdw13Str, &cdw13);
+      cdw13 = stoul(cdw13Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 13.");
          return;
@@ -2772,7 +2729,7 @@ GetFeature(struct nvme_handle *handle,
    }
 
    if (cdw14Str != NULL) {
-      rc = stoi(cdw14Str, &cdw14);
+      cdw14 = stoul(cdw14Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 14.");
          return;
@@ -2780,7 +2737,7 @@ GetFeature(struct nvme_handle *handle,
    }
 
    if (cdw15Str != NULL) {
-      rc = stoi(cdw15Str, &cdw15);
+      cdw15 = stoul(cdw15Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 15.");
          return;
@@ -2788,7 +2745,7 @@ GetFeature(struct nvme_handle *handle,
    }
 
    if (dataLenStr != NULL) {
-      rc = stoi(dataLenStr, &dataLen);
+      dataLen = stoul(dataLenStr, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid data length.");
          return;
@@ -2887,7 +2844,7 @@ SetFeature(struct nvme_handle *handle,
    }
 
    if (cdw11Str != NULL) {
-      rc = stoi(cdw11Str, &cdw11);
+      cdw11 = stoul(cdw11Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 11.");
          return;
@@ -2895,7 +2852,7 @@ SetFeature(struct nvme_handle *handle,
    }
 
    if (cdw12Str != NULL) {
-      rc = stoi(cdw12Str, &cdw12);
+      cdw12 = stoul(cdw12Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 12.");
          return;
@@ -2903,7 +2860,7 @@ SetFeature(struct nvme_handle *handle,
    }
 
    if (cdw13Str != NULL) {
-      rc = stoi(cdw13Str, &cdw13);
+      cdw13 = stoul(cdw13Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 13.");
          return;
@@ -2911,7 +2868,7 @@ SetFeature(struct nvme_handle *handle,
    }
 
    if (cdw14Str != NULL) {
-      rc = stoi(cdw14Str, &cdw14);
+      cdw14 = stoul(cdw14Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 14.");
          return;
@@ -2919,7 +2876,7 @@ SetFeature(struct nvme_handle *handle,
    }
 
    if (cdw15Str != NULL) {
-      rc = stoi(cdw15Str, &cdw15);
+      cdw15 = stoul(cdw15Str, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid command dword 15.");
          return;
@@ -4143,15 +4100,7 @@ void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
 void getFeature_0fh(struct nvme_handle *handle, int select, int nsId)
 {
    int value, rc;
-   NvmeUserIo uio;
    vmk_NvmeIdentifyController idCtrlr;
-
-   memset(&uio, 0, sizeof(uio));
-   uio.cmd.getFeatures.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_FEATURES;
-   uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
-   uio.cmd.getFeatures.cdw10.fid = VMK_NVME_FEATURE_ID_KEEP_ALIVE_TIMER;
-   uio.cmd.getFeatures.cdw10.sel = select;
 
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, &idCtrlr);
    if (rc != 0) {
@@ -4164,14 +4113,13 @@ void getFeature_0fh(struct nvme_handle *handle, int select, int nsId)
       return;
    }
 
-   rc = Nvme_AdminPassthru(handle, &uio);
+   rc = Nvme_GetFeature(handle, 0, VMK_NVME_FEATURE_ID_KEEP_ALIVE_TIMER, select,
+                        0, 0, 0, 0, 0, NULL, 0, &value);
 
    if (rc) {
-      Error("Failed to get feature, %s.", NVME_FEATURE_ERROR_STR);
+      Error("Failed to get feature, 0x%x.", rc);
       return;
    }
-
-   value = uio.comp.dw0;
 
    esxcli_xml_begin_output();
    xml_struct_begin("KeepAliveTimer");
@@ -4554,14 +4502,14 @@ NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
       return;
    }
 
-   rc = stoi(ftr, &fid);
+   fid = stoul(ftr, 0, VMK_UINT32_MAX, &rc);
    if (rc) {
       Error("Invalid feature ID.");
       return;
    }
 
    if (ns != NULL) {
-      rc = stoi(ns, &nsId);
+      nsId = stoul(ns, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid namespace ID.");
          return;
@@ -4676,14 +4624,14 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
       return;
    }
 
-   rc = stoi(ftr, &fid);
+   fid = stoul(ftr, 0, VMK_UINT32_MAX, &rc);
    if (rc) {
       Error("Invalid feature ID.");
       return;
    }
 
    if (ns != NULL) {
-      rc = stoi(ns, &nsId);
+      nsId = stoul(ns, 0, VMK_UINT32_MAX, &rc);
       if (rc) {
          Error("Invalid namespace ID.");
          return;
@@ -5073,7 +5021,7 @@ NvmePlugin_DriverLoglevelSet(int argc, const char *argv[])
                logLevel);
       }
       else {
-         rc = htoi(debugString, &debugLevel);
+         debugLevel = stoul(debugString, 0, VMK_UINT32_MAX, &rc);
          if (rc) {
             Error("Invalid debug level.");
             return;
@@ -5275,6 +5223,7 @@ NvmePlugin_DeviceTimeoutSet(int argc, const char *argv[])
 
 void
 NvmePlugin_DeviceTimeoutGet(int argc, const char *argv[])
+
 {
    int timeout = 0;
    int rc;
@@ -5328,6 +5277,106 @@ NvmePlugin_DeviceTimeoutGet(int argc, const char *argv[])
    }
 
    Nvme_Close(handle);
+}
+
+void
+NvmePlugin_DeviceConfigList(int argc, const char *argv[])
+{
+   char str[32];
+
+   esxcli_xml_begin_output();
+   xml_list_begin("structure");
+
+   xml_struct_begin("ConfigList");
+   PSTR("Name", "logLevel");
+   snprintf(str, sizeof(str), "%u", NVME_LOG_ERR);
+   PSTR("Default", str);
+   snprintf(str, sizeof(str), "%u", logLevel);
+   PSTR("Current", str);
+   PSTR("Description", "Log level of this plugin.");
+   xml_struct_end();
+
+   xml_struct_begin("ConfigList");
+   PSTR("Name", "adminTimeout");
+   snprintf(str, sizeof(str), "%u", ADMIN_TIMEOUT);
+   PSTR("Default", str);
+   snprintf(str, sizeof(str), "%lu", adminTimeout);
+   PSTR("Current", str);
+   PSTR("Description", "Timeout in microseconds of the admin commands issued by this plugin.");
+   xml_struct_end();
+
+   xml_list_end();
+   esxcli_xml_end_output();
+}
+
+void
+NvmePlugin_DeviceConfigSet(int argc, const char *argv[])
+{
+   int ch, rc, fd;
+   char *paramStr = NULL;
+   char *valueStr = NULL;
+   char configStr[CONFIG_FILE_LEN];
+   vmk_uint32 newLogLevel = logLevel;
+   vmk_uint64 newAdminTimeout = adminTimeout;
+
+   while ((ch = getopt(argc, (char *const*)argv, "p:v:")) != -1) {
+      switch (ch) {
+         case 'p':
+            paramStr = optarg;
+            break;
+         case 'v':
+            valueStr = optarg;
+            break;
+         default:
+            Error("Invalid parameter.");
+            return;
+      }
+   }
+
+   if (paramStr == NULL || valueStr == NULL) {
+      Error("Missing required parameters.");
+      return;
+   }
+
+   if (strcmp(paramStr, "logLevel") == 0) {
+      newLogLevel = stoul(valueStr, 0, VMK_UINT32_MAX, &rc);
+      if (rc) {
+         Error("Invalid log level %s.", valueStr);
+         return;
+      }
+   } else if (strcmp(paramStr, "adminTimeout") == 0) {
+      newAdminTimeout = stoul(valueStr, 0, VMK_UINT64_MAX, &rc);
+      if (rc) {
+         Error("Invalid admin timeout %s.", valueStr);
+         return;
+      }
+   } else {
+      Error("Invalid parameter");
+      return;
+   }
+
+   memset(configStr, 0, CONFIG_FILE_LEN);
+   snprintf(configStr, CONFIG_FILE_LEN, CONFIG_FILE_FORMAT,
+            newLogLevel, newAdminTimeout);
+   fd = open(CONFIG_FILE, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+   if (fd == -1) {
+      Error("Failed to open config file.");
+      return;
+   } else {
+      if (write(fd, configStr, CONFIG_FILE_LEN) != CONFIG_FILE_LEN){
+         Error("Failed to write config file.");
+         close(fd);
+         return;
+      }
+   }
+   close(fd);
+   esxcli_xml_begin_output();
+   xml_list_begin("string");
+   printf("<string>");
+   printf("%s set successfully!\n", paramStr);
+   printf("</string>");
+   xml_list_end();
+   esxcli_xml_end_output();
 }
 
 typedef void (*CommandHandlerFunc)(int argc, const char *argv[]);
@@ -5455,8 +5504,16 @@ static struct Command commands[] = {
       NvmePlugin_DeviceNsOffline,
       NVME_NS_MGMT,
    },
-
-
+   {
+      "nvme.device.config.list",
+      NvmePlugin_DeviceConfigList,
+      NVME_NORMAL,
+   },
+   {
+      "nvme.device.config.set",
+      NvmePlugin_DeviceConfigSet,
+      NVME_NORMAL,
+   },
 };
 
 #define NUM_COMMANDS       (sizeof(commands)/sizeof(commands[0]))
@@ -5489,6 +5546,29 @@ main(int argc, const char * argv[]) {
    const char        *op;
    int                rc = 0;
    int                fnIdx;
+   int                fd;
+   char               configStr[CONFIG_FILE_LEN];
+
+   fd = open(CONFIG_FILE, O_RDONLY);
+   if (fd == -1) {
+      LogDebug("Failed to open config file.");
+   } else {
+      if (read(fd, configStr, CONFIG_FILE_LEN) < 0) {
+         LogError("Failed to read config file.");
+      } else {
+         LogDebug("Config: %s", configStr);
+         if (sscanf(configStr, CONFIG_FILE_FORMAT,
+                    &logLevel, &adminTimeout) != 2) {
+            LogError("Failed to read parameter values. "
+                     "logLevel=%u, adminTimeout=%lu",
+                     logLevel, adminTimeout);
+         } else {
+            LogDebug("logLevel=%u, adminTimeout=%lu.",
+                     logLevel, adminTimeout);
+         }
+      }
+      close(fd);
+   }
 
    if (argc < 3) {
       Error("Invalid parameter.\n");

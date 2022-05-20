@@ -96,6 +96,9 @@
       <namespace path="nvme.device.timeout">
          <description>NVMe IO timeout checker operations</description>
       </namespace>
+      <namespace path="nvme.device.config">
+         <description>NVMe config operations</description>
+      </namespace>
       <namespace path="nvme.driver">
          <description>NVMe driver operations (Legacy, valid for NVMe PCIe device only).</description>
       </namespace>
@@ -1717,6 +1720,44 @@ Debug level(hex int format). When log level is 5, this value is used to manupula
             <formatter>simple</formatter>
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.timeout.get -A $val{adapter}</execute>
+      </command>
+      <command path="nvme.device.config.list">
+         <description>List the configurable parameters for this plugin</description>
+         <input-spec />
+         <output-spec>
+            <list type="structure">
+               <structure typeName="ConfigList">
+                  <field name="Name"> <string/> </field>
+                  <field name="Default"> <string/> </field>
+                  <field name="Current"> <string/> </field>
+                  <field name="Description"> <string/> </field>
+               </structure>
+            </list>
+         </output-spec>
+         <format-parameters>
+            <formatter>table</formatter>
+            <format-parameter name="fields:ConfigList">Name,Default,Current,Description</format-parameter>
+            <format-parameter name="show-header:ConfigList">true</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.config.list</execute>
+      </command>
+      <command path="nvme.device.config.set">
+         <description>Set the plugin's parameter</description>
+         <input-spec >
+            <parameter name="parameter" type="string" required="true" shortname="p">
+               <description>Parameter name</description>
+            </parameter>
+            <parameter name="value" type="string" required="true" shortname="v">
+               <description>Parameter value</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.config.set -p $val{parameter} -v $val{value}</execute>
       </command>
    </commands>
 </plugin>

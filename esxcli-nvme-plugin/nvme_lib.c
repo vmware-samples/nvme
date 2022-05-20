@@ -1,5 +1,5 @@
 /*********************************************************************************
- * Copyright (c) 2013-2021 VMware, Inc. All rights reserved.
+ * Copyright (c) 2013-2022 VMware, Inc. All rights reserved.
  * ******************************************************************************/
 
 #include <assert.h>
@@ -21,7 +21,8 @@
  ****************************************************************************/
 
 struct nvme_adapter_list adapterList;
-int logLevel = NVME_LOG_ERR;
+vmk_uint32 logLevel = NVME_LOG_ERR;
+vmk_uint64 adminTimeout = ADMIN_TIMEOUT;
 
 /*****************************************************************************
  * NVMe Management Ops
@@ -336,7 +337,7 @@ Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, int nsId, void *id
    uio.namespaceID = nsId;
    uio.direction = XFER_FROM_DEV;
 
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = adminTimeout;
 #define PAGE_SIZE 4096
    uio.length = PAGE_SIZE;
    uio.addr = (vmk_uintptr_t)id;
@@ -556,7 +557,7 @@ Nvme_NsMgmtCreate(struct nvme_handle *handle,
 
    uio.cmd.nsMgmt.cdw0.opc = VMK_NVME_ADMIN_CMD_NAMESPACE_MANAGEMENT;
    uio.direction = XFER_TO_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = adminTimeout;
    uio.cmd.nsMgmt.cdw10.sel = VMK_NVME_NS_MGMT_CREATE;
    uio.addr = (vmk_uintptr_t)idNs;
    uio.length = sizeof(*idNs);
@@ -591,7 +592,7 @@ Nvme_NsMgmtDelete(struct nvme_handle *handle, int nsId)
    uio.cmd.nsMgmt.cdw0.opc = VMK_NVME_ADMIN_CMD_NAMESPACE_MANAGEMENT;
    uio.cmd.nsMgmt.nsid = nsId;
    uio.direction = XFER_NO_DATA;
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = adminTimeout;
    uio.cmd.nsMgmt.cdw10.sel = VMK_NVME_NS_MGMT_DELETE;
 
    return Nvme_AdminPassthru(handle, &uio);
@@ -619,7 +620,7 @@ Nvme_NsAttach(struct nvme_handle *handle, int sel, int nsId,
    uio.cmd.nsAttach.cdw0.opc = VMK_NVME_ADMIN_CMD_NAMESPACE_ATTACHMENT;
    uio.cmd.nsAttach.nsid = nsId;
    uio.direction = XFER_TO_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = adminTimeout;
    uio.cmd.nsAttach.cdw10.sel = sel;
    uio.addr = (vmk_uintptr_t)ctrlrList;
    uio.length = sizeof(*ctrlrList);
@@ -735,7 +736,7 @@ Nvme_CreateNamespace_IDT(struct nvme_handle *handle,
    uio.cmd.vendorSpecificCmd.cdw14 = nnu;
    uio.cmd.vendorSpecificCmd.nsid = ns;
    uio.namespaceID = ns;
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = adminTimeout;
 
    rc = Nvme_AdminPassthru(handle, &uio);
 
@@ -759,7 +760,7 @@ int Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, int ns)
    uio.cmd.vendorSpecificCmd.cdw12 = IDT_DELETE_NAMESPACE;
    uio.namespaceID = ns;
    uio.cmd.vendorSpecificCmd.nsid = ns;
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = adminTimeout;
    rc = Nvme_AdminPassthru(handle, &uio);
    return rc;
 }
@@ -916,6 +917,11 @@ Nvme_FWDownload(struct nvme_handle *handle,
    vmk_uint32 offset, size;
    int rc;
    void *chunk;
+   vmk_uint64 timeout = FIRMWARE_DOWNLOAD_TIMEOUT;
+
+   if (adminTimeout > timeout) {
+      timeout = adminTimeout;
+   }
 
    if ((chunk = malloc(xferSize)) == NULL) {
       LogError("Failed to malloc %d bytes.", xferSize);
@@ -930,7 +936,7 @@ Nvme_FWDownload(struct nvme_handle *handle,
          VMK_NVME_ADMIN_CMD_FIRMWARE_DOWNLOAD;
       uio.cmd.firmwareDownload.nsid = 0;
       uio.direction = XFER_TO_DEV;
-      uio.timeoutUs = FIRMWARE_DOWNLOAD_TIMEOUT;
+      uio.timeoutUs = timeout;
       uio.cmd.firmwareDownload.cdw10.numd =
          (size / sizeof(vmk_uint32)) - 1;
       uio.cmd.firmwareDownload.cdw11.ofst = (fwOffset + offset) / sizeof(vmk_uint32);
@@ -1015,7 +1021,11 @@ Nvme_FWActivate(struct nvme_handle *handle,
    uio.cmd.firmwareActivate.cdw0.opc = VMK_NVME_ADMIN_CMD_FIRMWARE_COMMIT;
    uio.cmd.firmwareActivate.nsid = 0;
    uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = FIRMWARE_ACTIVATE_TIMEOUT;
+   if (FIRMWARE_ACTIVATE_TIMEOUT < adminTimeout) {
+      uio.timeoutUs = adminTimeout;
+   } else {
+      uio.timeoutUs = FIRMWARE_ACTIVATE_TIMEOUT;
+   }
    uio.cmd.firmwareActivate.cdw10.fs = slot;
    uio.cmd.firmwareActivate.cdw10.ca = action;
    rc = Nvme_AdminPassthru(handle, &uio);
@@ -1058,7 +1068,6 @@ Nvme_FormatNvm(struct nvme_handle *handle,
    NvmeUserIo uio;
 
    memset(&uio, 0, sizeof(uio));
-
    uio.cmd.format.cdw0.opc = VMK_NVME_ADMIN_CMD_FORMAT_NVM;
    uio.cmd.format.nsid = ns;
    uio.cmd.format.cdw10.ses = ses;
@@ -1066,12 +1075,15 @@ Nvme_FormatNvm(struct nvme_handle *handle,
    uio.cmd.format.cdw10.pi = pi;
    uio.cmd.format.cdw10.mset = ms;
    uio.cmd.format.cdw10.lbaf = lbaf;
-
    uio.namespaceID = ns;
    /* Set timeout as 30mins, we do see some devices need
     * ~20 minutes to format.
     */
-   uio.timeoutUs = FORMAT_TIMEOUT;
+   if (FORMAT_TIMEOUT >= adminTimeout) {
+      uio.timeoutUs = FORMAT_TIMEOUT;
+   } else {
+      uio.timeoutUs = adminTimeout;
+   }
    rc = Nvme_AdminPassthru(handle, &uio);
 
    if (rc) {
@@ -1415,7 +1427,7 @@ int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid, void *logData
       uio.cmd.getLogPage.cdw0.opc = VMK_NVME_ADMIN_CMD_GET_LOG_PAGE;
       uio.cmd.getLogPage.nsid = nsid;
       uio.direction = XFER_FROM_DEV;
-      uio.timeoutUs = ADMIN_TIMEOUT;
+      uio.timeoutUs = adminTimeout;
       uio.cmd.getLogPage.cdw10.lid = lid;
       uio.cmd.getLogPage.cdw10.numdl = (vmk_uint16)(numd & 0xffff);
       uio.cmd.getLogPage.cdw11.numdu = (vmk_uint16)((numd >> 16) & 0xffff);
@@ -1473,7 +1485,7 @@ int Nvme_GetFeature(struct nvme_handle *handle,
    uio.cmd.getFeatures.cdw14 = cdw14;
    uio.cmd.getFeatures.cdw15 = cdw15;
    uio.direction = XFER_FROM_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = adminTimeout;
    uio.addr = (vmk_uintptr_t)buf;
    uio.length = len;
    rc = Nvme_AdminPassthru(handle, &uio);
@@ -1515,7 +1527,7 @@ int Nvme_SetFeature(struct nvme_handle *handle,
    uio.cmd.setFeatures.cdw14 = cdw14;
    uio.cmd.setFeatures.cdw15 = cdw15;
    uio.direction = XFER_TO_DEV;
-   uio.timeoutUs = ADMIN_TIMEOUT;
+   uio.timeoutUs = adminTimeout;
    uio.addr = (vmk_uintptr_t)buf;
    uio.length = len;
    rc = Nvme_AdminPassthru(handle, &uio);
