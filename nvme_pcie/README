@@ -6,6 +6,12 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+
+2022/5/12 1.2.3.22-1vmw
+
+   PR #2969629: If there is hardware issue causes invalid vmkcmd in NVMEPCIEProcessCq(),
+                driver should check cid before to avoid and log more messages for debug.
+
 2022/4/21 1.2.3.21-1vmw
 
    Fix PR #2959131: Redundant VMK_ASSERT causes PSOD when creating iopsTimer fails.

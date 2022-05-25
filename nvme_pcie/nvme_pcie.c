@@ -45,8 +45,6 @@ static VMK_ReturnStatus DeleteSq(NVMEPCIEController *ctrlr,
                                  vmk_uint16 qid);
 static VMK_ReturnStatus DeleteCq(NVMEPCIEController *ctrlr,
                                  vmk_uint16 qid);
-void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo);
-VMK_ReturnStatus NVMEPCIEResumeQueue(NVMEPCIEQueueInfo *qinfo);
 
 /**
  * Create queue and allocate queue resources
@@ -515,6 +513,7 @@ NVMEPCIEStatsWalkThrough(NVMEPCIEQueueInfo *qinfo, vmk_Bool countIntr)
    NVMEPCIECmdInfo *cmdInfo;
    NVMEPCIECmdInfoList *cmdList;
    vmk_TimerCycles ts;
+   vmk_uint16 cid;
 
    if (!ctrlr->statsEnabled) {
       return;
@@ -541,12 +540,15 @@ NVMEPCIEStatsWalkThrough(NVMEPCIEQueueInfo *qinfo, vmk_Bool countIntr)
       if (cqEntry->dw3.p != phase) {
          break;
       }
-      if (ctrlr->abortEnabled) {
-         cmdInfo = &cmdList->list[cqEntry->dw3.cid];
+      cid = (ctrlr->abortEnabled) ? cqEntry->dw3.cid : cqEntry->dw3.cid - 1;
+      if (VMK_UNLIKELY(cid >= cmdList->idCount)) {
+         EPRINT(ctrlr, "Invalid cid %d", cid);
+         NVMEPCIEDumpCqe(ctrlr, cqEntry);
+         VMK_ASSERT(0);
       } else {
-         cmdInfo = &cmdList->list[cqEntry->dw3.cid - 1];
+         cmdInfo = &cmdList->list[cid];
+         cmdInfo->doneByHwTs = ts;
       }
-      cmdInfo->doneByHwTs = ts;
 
       if (++head >= cqInfo->qsize) {
          head = 0;
@@ -673,7 +675,9 @@ QueueDestroy(NVMEPCIEQueueInfo *qinfo)
     * successfully
     */
    if (ctrlr->pollEnabled) {
+      DPRINT_Q(ctrlr, "Start destroy poll handler of queue %d.", qinfo->id);
       NVMEPCIEStoragePollDestory(qinfo);
+      DPRINT_Q(ctrlr, "Finish destroy poll handler of queue %d.", qinfo->id);
    }
 #endif
 
@@ -1737,6 +1741,7 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
    vmk_TimerRelCycles latency = 0;
    vmk_TimerCycles lastValidTs = 0;
 #endif
+   vmk_uint16 cid;
 
    head = cqInfo->head;
    phase = cqInfo->phase;
@@ -1747,20 +1752,31 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
       if (cqEntry->dw3.p != phase) {
          break;
       }
-      if (ctrlr->abortEnabled) {
-         cmdInfo = &cmdList->list[cqEntry->dw3.cid];
-      } else {
-         cmdInfo = &cmdList->list[cqEntry->dw3.cid - 1];
+      cid = (ctrlr->abortEnabled) ? cqEntry->dw3.cid : cqEntry->dw3.cid - 1;
+      if (VMK_UNLIKELY(cid >= cmdList->idCount)) {
+         EPRINT(ctrlr, "Invalid cid %d", cid);
+         NVMEPCIEDumpCqe(ctrlr, cqEntry);
+         VMK_ASSERT(0);
+         goto skip_invalid_cqe;
       }
+      cmdInfo = &cmdList->list[cid];
+
+      if (VMK_UNLIKELY(cmdInfo->vmkCmd == NULL)) {
+         EPRINT(ctrlr, "NULL cmdInfo->vmkCmd, cid %d", cid);
+         NVMEPCIEDumpCqe(ctrlr, cqEntry);
+         VMK_ASSERT(0);
+         goto skip_invalid_cqe;
+      }
+
       sqHead = cqEntry->dw2.sqhd;
-      if (sqHead >= (vmk_uint16)sqInfo->qsize) {
+      if (VMK_UNLIKELY(sqHead >= (vmk_uint16)sqInfo->qsize)) {
          EPRINT(ctrlr, "Invalid sqhd 0x%x returned from controller for qid %d, cid 0x%x",
                 sqHead, qinfo->id, cmdInfo->vmkCmd->nvmeCmd.cdw0.cid);
          VMK_ASSERT(0);
+         goto skip_invalid_cqe;
       } else {
          vmk_AtomicWrite32(&sqInfo->pendingHead, (vmk_uint32)sqHead);
       }
-      VMK_ASSERT(cmdInfo->vmkCmd != NULL);
       vmk_Memcpy(&cmdInfo->vmkCmd->cqEntry,
                  cqEntry,
                  VMK_NVME_CQE_SIZE);
@@ -1799,6 +1815,7 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
          cmdInfo->done(qinfo, cmdInfo);
       }
 
+skip_invalid_cqe:
       numCmdCompleted++;
       vmk_AtomicInc32(&qinfo->numCmdComplThisSec);
 
@@ -2009,7 +2026,9 @@ void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo)
     * enabled and handler created successfully
     */
    if (ctrlr->pollEnabled) {
+      DPRINT_Q(ctrlr, "Start disable polling of queue %d.", qinfo->id);
       NVMEPCIEStoragePollDisable(qinfo);
+      DPRINT_Q(ctrlr, "Finish disable polling of queue %d.", qinfo->id);
    }
 #endif
 
