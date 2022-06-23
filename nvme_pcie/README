@@ -6,6 +6,9 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2022/6/21 1.2.4.1-1vmw
+
+   Fix PR #2989212: Enhance error handling in SetNumberIOQueues().
 
 2022/5/12 1.2.3.22-1vmw
 

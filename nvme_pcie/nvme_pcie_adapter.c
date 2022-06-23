@@ -257,26 +257,30 @@ ReallocIntr(NVMEPCIEController *ctrlr, int intrNum)
    VMK_ReturnStatus vmkStatus = VMK_OK;
    NVMEPCIEQueueInfo *adminq = &ctrlr->queueList[0];
 
-   if (!nvmePCIEMsiEnbaled) {
-      NVMEPCIESuspendQueue(adminq);
-      NVMEPCIEIntrUnregister(ctrlr->osRes.intrArray[0], adminq);
+   if (ctrlr->osRes.intrType != VMK_PCI_INTERRUPT_TYPE_MSIX) {
+      return VMK_BAD_PARAM;
+   }
+
+   NVMEPCIESuspendQueue(adminq);
+   NVMEPCIEIntrUnregister(ctrlr->osRes.intrArray[0], adminq);
+   NVMEPCIEIntrFree(ctrlr);
+
+   vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, intrNum);
+   if (vmkStatus != VMK_OK) {
+      EPRINT(ctrlr, "Failed to allocate MSIX %d interrupt cookies", intrNum);
+      return vmkStatus;
+   }
+
+   vmkStatus = NVMEPCIEIntrRegister(ctrlr->osRes.device,
+                                    ctrlr->osRes.intrArray[0],
+                                    adminq,
+                                    NVMEPCIEGetCtrlrName(ctrlr),
+                                    NVMEPCIEQueueIntrAck,
+                                    NVMEPCIEQueueIntrHandler);
+   if (vmkStatus != VMK_OK) {
+      EPRINT(ctrlr, "Failed to register interrupt for admin queue, 0x%x.", vmkStatus);
       NVMEPCIEIntrFree(ctrlr);
-
-      vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, intrNum);
-      if (vmkStatus != VMK_OK) {
-         EPRINT(ctrlr, "Failed to allocate MSIX %d interrupt cookies", intrNum);
-         return VMK_OK;
-      }
-
-      vmkStatus = NVMEPCIEIntrRegister(ctrlr->osRes.device,
-                                       ctrlr->osRes.intrArray[0],
-                                       adminq,
-                                       NVMEPCIEGetCtrlrName(ctrlr),
-                                       NVMEPCIEQueueIntrAck,
-                                       NVMEPCIEQueueIntrHandler);
-      if (vmkStatus != VMK_OK) {
-         EPRINT(ctrlr, "Failed to register interrupt for admin queue, 0x%x.", vmkStatus);
-      }
+      return vmkStatus;
    }
 
    NVMEPCIEResumeQueue(adminq);
@@ -325,6 +329,11 @@ SetNumberIOQueues(vmk_NvmeController controller,
       nrIoQueues = ctrlr->osRes.numIntrs - 1;
    } else {
       nrIoQueues = 1;
+   }
+
+   if (nrIoQueues < 1) {
+      EPRINT(ctrlr, "Failed to allocate interrupts for IO queues.");
+      return VMK_FAILURE;
    }
 
    vmkStatus = RequestIoQueues(ctrlr, &nrIoQueues);
@@ -587,7 +596,7 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
 
    /* fix pr2370756, pr2324145 */
    NVMEPCIEDetectWorkaround(ctrlr);
-   WPRINT(ctrlr, "workaround=%d", ctrlr->workaround);
+   IPRINT(ctrlr, "workaround=%d", ctrlr->workaround);
    vmk_NameFormat(&props.name, "%s-IODmaEngine", NVMEPCIEGetCtrlrName(ctrlr));
    props.module = vmk_ModuleCurrentID;
    props.flags = VMK_DMA_ENGINE_FLAGS_COHERENT;
