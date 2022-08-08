@@ -6,6 +6,11 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2022/8/4 1.2.4.2-1vmw
+
+   1. Fix PR #3008867: Skip the inactive command to avoid double completion.
+   2. Add more information in queue and command debug logs.
+
 2022/6/21 1.2.4.1-1vmw
 
    Fix PR #2989212: Enhance error handling in SetNumberIOQueues().

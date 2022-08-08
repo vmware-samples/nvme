@@ -209,6 +209,10 @@ CompQueueConstruct(NVMEPCIEQueueInfo *qinfo, int qid, int qsize, int intrIndex)
       }
    }
 
+   DPRINT_Q(ctrlr, "cq [%d] %p created, size %d, doorbell 0x%lx, compq %p, compqPhy 0x%lx",
+            cqInfo->id, cqInfo, cqInfo->qsize, cqInfo->doorbell,
+            cqInfo->compq, cqInfo->compqPhy);
+
    return VMK_OK;
 
 free_cq_dma:
@@ -318,6 +322,9 @@ VMK_ReturnStatus SubQueueConstruct(NVMEPCIEQueueInfo *qinfo, int qid, int qsize)
    sqInfo->subqPhy = sqInfo->dmaEntry.ioa;
    sqInfo->doorbell = ctrlr->regs + VMK_NVME_REG_SQTDBL(qid, ctrlr->dstrd);
 
+   DPRINT_Q(ctrlr, "sq [%d] %p constructed, size %d, doorbell 0x%lx, subq %p, subqPhy 0x%lx",
+            sqInfo->id, sqInfo, sqInfo->qsize, sqInfo->doorbell,
+            sqInfo->subq, sqInfo->subqPhy);
    return VMK_OK;
 
 free_lock:
@@ -420,6 +427,8 @@ CmdInfoListConstruct(NVMEPCIEQueueInfo *qinfo, int qsize)
       cmdInfo ++;
    }
 
+   DPRINT_Q(ctrlr, "cmdList [%d] %p constructed, list %p, idCount: %d",
+            qinfo->id, cmdList, cmdList->list, cmdList->idCount);
    return VMK_OK;
 
 free_lock:
@@ -599,9 +608,6 @@ QueueConstruct(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo,
       EPRINT(ctrlr, "Failed to construct submission queue %d, 0x%x.", qid, vmkStatus);
       goto destroy_cq;
    }
-
-   VPRINT(ctrlr, "sq[%d].doorbell: 0x%lx, cq[%d].doorbell: 0x%lx",
-          qid, qinfo->sqInfo->doorbell, qid, qinfo->cqInfo->doorbell);
 
    vmkStatus = CmdInfoListConstruct(qinfo, sqsize - 1);
    if (vmkStatus != VMK_OK) {
@@ -840,8 +846,9 @@ NVMEPCIEGetCmdInfo(NVMEPCIEQueueInfo *qinfo, vmk_uint16 cid)
    cmdInfo->doneByHwTs = 0;
    cmdInfo->statsOn = VMK_FALSE;
 #endif
-   DPRINT_CMD(ctrlr, "Get cmd info [%d] %p from queue [%d].",
-              cmdInfo->cmdId, cmdInfo, qinfo->id);
+   DPRINT_CMD(ctrlr, "Get cmdInfo [%d] %p from queue [%d], nrAct: %d.",
+              cmdInfo->cmdId, cmdInfo, qinfo->id,
+              vmk_AtomicRead32(&qinfo->cmdList->nrAct));
 
    return cmdInfo;
 
@@ -891,8 +898,9 @@ NVMEPCIEGetCmdInfoLegacy(NVMEPCIEQueueInfo *qinfo)
    cmdInfo->doneByHwTs = 0;
    cmdInfo->statsOn = VMK_FALSE;
 #endif
-   DPRINT_CMD(ctrlr, "Get cmd info [%d] %p from queue [%d].",
-              cmdInfo->cmdId, cmdInfo, qinfo->id);
+   DPRINT_CMD(ctrlr, "Get cmdInfo [%d] %p from queue [%d], nrAct: %d.",
+              cmdInfo->cmdId, cmdInfo, qinfo->id,
+              vmk_AtomicRead32(&cmdList->nrAct));
 
    return cmdInfo;
 }
@@ -934,7 +942,7 @@ NVMEPCIEPutCmdInfo(NVMEPCIEQueueInfo *qinfo, NVMEPCIECmdInfo *cmdInfo)
    if (!ctrlr->abortEnabled) {
       NVMEPCIEPushCmdInfo(qinfo, cmdInfo);
    }
-   DPRINT_CMD(ctrlr, "Put cmd Info [%d] %p back to queue [%d], nrAct: %d.",
+   DPRINT_CMD(ctrlr, "Put cmdInfo [%d] %p back to queue [%d], nrAct: %d.",
               cmdInfo->cmdId, cmdInfo, qinfo->id,
               vmk_AtomicRead32(&qinfo->cmdList->nrAct));
 }
@@ -1239,7 +1247,6 @@ NVMEPCIECompleteAsyncCommand(NVMEPCIEQueueInfo *qinfo,
 {
    vmk_NvmeCommand *vmkCmd = cmdInfo->vmkCmd;
    vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_PCIE_CMD_STATUS_DONE);
-   NVMEPCIEDumpCommand(qinfo->ctrlr, vmkCmd);
 #if NVME_PCIE_BLOCKSIZE_AWARE
    vmk_uint16 bs = NVMEPCIEGetCmdBlockSize(vmkCmd);
    if (qinfo->ctrlr->blkSizeAwarePollEnabled && (bs > 0) &&
@@ -1341,6 +1348,8 @@ NVMEPCIEIssueCommandToHw(NVMEPCIEQueueInfo *qinfo,
    }
 
    vmk_Memcpy(&sqInfo->subq[tail], &cmdInfo->vmkCmd->nvmeCmd, VMK_NVME_SQE_SIZE);
+   DPRINT_CMD(qinfo->ctrlr, "Issue cmdInfo [%d] %p vmkCmd %p to sq %d, tail %d.",
+              cmdInfo->cmdId, cmdInfo, cmdInfo->vmkCmd, qinfo->id, tail);
    NVMEPCIEDumpSqe(qinfo->ctrlr, &cmdInfo->vmkCmd->nvmeCmd);
    if (!qinfo->ctrlr->abortEnabled) {
       sqInfo->subq[tail].cdw0.cid = cmdInfo->cmdId;
@@ -1752,31 +1761,42 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
       if (cqEntry->dw3.p != phase) {
          break;
       }
+      NVMEPCIEDumpCqe(ctrlr, cqEntry);
+
       cid = (ctrlr->abortEnabled) ? cqEntry->dw3.cid : cqEntry->dw3.cid - 1;
       if (VMK_UNLIKELY(cid >= cmdList->idCount)) {
-         EPRINT(ctrlr, "Invalid cid %d", cid);
-         NVMEPCIEDumpCqe(ctrlr, cqEntry);
+         EPRINT(ctrlr, "Invalid cid %d, qid: %d", cid, qinfo->id);
          VMK_ASSERT(0);
          goto skip_invalid_cqe;
       }
       cmdInfo = &cmdList->list[cid];
 
       if (VMK_UNLIKELY(cmdInfo->vmkCmd == NULL)) {
-         EPRINT(ctrlr, "NULL cmdInfo->vmkCmd, cid %d", cid);
-         NVMEPCIEDumpCqe(ctrlr, cqEntry);
+         EPRINT(ctrlr, "NULL cmdInfo->vmkCmd, qid: %d, cid: %d, cmdInfo: %p, type: %d, status: %d",
+                qinfo->id, cid, cmdInfo, cmdInfo->type, vmk_AtomicRead32(&cmdInfo->atomicStatus));
          VMK_ASSERT(0);
          goto skip_invalid_cqe;
       }
 
       sqHead = cqEntry->dw2.sqhd;
       if (VMK_UNLIKELY(sqHead >= (vmk_uint16)sqInfo->qsize)) {
-         EPRINT(ctrlr, "Invalid sqhd 0x%x returned from controller for qid %d, cid 0x%x",
-                sqHead, qinfo->id, cmdInfo->vmkCmd->nvmeCmd.cdw0.cid);
+         EPRINT(ctrlr, "Invalid sqhd %d, qid: %d, cid: %d",
+                sqHead, qinfo->id, cid);
          VMK_ASSERT(0);
          goto skip_invalid_cqe;
       } else {
          vmk_AtomicWrite32(&sqInfo->pendingHead, (vmk_uint32)sqHead);
       }
+
+      if (vmk_AtomicRead32(&cmdInfo->atomicStatus) != NVME_PCIE_CMD_STATUS_ACTIVE &&
+          vmk_AtomicRead32(&cmdInfo->atomicStatus) != NVME_PCIE_CMD_STATUS_FREE_ON_COMPLETE) {
+         EPRINT(ctrlr, "Inactive command %p, qid: %d, cid: %d, vmkCmd: %p, type: %d, status: %d",
+                cmdInfo, qinfo->id, cid, cmdInfo->vmkCmd,
+                cmdInfo->type, vmk_AtomicRead32(&cmdInfo->atomicStatus));
+         VMK_ASSERT(0);
+         goto skip_invalid_cqe;
+      }
+
       vmk_Memcpy(&cmdInfo->vmkCmd->cqEntry,
                  cqEntry,
                  VMK_NVME_CQE_SIZE);
@@ -1811,8 +1831,20 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
          }
       }
 #endif
+
+      DPRINT_CMD(ctrlr, "Complete cmdInfo %p, qid: %d, cid: %d, vmkCmd: %p, "
+                 "type: %d, nvmeStatus: 0x%x, cqe: %p, cqHead: %d, "
+                 "sqHead: %d, lat: %lu",
+                 cmdInfo, qinfo->id, cid, cmdInfo->vmkCmd, cmdInfo->type,
+                 cmdInfo->vmkCmd->nvmeStatus, cqEntry, head, sqHead,
+                 cmdInfo->statsOn? vmk_TimerUnsignedTCToUS(cmdInfo->vmkCmd->deviceLatency) : 0);
       if (cmdInfo->done) {
          cmdInfo->done(qinfo, cmdInfo);
+      } else {
+         EPRINT(ctrlr, "NULL done function, qid: %d, cid: %d, cmdInfo: %p, vmkCmd: %p, type: %d, status: %d",
+                qinfo->id, cid, cmdInfo, cmdInfo->vmkCmd,
+                cmdInfo->type, vmk_AtomicRead32(&cmdInfo->atomicStatus));
+         VMK_ASSERT(0);
       }
 
 skip_invalid_cqe:
@@ -1904,7 +1936,7 @@ CreateCq(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo)
    }
 
    if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_GC_SUCCESS) {
-      DPRINT_Q(ctrlr, "cq [%d] created", qinfo->sqInfo->id);
+      DPRINT_Q(ctrlr, "cq [%d] created", qinfo->cqInfo->id);
    } else {
       EPRINT(ctrlr, "Create cq command failed, 0x%x", vmkCmd->nvmeStatus);
       vmkStatus = VMK_FAILURE;

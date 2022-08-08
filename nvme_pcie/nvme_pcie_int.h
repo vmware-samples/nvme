@@ -54,7 +54,7 @@ extern int nvmePCIEBlkSizeAwarePollEnabled;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.1"
+#define NVME_PCIE_DRIVER_VERSION "1.2.4.2"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -513,6 +513,4 @@ void NVMEPCIEDumpSqe(NVMEPCIEController *ctrlr,
                      vmk_NvmeSubmissionQueueEntry *sqe);
 void NVMEPCIEDumpCqe(NVMEPCIEController *ctrlr,
                      vmk_NvmeCompletionQueueEntry *cqe);
-void NVMEPCIEDumpCommand(NVMEPCIEController *ctrlr,
-                         vmk_NvmeCommand *vmkCmd);
 #endif // ifndef _NVME_PCIE_INT_H_
