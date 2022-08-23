@@ -1,3 +1,6 @@
+# Copyright (c) 2015-2022 VMware, Inc. All rights reserved.
+# VMware Confidential
+#
 # Makefile
 #
 # This builds the Userworld Tool binary for the example being packaged here.
@@ -210,7 +213,11 @@ else
 ifeq ($(DESC_ESX_VERSION),7.0.3)
 VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_9_0_0
 else
+ifeq ($(DESC_ESX_VERSION),8.0.0)
 VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_10_0_0
+else
+VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_11_0_0
+endif
 endif
 endif
 endif
