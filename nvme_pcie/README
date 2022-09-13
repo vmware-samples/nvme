@@ -6,6 +6,12 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2022/8/29 1.2.4.3-1vmw
+
+   Fix PR #3010532: Performance drops if the workload is around the previous polling
+                    activation conditions, which will cause unexpected switch between
+                    polling and interrupt frequently.
+
 2022/8/4 1.2.4.2-1vmw
 
    1. Fix PR #3008867: Skip the inactive command to avoid double completion.

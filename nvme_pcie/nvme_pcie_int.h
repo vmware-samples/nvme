@@ -38,9 +38,17 @@
 #if NVME_PCIE_STORAGE_POLL
 extern int nvmePCIEPollEnabled;
 extern vmk_uint64 nvmePCIEPollInterval;
-extern vmk_uint32 nvmePCIEPollThr;
-// IOPs threshold to enable polling per queue, currently 100k
-#define NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE (100 * 1024)
+extern vmk_uint32 nvmePCIEPollOIOThr;
+extern vmk_uint32 nvmePCIEPollIOpsThr;
+// IOPs threshold to enable polling per queue, default 25k per 0.1 second
+extern vmk_uint32 nvmePCIEPollIOpsThr0;
+/**
+ * IOPs threshold to skip IOPs Regulator Valve per queue, default
+ * (nvmePCIEPollIOpsThr0 + 5k)  per 0.1 second
+ */
+extern vmk_uint32 nvmePCIEPollIOpsThr1;
+// Time of IOPs regulation, currently one second
+#define NVME_PCIE_POLL_IOPS_REGULATOR_VALVE_TIME (VMK_USEC_PER_SEC)
 #if NVME_PCIE_BLOCKSIZE_AWARE
 extern int nvmePCIEBlkSizeAwarePollEnabled;
 #endif
@@ -54,7 +62,7 @@ extern int nvmePCIEBlkSizeAwarePollEnabled;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.2"
+#define NVME_PCIE_DRIVER_VERSION "1.2.4.3"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -92,8 +100,8 @@ extern int nvmePCIEBlkSizeAwarePollEnabled;
 #define NVME_PCIE_SYNC_CMD_NUM 10
 #define NVME_PCIE_SYNC_CMD_ID 0xffff
 
-// Time interval (one second) of recording IOPs for a queue
-#define NVME_PCIE_IOPS_RECORD_FREQ VMK_USEC_PER_SEC
+// Time interval (0.1 second) of recording IOPs for a queue
+#define NVME_PCIE_IOPS_RECORD_FREQ (VMK_USEC_PER_SEC / 10)
 
 typedef struct NVMEPCIEController NVMEPCIEController;
 typedef struct NVMEPCIECmdInfo NVMEPCIECmdInfo;
@@ -248,6 +256,8 @@ typedef struct NVMEPCIEQueueInfo {
    vmk_atomic8 isPollHdlrEnabled;
    // StoragePoll handler. Set as NULL, if failed to create
    vmk_StoragePoll pollHandler;
+   // Time stamp of IOPs Regulator Valve activation
+   vmk_atomic64 pollRegValveTime;
 #endif
    /**
     * Will update per second by 'iopsTimer'
@@ -486,6 +496,7 @@ void NVMEPCIEStoragePollEnable(NVMEPCIEQueueInfo *qinfo);
 void NVMEPCIEStoragePollDisable(NVMEPCIEQueueInfo *qinfo);
 void NVMEPCIEStoragePollDestory(NVMEPCIEQueueInfo *qinfo);
 vmk_Bool NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo);
+vmk_Bool NVMEPCIEStoragePollIOpsRegValveSwitch(NVMEPCIEQueueInfo *qinfo);
 #endif
 
 #if NVME_PCIE_BLOCKSIZE_AWARE
