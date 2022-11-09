@@ -1485,7 +1485,7 @@ NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,   // IN
           * TODO:
           * Delay time, may be determined dynamically in future.
           */
-         vmk_WorldSleep(10);
+         vmk_WorldSleep(50);
       } else {
          break;
       }
@@ -1593,51 +1593,6 @@ NVMEPCIEStoragePollDestory(NVMEPCIEQueueInfo *qinfo)
 }
 
 /**
- * Whether to switch to polling mode using IOPs Regulator Valve.
- *
- * @param[in]  qinfo       Queue instance
- *
- * @return                 Whether to switch to polling mode
- */
-vmk_Bool
-NVMEPCIEStoragePollIOpsRegValveSwitch(NVMEPCIEQueueInfo *qinfo)
-{
-   NVMEPCIEController *ctrlr = qinfo->ctrlr;
-   vmk_Bool doSwitch = VMK_FALSE;
-   vmk_atomic32 *iopsLastSecPtr;
-
-   iopsLastSecPtr = (ctrlr->iopsTimer != VMK_INVALID_TIMER) ?
-                    &qinfo->iopsLastSec : NULL;
-
-   vmk_SpinlockLock(qinfo->cqInfo->lock);
-
-   if ((iopsLastSecPtr != NULL) && (vmk_AtomicRead32(iopsLastSecPtr) >=
-                                    nvmePCIEPollIOpsThr1)) {
-      qinfo->pollRegValveTime = 0;
-
-      doSwitch = VMK_TRUE;
-      goto exit_poll_iops_reg_valve_switch;
-   }
-
-   if (!qinfo->pollRegValveTime) {
-      doSwitch = (iopsLastSecPtr != NULL) &&
-                 (vmk_AtomicRead32(iopsLastSecPtr) >=
-                  nvmePCIEPollIOpsThr0);
-      if (!doSwitch) {
-         qinfo->pollRegValveTime = NVMEPCIEGetTimerUs();
-      }
-   } else if ((NVMEPCIEGetTimerUs() - qinfo->pollRegValveTime) >=
-              NVME_PCIE_POLL_IOPS_REGULATOR_VALVE_TIME) {
-      qinfo->pollRegValveTime = 0;
-   }
-
-exit_poll_iops_reg_valve_switch:
-   vmk_SpinlockUnlock(qinfo->cqInfo->lock);
-
-   return doSwitch;
-}
-
-/**
  * Whether to switch to polling mode determining by some strategies.
  *
  * @param[in]  qinfo       Queue instance
@@ -1647,10 +1602,18 @@ exit_poll_iops_reg_valve_switch:
 vmk_Bool
 NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
 {
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
    vmk_Bool pollEnabled = qinfo->ctrlr->pollEnabled;
    vmk_atomic32 *nrActPtr = &qinfo->cmdList->nrAct;
+   vmk_atomic32 *iopsLastSecPtr;
    vmk_Bool doSwitch = VMK_FALSE;
 
+   /**
+    * If 'iopsTimer' is invalid, queue's 'iopsLastSec' will never be reset,
+    * thus, mark 'iopsLastSec' as invalid by setting 'iopsLastSecPtr' as NULL.
+    */
+   iopsLastSecPtr = (ctrlr->iopsTimer != VMK_INVALID_TIMER) ?
+                    &qinfo->iopsLastSec : NULL;
    /**
     * Just poll for IO queues if StoragePoll feature enabled and handler
     * created successfully.
@@ -1661,10 +1624,13 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
        *
        * 1. If OIO is adequate, it is appropriate to replace a large quantity
        *    of interrupts by polling
-       * 2. Use IOPs Regulaor Valve to stabilizing performance
+       * 2. If IOPs is greater than 'NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE',
+       *    but the OIO is low, device may have low latency feature, enable
+       *    polling as well
        */
-      if ((vmk_AtomicRead32(nrActPtr) >= nvmePCIEPollOIOThr) ||
-          NVMEPCIEStoragePollIOpsRegValveSwitch(qinfo)) {
+      if ((vmk_AtomicRead32(nrActPtr) >= nvmePCIEPollThr) ||
+          ((iopsLastSecPtr != NULL) && (vmk_AtomicRead32(iopsLastSecPtr) >=
+           NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE))) {
 #if NVME_PCIE_BLOCKSIZE_AWARE
          if (NVMEPCIEStoragePollBlkSizeAwareSwitch(qinfo)) {
             doSwitch = VMK_TRUE;

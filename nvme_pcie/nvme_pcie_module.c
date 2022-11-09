@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -32,25 +32,17 @@ VMK_MODPARAM(nvmePCIEPollEnabled, int, "NVMe PCIe hybrid poll enable,"
                                        " MSIX interrupt must be enabled."
                                        " Default enabled.");
 
-vmk_uint32 nvmePCIEPollOIOThr = 30;
-VMK_MODPARAM(nvmePCIEPollOIOThr, uint, "NVMe PCIe hybrid poll threshold of"
-                                       " automatic switch from interrupt to"
-                                       " poll. Valid if poll enabled. Default"
-                                       " 30 OIO commands per IO queue.");
-
-vmk_uint32 nvmePCIEPollIOpsThr = 250;
-VMK_MODPARAM(nvmePCIEPollIOpsThr, uint, "NVMe PCIe hybrid poll threshold of"
-                                        " automatic switch from interrupt to"
-                                        " poll. Valid if poll enabled. Default"
-                                        " 250(k) IOPs per IO queue.");
+vmk_uint32 nvmePCIEPollThr = 30;
+VMK_MODPARAM(nvmePCIEPollThr, uint, "NVMe PCIe hybrid poll threshold of"
+                                    " automatic switch from interrupt to poll."
+                                    " Valid if poll enabled. Default 30 OIO"
+                                    " commands per IO queue.");
 
 vmk_uint64 nvmePCIEPollInterval = 0;
 VMK_MODPARAM(nvmePCIEPollInterval, uint, "NVMe PCIe hybrid poll least interval"
                                          " between each poll in microseconds."
                                          " Valid if poll enabled. Default"
                                          " 0us.");
-vmk_uint32 nvmePCIEPollIOpsThr0;
-vmk_uint32 nvmePCIEPollIOpsThr1;
 
 #if NVME_PCIE_BLOCKSIZE_AWARE
 int nvmePCIEBlkSizeAwarePollEnabled = 1;
@@ -93,11 +85,6 @@ init_module(void)
 
    NVMEPCIELogNoHandle("Loading driver %s.", NVME_PCIE_DRIVER_IDENT);
    NVMEPCIEValidateModuleParameter();
-
-#if NVME_PCIE_STORAGE_POLL
-   nvmePCIEPollIOpsThr0 = (nvmePCIEPollIOpsThr / 10) << 10;
-   nvmePCIEPollIOpsThr1 = nvmePCIEPollIOpsThr0 + (5 << 10);
-#endif
 
    /* Always initialize heap in the first place. */
    vmkStatus = HeapCreate();
