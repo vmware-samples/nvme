@@ -1,0 +1,27 @@
+# Copyright (c) 2022 VMware, Inc. All rights reserved.
+# # VMware Confidential
+
+""" Driver definition for nvme_pcie driver.
+"""
+
+load(
+    "//bora/bazel/esx:device_driver.bzl",
+    "device_driver",
+)
+
+device_driver(
+    name = "nvme_pcie",
+    vendor = "VMware",
+    version = "1.2.4.4",
+    binary_compat = "yes",
+    version_bump = '1',
+    license = "BSD",
+    srcs = [
+        "nvme_pcie.c",
+        "nvme_pcie_adapter.c",
+        "nvme_pcie_debug.c",
+        "nvme_pcie_driver.c",
+        "nvme_pcie_module.c",
+        "nvme_pcie_os.c",
+    ],
+)
