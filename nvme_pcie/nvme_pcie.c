@@ -624,7 +624,7 @@ QueueConstruct(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo,
 #endif
 
 #if NVME_PCIE_STORAGE_POLL
-   if (ctrlr->pollEnabled && (qinfo->id > 0)) {
+   if (qinfo->id > 0) {
       NVMEPCIEStoragePollCreate(qinfo);
    }
 #endif
@@ -676,15 +676,10 @@ QueueDestroy(NVMEPCIEQueueInfo *qinfo)
 #endif
 
 #if NVME_PCIE_STORAGE_POLL
-   /**
-    * Destroy poll handler if StoragePoll feature enabled and handler created
-    * successfully
-    */
-   if (ctrlr->pollEnabled) {
-      DPRINT_Q(ctrlr, "Start destroy poll handler of queue %d.", qinfo->id);
-      NVMEPCIEStoragePollDestory(qinfo);
-      DPRINT_Q(ctrlr, "Finish destroy poll handler of queue %d.", qinfo->id);
-   }
+   // Destroy poll handler if StoragePoll handler created successfully
+   DPRINT_Q(ctrlr, "Start destroy poll handler of queue %d.", qinfo->id);
+   NVMEPCIEStoragePollDestory(qinfo);
+   DPRINT_Q(ctrlr, "Finish destroy poll handler of queue %d.", qinfo->id);
 #endif
 
    vmkStatus = CmdInfoListDestroy(qinfo);
@@ -993,6 +988,33 @@ NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd)
 }
 
 /**
+ * Whether 'vmkCmd' is a small block size IO command.
+ *
+ * @param[in] qid      Queue ID
+ * @param[in] vmkCmd   'vmk_NvmeCommand' type command
+ *
+ * @return VMK_TRUE   'vmkCmd' is a small block size IO command
+ * @return VMK_FALSE  'vmkCmd' is not a small block size IO command
+ */
+inline vmk_Bool
+NVMEPCIEIsSmallBsIoCmd(vmk_uint32 qid,
+                       vmk_NvmeCommand *vmkCmd)
+{
+   vmk_Bool ret = VMK_FALSE;
+   vmk_uint16 bs;
+
+   if (qid > 0) {
+      bs = NVMEPCIEGetCmdBlockSize(vmkCmd);
+
+      if ((bs > 0) && (bs <= NVME_PCIE_SMALL_BLOCKSIZE)) {
+         ret = VMK_TRUE;
+      }
+   }
+
+   return ret;
+}
+
+/**
  * Submit a command to a queue
  *
  * @param[in] ctrlr   Controller instance
@@ -1011,9 +1033,6 @@ NVMEPCIESubmitAsyncCommand(NVMEPCIEController *ctrlr,
    NVMEPCIEQueueInfo *qinfo;
    vmk_NvmeStatus nvmeStatus;
    vmk_uint16 cid;
-#if NVME_PCIE_BLOCKSIZE_AWARE
-   vmk_uint16 bs = NVMEPCIEGetCmdBlockSize(vmkCmd);
-#endif
 
    qinfo = &ctrlr->queueList[qid];
    vmk_AtomicInc32(&qinfo->refCount);
@@ -1042,8 +1061,8 @@ NVMEPCIESubmitAsyncCommand(NVMEPCIEController *ctrlr,
    }
 
 #if NVME_PCIE_BLOCKSIZE_AWARE
-   if (ctrlr->blkSizeAwarePollEnabled && (bs > 0) &&
-       (bs <= NVME_PCIE_SMALL_BLOCKSIZE)) {
+   if (vmk_AtomicRead8(&ctrlr->blkSizeAwarePollAct) &&
+       NVMEPCIEIsSmallBsIoCmd(qid, vmkCmd)) {
       vmk_AtomicInc32(&qinfo->cmdList->nrActSmall);
    }
 #endif
@@ -1057,8 +1076,8 @@ NVMEPCIESubmitAsyncCommand(NVMEPCIEController *ctrlr,
       vmkCmd->nvmeStatus = nvmeStatus;
       WPRINT(ctrlr, "Failed to issue command %d, 0x%x", cmdInfo->cmdId, nvmeStatus);
 #if NVME_PCIE_BLOCKSIZE_AWARE
-      if (qinfo->ctrlr->blkSizeAwarePollEnabled && (bs > 0) &&
-          (bs <= NVME_PCIE_SMALL_BLOCKSIZE)) {
+      if (vmk_AtomicRead8(&ctrlr->blkSizeAwarePollAct) &&
+          NVMEPCIEIsSmallBsIoCmd(qid, vmkCmd)) {
          vmk_AtomicDec32(&qinfo->cmdList->nrActSmall);
       }
 #endif
@@ -1245,12 +1264,12 @@ static void
 NVMEPCIECompleteAsyncCommand(NVMEPCIEQueueInfo *qinfo,
                              NVMEPCIECmdInfo *cmdInfo)
 {
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
    vmk_NvmeCommand *vmkCmd = cmdInfo->vmkCmd;
    vmk_AtomicWrite32(&cmdInfo->atomicStatus, NVME_PCIE_CMD_STATUS_DONE);
 #if NVME_PCIE_BLOCKSIZE_AWARE
-   vmk_uint16 bs = NVMEPCIEGetCmdBlockSize(vmkCmd);
-   if (qinfo->ctrlr->blkSizeAwarePollEnabled && (bs > 0) &&
-       (bs <= NVME_PCIE_SMALL_BLOCKSIZE)) {
+   if (vmk_AtomicRead8(&ctrlr->blkSizeAwarePollAct) &&
+       NVMEPCIEIsSmallBsIoCmd(qinfo->id, vmkCmd)) {
       vmk_AtomicDec32(&qinfo->cmdList->nrActSmall);
    }
 #endif
@@ -1481,11 +1500,7 @@ NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,   // IN
       if (cqEntry->dw3.p != phase) {
          tryPollTimes++;
 
-         /**
-          * TODO:
-          * Delay time, may be determined dynamically in future.
-          */
-         vmk_WorldSleep(50);
+         vmk_WorldSleep(vmk_AtomicRead64(&qinfo->ctrlr->pollInterval));
       } else {
          break;
       }
@@ -1541,8 +1556,6 @@ NVMEPCIEStoragePollCreate(NVMEPCIEQueueInfo *qinfo)
          /** Set as NULL to claim that failed to create poll handler */
          qinfo->pollHandler = NULL;
          vmk_AtomicWrite8(&qinfo->isPollHdlrEnabled, VMK_FALSE);
-      } else {
-         vmk_StoragePollSetInterval(qinfo->pollHandler, nvmePCIEPollInterval);
       }
    }
 }
@@ -1603,7 +1616,6 @@ vmk_Bool
 NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
 {
    NVMEPCIEController *ctrlr = qinfo->ctrlr;
-   vmk_Bool pollEnabled = qinfo->ctrlr->pollEnabled;
    vmk_atomic32 *nrActPtr = &qinfo->cmdList->nrAct;
    vmk_atomic32 *iopsLastSecPtr;
    vmk_Bool doSwitch = VMK_FALSE;
@@ -1618,7 +1630,8 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
     * Just poll for IO queues if StoragePoll feature enabled and handler
     * created successfully.
     */
-   if (pollEnabled && VMK_LIKELY(qinfo->pollHandler != NULL)) {
+   if (vmk_AtomicRead8(&ctrlr->pollAct) &&
+       VMK_LIKELY(qinfo->pollHandler != NULL)) {
       /**
        * Activate polling Strategy
        *
@@ -1628,7 +1641,8 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
        *    but the OIO is low, device may have low latency feature, enable
        *    polling as well
        */
-      if ((vmk_AtomicRead32(nrActPtr) >= nvmePCIEPollThr) ||
+      if ((vmk_AtomicRead32(nrActPtr) >=
+           vmk_AtomicRead32(&ctrlr->pollOIOThr)) ||
           ((iopsLastSecPtr != NULL) && (vmk_AtomicRead32(iopsLastSecPtr) >=
            NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE))) {
 #if NVME_PCIE_BLOCKSIZE_AWARE
@@ -1659,7 +1673,7 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
 inline vmk_Bool
 NVMEPCIEStoragePollBlkSizeAwareSwitch(NVMEPCIEQueueInfo *qinfo)
 {
-   vmk_Bool blkSizeAwarePollEnabled = qinfo->ctrlr->blkSizeAwarePollEnabled;
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
    vmk_atomic32 *nrActPtr = &qinfo->cmdList->nrAct;
    vmk_atomic32 *nrActSmallPtr = &qinfo->cmdList->nrActSmall;
    vmk_Bool doSwitch = VMK_TRUE;
@@ -1670,8 +1684,8 @@ NVMEPCIEStoragePollBlkSizeAwareSwitch(NVMEPCIEQueueInfo *qinfo)
     * If the number of small block size OIO is less than half of total
     * OIO, use interruption to avoid inefficiency.
     */
-   if ((blkSizeAwarePollEnabled) && (vmk_AtomicRead32(nrActPtr) >
-       (vmk_AtomicRead32(nrActSmallPtr) << 1))) {
+   if (vmk_AtomicRead8(&ctrlr->blkSizeAwarePollAct) &&
+       (vmk_AtomicRead32(nrActPtr) > (vmk_AtomicRead32(nrActSmallPtr) << 1))) {
       doSwitch = VMK_FALSE;
    }
 
@@ -2054,14 +2068,12 @@ void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo)
 
 #if NVME_PCIE_STORAGE_POLL
    /**
-    * Disable poll handler and re-enable interrupt if StoragePoll feature
-    * enabled and handler created successfully
+    * Disable poll handler and re-enable interrupt if StoragePoll handler
+    * created successfully.
     */
-   if (ctrlr->pollEnabled) {
-      DPRINT_Q(ctrlr, "Start disable polling of queue %d.", qinfo->id);
-      NVMEPCIEStoragePollDisable(qinfo);
-      DPRINT_Q(ctrlr, "Finish disable polling of queue %d.", qinfo->id);
-   }
+   DPRINT_Q(ctrlr, "Start disable polling of queue %d.", qinfo->id);
+   NVMEPCIEStoragePollDisable(qinfo);
+   DPRINT_Q(ctrlr, "Finish disable polling of queue %d.", qinfo->id);
 #endif
 
    NVMEPCIEDisableIntr(qinfo, VMK_TRUE);
@@ -2079,7 +2091,6 @@ void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo)
 VMK_ReturnStatus
 NVMEPCIEResumeQueue(NVMEPCIEQueueInfo *qinfo)
 {
-   NVMEPCIEController *ctrlr = qinfo->ctrlr;
    VMK_ReturnStatus vmkStatus = VMK_OK;
    NVMEPCIEQueueState state;
 
@@ -2090,13 +2101,8 @@ NVMEPCIEResumeQueue(NVMEPCIEQueueInfo *qinfo)
    }
 
 #if NVME_PCIE_STORAGE_POLL
-   /**
-    * Enable poll handler if StoragePoll feature enabled and handler created
-    * successfully
-    */
-   if (ctrlr->pollEnabled) {
-      NVMEPCIEStoragePollEnable(qinfo);
-   }
+   // Enable poll handler if StoragePoll handler created successfully
+   NVMEPCIEStoragePollEnable(qinfo);
 #endif
 
    NVMEPCIEEnableIntr(qinfo);

@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2021 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -27,28 +27,28 @@ vmk_uint32 nvmePCIEFakeAdminQSize = 0;
 VMK_MODPARAM(nvmePCIEFakeAdminQSize, uint, "NVMe PCIe fake ADMIN queue size. 0's based");
 
 #if NVME_PCIE_STORAGE_POLL
-int nvmePCIEPollEnabled = 1;
-VMK_MODPARAM(nvmePCIEPollEnabled, int, "NVMe PCIe hybrid poll enable,"
-                                       " MSIX interrupt must be enabled."
-                                       " Default enabled.");
+int nvmePCIEPollAct = 1;
+VMK_MODPARAM(nvmePCIEPollAct, int, "NVMe PCIe hybrid poll activate,"
+                                   " MSIX interrupt must be enabled."
+                                   " Default activated.");
 
-vmk_uint32 nvmePCIEPollThr = 30;
-VMK_MODPARAM(nvmePCIEPollThr, uint, "NVMe PCIe hybrid poll threshold of"
-                                    " automatic switch from interrupt to poll."
-                                    " Valid if poll enabled. Default 30 OIO"
-                                    " commands per IO queue.");
+vmk_uint32 nvmePCIEPollOIOThr = 30;
+VMK_MODPARAM(nvmePCIEPollOIOThr, uint, "NVMe PCIe hybrid poll OIO threshold of"
+                                       " automatic switch from interrupt to"
+                                       " poll. Valid if poll activated. Default"
+                                       " 30 OIO commands per IO queue.");
 
-vmk_uint64 nvmePCIEPollInterval = 0;
-VMK_MODPARAM(nvmePCIEPollInterval, uint, "NVMe PCIe hybrid poll least interval"
+vmk_uint64 nvmePCIEPollInterval = 50;
+VMK_MODPARAM(nvmePCIEPollInterval, uint, "NVMe PCIe hybrid poll interval"
                                          " between each poll in microseconds."
-                                         " Valid if poll enabled. Default"
-                                         " 0us.");
+                                         " Valid if poll activated. Default"
+                                         " 50us.");
 
 #if NVME_PCIE_BLOCKSIZE_AWARE
-int nvmePCIEBlkSizeAwarePollEnabled = 1;
-VMK_MODPARAM(nvmePCIEBlkSizeAwarePollEnabled, int, "NVMe PCIe block size aware"
-                                                   " poll enable. Valid if poll"
-                                                   " enabled. Default enabled.");
+int nvmePCIEBlkSizeAwarePollAct = 1;
+VMK_MODPARAM(nvmePCIEBlkSizeAwarePollAct, int, "NVMe PCIe block size aware"
+                                               " poll activate. Valid if poll"
+                                               " activated. Default activated.");
 #endif
 #endif
 

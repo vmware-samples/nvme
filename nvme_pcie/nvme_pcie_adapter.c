@@ -10,6 +10,7 @@
  */
 
 #include "nvme_pcie_int.h"
+#include "nvme_pcie_mgmt.h"
 
 extern int nvmePCIEDma4KSwitch;
 extern vmk_uint32 nvmePCIEFakeAdminQSize;
@@ -117,11 +118,12 @@ NotifyAdapterIOAllowed(vmk_NvmeAdapter adapter,
 
    IPRINT(ctrlr, "IOAllowed: %d.", ioAllowed);
 
+   if (ioAllowed) {
 #if NVME_PCIE_STORAGE_POLL
-   if (ioAllowed && ctrlr->pollEnabled) {
       NVMEPCIEStoragePollSetup(ctrlr);
-   }
 #endif
+      NVMEPCIEKeyValInit(ctrlr);
+   }
 }
 
 /**
@@ -808,6 +810,16 @@ NVMEPCIEControllerInit(NVMEPCIEController *ctrlr)
    NVMEPCIECreateIOPsTimer(ctrlr);
    NVMEPCIEStartIOPsTimer(ctrlr);
 
+   // Init StoragePoll related configs
+#if NVME_PCIE_STORAGE_POLL
+   ctrlr->pollAct = nvmePCIEPollAct && (!nvmePCIEMsiEnbaled);
+   ctrlr->pollOIOThr = nvmePCIEPollOIOThr;
+   ctrlr->pollInterval = nvmePCIEPollInterval;
+#if NVME_PCIE_BLOCKSIZE_AWARE
+   ctrlr->blkSizeAwarePollAct = ctrlr->pollAct && nvmePCIEBlkSizeAwarePollAct;
+#endif
+#endif
+
    return VMK_OK;
 }
 
@@ -846,6 +858,7 @@ NVMEPCIEDestroyIOPsTimer(NVMEPCIEController *ctrlr)
 VMK_ReturnStatus
 NVMEPCIEControllerDestroy(NVMEPCIEController *ctrlr)
 {
+   NVMEPCIEKeyValDestory(ctrlr);
    NVMEPCIEStopIOPsTimer(ctrlr);
    NVMEPCIEDestroyIOPsTimer(ctrlr);
    vmk_NvmeUnregisterController(ctrlr->osRes.vmkController);

@@ -32,7 +32,7 @@ nvme_pcie_identification = {
    "binary compat"   : "yes",
    "summary"         : "Non-Volatile memory controller driver",
    "description"     : "Non-Volatile memory controller driver",
-   "version"         : "1.2.4.4",
+   "version"         : "1.2.4.5",
    "version_bump"    : 1,
    "license"         : VMK_MODULE_LICENSE_BSD,
    "vendor"          : "VMware",
@@ -45,12 +45,14 @@ nvme_pcie_identification = {
 #
 module_def = {
    "identification"  : nvme_pcie_identification,
-   "source files"    : [ "nvme_pcie_module.c",
-                        "nvme_pcie_os.c",
-                        "nvme_pcie_driver.c",
-                        "nvme_pcie_adapter.c",
-                        "nvme_pcie.c",
-                         "nvme_pcie_debug.c"
+   "source files"    : [
+      "nvme_pcie.c",
+      "nvme_pcie_adapter.c",
+      "nvme_pcie_debug.c",
+      "nvme_pcie_driver.c",
+      "nvme_pcie_mgmt.c",
+      "nvme_pcie_module.c",
+      "nvme_pcie_os.c",
                        ],
    "includes"        : [
                        ],

@@ -11,17 +11,18 @@ load(
 
 device_driver(
     name = "nvme_pcie",
-    vendor = "VMware",
-    version = "1.2.4.4",
-    binary_compat = "yes",
-    version_bump = '1',
-    license = "BSD",
     srcs = [
         "nvme_pcie.c",
         "nvme_pcie_adapter.c",
         "nvme_pcie_debug.c",
         "nvme_pcie_driver.c",
+        "nvme_pcie_mgmt.c",
         "nvme_pcie_module.c",
         "nvme_pcie_os.c",
     ],
+    binary_compat = "yes",
+    license = "BSD",
+    vendor = "VMware",
+    version = "1.2.4.5",
+    version_bump = "1",
 )

@@ -36,13 +36,13 @@
 #define NVME_STATS 1
 
 #if NVME_PCIE_STORAGE_POLL
-extern int nvmePCIEPollEnabled;
+extern int nvmePCIEPollAct;
 extern vmk_uint64 nvmePCIEPollInterval;
-extern vmk_uint32 nvmePCIEPollThr;
+extern vmk_uint32 nvmePCIEPollOIOThr;
 // IOPs threshold to enable polling per queue, currently 100k
 #define NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE (100 * 1024)
 #if NVME_PCIE_BLOCKSIZE_AWARE
-extern int nvmePCIEBlkSizeAwarePollEnabled;
+extern int nvmePCIEBlkSizeAwarePollAct;
 #endif
 #endif
 
@@ -54,7 +54,7 @@ extern int nvmePCIEBlkSizeAwarePollEnabled;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.4"
+#define NVME_PCIE_DRIVER_VERSION "1.2.4.5"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -94,6 +94,8 @@ extern int nvmePCIEBlkSizeAwarePollEnabled;
 
 // Time interval (one second) of recording IOPs for a queue
 #define NVME_PCIE_IOPS_RECORD_FREQ VMK_USEC_PER_SEC
+
+#define NVME_PCIE_KV_MGMT_VERSION (VMK_REVISION_FROM_NUMBERS(1,0,0,0))
 
 typedef struct NVMEPCIEController NVMEPCIEController;
 typedef struct NVMEPCIECmdInfo NVMEPCIECmdInfo;
@@ -287,11 +289,19 @@ typedef struct NVMEPCIEController {
    // Timer hanndler to record IOPs
    vmk_Timer iopsTimer;
 #if NVME_PCIE_STORAGE_POLL
-   vmk_Bool pollEnabled;
+   /**
+    * Always setup poll handlers, and it depends on 'pollAct' to activate
+    * poll routine.
+    */
+   vmk_atomic8 pollAct;
+   vmk_atomic32 pollOIOThr;
+   vmk_atomic64 pollInterval;
 #endif
 #if NVME_PCIE_BLOCKSIZE_AWARE
-   vmk_Bool blkSizeAwarePollEnabled;
+   vmk_atomic8 blkSizeAwarePollAct;
 #endif
+   vmk_MgmtHandle kvMgmtHandle;
+   vmk_MgmtApiSignature kvMgmtSig;
 } NVMEPCIEController;
 
 /**
@@ -468,6 +478,8 @@ void NVMEPCIEEnableIntr(NVMEPCIEQueueInfo *qinfo);
 void NVMEPCIEDisableIntr(NVMEPCIEQueueInfo *qinfo, vmk_Bool intrSync);
 
 vmk_uint16 NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd);
+vmk_Bool NVMEPCIEIsSmallBsIoCmd(vmk_uint32 qid,
+                                vmk_NvmeCommand *vmkCmd);
 
 #if NVME_PCIE_STORAGE_POLL
 vmk_uint32 NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,

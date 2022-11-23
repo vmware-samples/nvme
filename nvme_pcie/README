@@ -6,6 +6,11 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2022/11/14 1.2.4.5-1vmw
+
+   Create nvme_pcie_mgmt.h/.c which setup up vmk_Mgmt implementation,
+   by which we can config StoragePoll dynamically.
+
 2022/11/10 1.2.4.4-1vmw
 
    Bump up driver version after backing out change 10397004 (1.2.4.3-1vmw).
