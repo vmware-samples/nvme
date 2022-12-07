@@ -32,11 +32,9 @@
 
 #define NVMEPCIE_KVMGMT_BUF_SIZE   (4096)
 
-extern int nvmePCIEMsiEnbaled;
-
-
 typedef struct NVMEPCIEKVMgmtData {
    char *keyName;
+   vmk_MgmtKeyType type;
    vmk_MgmtKeyGetFn getFn;
    char *getDesc;
    vmk_MgmtKeySetFn setFn;
@@ -47,5 +45,7 @@ typedef struct NVMEPCIEKVMgmtData {
 VMK_ReturnStatus NVMEPCIEKeyValInit(NVMEPCIEController *ctrlr);
 void NVMEPCIEKeyValDestory(NVMEPCIEController *ctrlr);
 
+VMK_ReturnStatus NVMEPCIEGlobalKeyValInit();
+void NVMEPCIEGlobalKeyValDestroy();
 
 #endif // ifndef _NVME_PCIE_MGMT_H_

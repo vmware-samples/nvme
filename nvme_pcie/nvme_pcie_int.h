@@ -45,6 +45,7 @@ extern vmk_uint32 nvmePCIEPollOIOThr;
 extern int nvmePCIEBlkSizeAwarePollAct;
 #endif
 #endif
+extern int nvmePCIEMsiEnbaled;
 
 /**
  * Driver name. This should be the name of the SC file.
@@ -54,7 +55,7 @@ extern int nvmePCIEBlkSizeAwarePollAct;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.5"
+#define NVME_PCIE_DRIVER_VERSION "1.2.4.6"
 
 /**
  * Driver release number. This should always in sync with .sc file.

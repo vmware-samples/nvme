@@ -23,6 +23,6 @@ device_driver(
     binary_compat = "yes",
     license = "BSD",
     vendor = "VMware",
-    version = "1.2.4.5",
+    version = "1.2.4.6",
     version_bump = "1",
 )

@@ -26,7 +26,6 @@ static VMK_ReturnStatus SetupAdminQueue(NVMEPCIEController *ctrlr);
 static void DestroyAdminQueue(NVMEPCIEController *ctrlr);
 extern void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo);
 extern void NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status);
-extern int nvmePCIEMsiEnbaled;
 
 /**
  * Wait for CSTS.RDY to become expected value

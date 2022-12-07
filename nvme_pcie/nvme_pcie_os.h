@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016, 2018, 2020-2021 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016, 2018, 2020-2022 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -54,6 +54,8 @@ typedef struct NVMEPCIEDriverResource {
    vmk_Lock lock;
    /** Controller list */
    vmk_ListLinks ctrlrList;
+   /** Management handle */
+   vmk_MgmtHandle kvMgmtHandle;
 } NVMEPCIEDriverResource;
 
 /**
@@ -71,6 +73,7 @@ extern NVMEPCIEDriverResource __nvmePCIEdriverResource;
 #define NVME_PCIE_DRIVER_RES_MEMPOOL (__nvmePCIEdriverResource.memPool)
 #define NVME_PCIE_DRIVER_RES_LOCK (__nvmePCIEdriverResource.lock)
 #define NVME_PCIE_DRIVER_RES_CONTROLLER_LIST (__nvmePCIEdriverResource.ctrlrList)
+#define NVME_PCIE_DRIVER_MGMT_HANDLE (__nvmePCIEdriverResource.kvMgmtHandle)
 
 #define NVME_PCIE_DRIVER_PROPS_HEAP_NAME "nvmePCIEHeap"
 #define NVME_PCIE_DRIVER_PROPS_DRIVER_NAME "nvmePCIEDriver"

@@ -10,6 +10,7 @@
  */
 
 #include "nvme_pcie_int.h"
+#include "nvme_pcie_mgmt.h"
 
 static int nvmePCIELogLevel = NVME_LOG_LEVEL_INFO;
 VMK_MODPARAM(nvmePCIELogLevel, int, "NVMe PCIe driver log level");
@@ -56,7 +57,14 @@ extern int nvmePCIEAdminQueueSize;
 /**
  * Global, static data that holds module/driver wide resources
  */
-NVMEPCIEDriverResource __nvmePCIEdriverResource;
+NVMEPCIEDriverResource __nvmePCIEdriverResource = {
+   .heapId = VMK_INVALID_HEAP_ID,
+   .driverHandle = VMK_DRIVER_NONE,
+   .logHandle = VMK_INVALID_LOG_HANDLE,
+   .memPool = VMK_MEMPOOL_INVALID,
+   .lock = VMK_LOCK_INVALID,
+   .kvMgmtHandle = NULL,
+};
 
 static VMK_ReturnStatus HeapCreate();
 static void HeapDestroy();
@@ -120,6 +128,14 @@ init_module(void)
       goto destroy_mempool;
    }
 
+   /** Initialize management handle */
+   vmkStatus = NVMEPCIEGlobalKeyValInit();
+   if (vmkStatus != VMK_OK) {
+      MOD_EPRINT("Failed to create mgmt handle, %s.",
+                 vmk_StatusToString(vmkStatus));
+      goto destroy_lock;
+   }
+
    /** Initialize controller list */
    vmk_ListInit(&NVME_PCIE_DRIVER_RES_CONTROLLER_LIST);
 
@@ -127,12 +143,15 @@ init_module(void)
    vmkStatus = NVMEPCIEDriverRegister();
    if (vmkStatus != VMK_OK) {
       MOD_EPRINT("Failed to register driver, %s.", vmk_StatusToString(vmkStatus));
-      goto destroy_lock;
+      goto destroy_mgmt_handle;
    }
 
    MOD_IPRINT("Module initialized successfully.");
 
    return 0;
+
+destroy_mgmt_handle:
+   NVMEPCIEGlobalKeyValDestroy();
 
 destroy_lock:
    NVMEPCIELockDestroy(&NVME_PCIE_DRIVER_RES_LOCK);
@@ -162,6 +181,7 @@ cleanup_module(void)
     * Cleanup module resources in reverse order compared to module_init
     */
    NVMEPCIEDriverUnregister();
+   NVMEPCIEGlobalKeyValDestroy();
    NVMEPCIELockDestroy(&NVME_PCIE_DRIVER_RES_LOCK);
    MemPoolDestroy();
    LogHandleDestroy();

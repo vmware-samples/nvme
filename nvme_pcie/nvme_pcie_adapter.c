@@ -14,7 +14,6 @@
 
 extern int nvmePCIEDma4KSwitch;
 extern vmk_uint32 nvmePCIEFakeAdminQSize;
-extern int nvmePCIEMsiEnbaled;
 
 static VMK_ReturnStatus RequestIoQueues(NVMEPCIEController *ctrlr,
                                         vmk_uint32 *nrIoQueues);
