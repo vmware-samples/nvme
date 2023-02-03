@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2022 VMware, Inc. All rights reserved.
+# Copyright (c) 2015-2023 VMware, Inc. All rights reserved.
 # VMware Confidential
 #
 # Makefile
@@ -194,37 +194,6 @@ IMPORT_DEVKIT = $(shell rpm -q --qf '%{INSTPREFIXES}\n' $(1) | $(GREP) $(BUILD_N
 HEXDK_BASE := $(shell rpm -q --qf '%{INSTPREFIXES}\n' $(HEXDK))
 VMKAPIDDK_BASE := $(call IMPORT_DEVKIT,$(DDK))
 VMW_VMKAPIDDK_BASE := $(VMKAPIDDK_BASE)
-
-ifeq ($(DESC_ESX_VERSION),6.5.0)
-VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_4_0_0
-else
-ifeq ($(DESC_ESX_VERSION),6.7.0)
-VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_5_0_0
-else
-ifeq ($(DESC_ESX_VERSION),7.0.0)
-VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_6_0_0
-else
-ifeq ($(DESC_ESX_VERSION),7.0.1)
-VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_7_0_0
-else
-ifeq ($(DESC_ESX_VERSION),7.0.2)
-VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_8_0_0
-else
-ifeq ($(DESC_ESX_VERSION),7.0.3)
-VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_9_0_0
-else
-ifeq ($(DESC_ESX_VERSION),8.0.0)
-VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_10_0_0
-else
-VMKAPI_LOCATION = $(VMKAPIDDK_BASE)/src/bora/vmkernel/include/vmkapi/v2_11_0_0
-endif
-endif
-endif
-endif
-endif
-endif
-endif
-
 VMKAPI_LOCATION = $(dir $(shell find $(VMKAPIDDK_ROOT)/src/bora -name vmkapi.h))
 
 # Only need to evaluate once (aka use ":=").
