@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -55,7 +55,7 @@ extern int nvmePCIEMsiEnbaled;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.6"
+#define NVME_PCIE_DRIVER_VERSION "1.2.4.7"
 
 /**
  * Driver release number. This should always in sync with .sc file.

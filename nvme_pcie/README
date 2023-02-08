@@ -6,6 +6,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2023/2/8 1.2.4.7-1vmw
+
+   Fix PR #3095718: Update Submission Queue Tail doorbell once for one fused operation.
+
 2022/11/29 1.2.4.6-1vmw
 
    Add management interface to config driver log dynamically.

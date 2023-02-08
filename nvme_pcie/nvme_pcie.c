@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -1328,8 +1328,10 @@ NVMEPCIEUpdateSubQueueHead(NVMEPCIESubQueueInfo *sqInfo)
  * @param[in] cmdInfo  Command info
  * @param[in] cb       Command completion callback
  *
- * @return VMK_NVME_STATUS_VMW_WOULD_BLOCK Command submitted to hardware successfully
- * @return VMK_NVME_STATUS_VMW_QFULL Failed to submit command due to queue being full
+ * @return VMK_NVME_STATUS_VMW_WOULD_BLOCK Command submitted to hardware successfully.
+ * @return VMK_NVME_STATUS_VMW_QFULL Failed to submit command due to queue being full.
+ * @return VMK_NVME_STATUS_VMW_RESET Failed to submit command due to queue being reset.
+ * @return VMK_NVME_STATUS_VMW_QUIESCED Failed to submit command due to device being removed.
  */
 static vmk_NvmeStatus
 NVMEPCIEIssueCommandToHw(NVMEPCIEQueueInfo *qinfo,
@@ -1385,7 +1387,25 @@ NVMEPCIEIssueCommandToHw(NVMEPCIEQueueInfo *qinfo,
       cmdInfo->statsOn = VMK_TRUE;
    }
 #endif
-   NVMEPCIEWritel(tail, sqInfo->doorbell);
+   if (VMK_UNLIKELY(cmdInfo->vmkCmd->nvmeCmd.cdw0.fuse == VMK_NVME_FUSED_OP_FIRST)) {
+      /**
+       * Not write the SQ Tail doorbell for the first fused command.
+       * If the second fused command doesn't reach here, the first fused
+       * command will be submitted to hardware along with other IOs, and
+       * the device should reject this first fused command. If no command
+       * is submitted after this first fused command, driver will receive
+       * abort request and this first fused command should be cleared in
+       * queue reset.
+       */
+      VPRINT(qinfo->ctrlr, "FUSE: Issue first cmdInfo [%d] %p vmkCmd %p to sq %d, fusetag %d, tail %d.",
+             cmdInfo->cmdId, cmdInfo, cmdInfo->vmkCmd, qinfo->id, cmdInfo->vmkCmd->fuseTag, tail);
+   } else {
+      if (VMK_UNLIKELY(cmdInfo->vmkCmd->nvmeCmd.cdw0.fuse == VMK_NVME_FUSED_OP_SECOND)) {
+         VPRINT(qinfo->ctrlr, "FUSE: Issue second cmdInfo [%d] %p vmkCmd %p to sq %d, fusetag %d, tail %d.",
+                cmdInfo->cmdId, cmdInfo, cmdInfo->vmkCmd, qinfo->id, cmdInfo->vmkCmd->fuseTag, tail);
+      }
+      NVMEPCIEWritel(tail, sqInfo->doorbell);
+   }
    sqInfo->tail = tail;
    vmk_SpinlockUnlock(sqInfo->lock);
 
