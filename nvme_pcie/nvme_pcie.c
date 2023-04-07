@@ -943,17 +943,20 @@ NVMEPCIEPutCmdInfo(NVMEPCIEQueueInfo *qinfo, NVMEPCIECmdInfo *cmdInfo)
 }
 
 /**
- * Get block size of a 'vmk_NvmeCommand' type command
+ * Get 1-based nlb of a 'vmk_NvmeCommand' type command.
+ *
+ * Nlb field in NVMe spec is 0-based, to make it more clear whether nlb is
+ * valid or not, transfer valid nlb to 1-based.
  *
  * @param[in] vmkCmd  'vmk_NvmeCommand' type command
  *
- * @return    0       Cannot get block size of this command
- * @return    Not 0   Block size of this command
+ * @return    0       Cannot get nlb of this command
+ * @return    Not 0   1-based nlb of this command
  */
-inline vmk_uint16
-NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd)
+VMK_INLINE vmk_uint16
+NVMEPCIEGetCmdNlb(vmk_NvmeCommand *vmkCmd)
 {
-   vmk_uint16 bs = 0;
+   vmk_uint16 nlb = 0;
 
    if (vmkCmd == NULL) {
       return 0;
@@ -961,30 +964,21 @@ NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd)
 
    switch (vmkCmd->nvmeCmd.cdw0.opc) {
       case VMK_NVME_NVM_CMD_READ:
-         bs = (((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb) >> 1;
-         break;
-
       case VMK_NVME_NVM_CMD_WRITE:
-         bs = (((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb) >> 1;
-         break;
-
       case VMK_NVME_NVM_CMD_COMPARE:
-         bs = (((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb) >> 1;
-         break;
-
       case VMK_NVME_NVM_CMD_WRITE_ZEROES:
-         bs = (((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb) >> 1;
+         nlb = ((vmk_NvmeReadCmd *)(&vmkCmd->nvmeCmd))->cdw12.nlb + 1;
          break;
 
       default:
          /**
-          * Other types of commands don't have 'nlb' field, remains 'bs'
+          * Other types of commands don't have 'nlb' field, remains 'nlb'
           * as 0 to claim unavailable.
           */
          break;
    }
 
-   return bs;
+   return nlb;
 }
 
 /**
@@ -996,17 +990,17 @@ NVMEPCIEGetCmdBlockSize(vmk_NvmeCommand *vmkCmd)
  * @return VMK_TRUE   'vmkCmd' is a small block size IO command
  * @return VMK_FALSE  'vmkCmd' is not a small block size IO command
  */
-inline vmk_Bool
+VMK_INLINE vmk_Bool
 NVMEPCIEIsSmallBsIoCmd(vmk_uint32 qid,
                        vmk_NvmeCommand *vmkCmd)
 {
    vmk_Bool ret = VMK_FALSE;
-   vmk_uint16 bs;
+   vmk_uint16 nlb;
 
    if (qid > 0) {
-      bs = NVMEPCIEGetCmdBlockSize(vmkCmd);
+      nlb = NVMEPCIEGetCmdNlb(vmkCmd);
 
-      if ((bs > 0) && (bs <= NVME_PCIE_SMALL_BLOCKSIZE)) {
+      if ((nlb > 0) && (nlb <= NVME_PCIE_SMALL_NLB)) {
          ret = VMK_TRUE;
       }
    }

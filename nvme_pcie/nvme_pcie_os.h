@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016, 2018, 2020-2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016, 2018, 2020-2023 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -30,12 +30,6 @@
 #define INCLUDE_ALLOW_VMKERNEL
 //#include "includeCheck.h"
 
-#define NVME_PCIE_STORAGE_POLL 1
-
-#if NVME_PCIE_STORAGE_POLL
-#define NVME_PCIE_BLOCKSIZE_AWARE 1
-#define NVME_PCIE_SMALL_BLOCKSIZE 32
-#endif
 
 /**
  * NVMEPCIEDriverResource - global data structure that holds module wide resources.
