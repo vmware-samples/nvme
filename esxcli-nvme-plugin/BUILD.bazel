@@ -1,0 +1,31 @@
+# Copyright (c) 2023 VMware, Inc.  All rights reserved.
+# VMware Confidential
+
+load("//bora/bazel/esx:esx_debug_binary.bzl", "esx_debug_binary")
+
+esx_debug_binary(
+    name = "esxcli-nvme-plugin",
+    srcs = [
+        "esxcli_xml.c",
+        "esxcli_xml.h",
+        "main.c",
+        "nvme_lib.c",
+        "nvme_lib.h",
+        "nvme_mgmt.h",
+    ],
+    copts = ["-Wno-error=address-of-packed-member"],
+    features = [
+        "-enable_all_vmkapis",
+    ],
+    local_defines = [
+        "VMK_DEVKIT_HAS_API_VMKAPI_BASE",
+        "VMK_DEVKIT_HAS_API_VMKAPI_NVME",
+        "VMK_DEVKIT_HAS_API_VMKAPI_NVME_DRV",
+        "VMK_DEVKIT_USES_BINARY_COMPATIBLE_APIS",
+        "VMK_DEVKIT_USES_PUBLIC_APIS",
+        "VMK_DEVKIT_USES_BINARY_INCOMPATIBLE_APIS",
+    ],
+    deps = [
+        "//bora/lib/vmkmgmt",
+    ],
+)
