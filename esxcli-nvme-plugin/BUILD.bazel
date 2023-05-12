@@ -29,3 +29,11 @@ esx_debug_binary(
         "//bora/lib/vmkmgmt",
     ],
 )
+
+filegroup(
+    name = "xml",
+    srcs = [
+        "esxcli-nvme.xml",
+    ],
+    visibility = ["//bora/bazel/esx/package/vibs/esxcli_nvme_plugin:__pkg__"],
+)
