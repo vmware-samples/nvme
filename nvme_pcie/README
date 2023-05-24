@@ -6,6 +6,12 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2023/5/23 1.2.4.9-1vmw
+
+   Add Lenovo ThinkSystem NVMe 4-tuple devID '1b4b:2241:1d49:0306'
+   and '1b4b:2241:1d49:0307' to the list of supported devices so that correct
+   device descriptions can be displayed as Lenovo expects.
+
 2023/4/3 1.2.4.8-1vmw
 
    Revise the block size calculation to avoid StoragePoll activation failure

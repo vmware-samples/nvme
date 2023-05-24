@@ -1,6 +1,6 @@
 """
 ********************************************************************************
-* Copyright (c) 2016-2019, 2021 VMware, Inc. All rights reserved.
+* Copyright (c) 2016-2019, 2021, 2023 VMware, Inc. All rights reserved.
 ********************************************************************************
 """
 DEV = {
@@ -418,6 +418,18 @@ DEV = {
                {
                   "device id"         : "0x2241",
                   "description"       : "Marvell NR2241 NVMe Controller",
+               },
+               {
+                  "device id"         : "0x2241",
+                  "sub vendor id"     : "0x1D49",
+                  "sub device id"     : "0x0306",
+                  "sub device desc"   : "Lenovo ThinkSystem M.2 NVMe 2-Bay RAID Enablement Kit",
+               },
+               {
+                  "device id"         : "0x2241",
+                  "sub vendor id"     : "0x1D49",
+                  "sub device id"     : "0x0307",
+                  "sub device desc"   : "Lenovo ThinkSystem 7mm NVMe 2-Bay Rear RAID Enablement Kit",
                },
             ],
          },

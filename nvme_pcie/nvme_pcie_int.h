@@ -63,7 +63,7 @@ extern int nvmePCIEMsiEnbaled;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.8"
+#define NVME_PCIE_DRIVER_VERSION "1.2.4.9"
 
 /**
  * Driver release number. This should always in sync with .sc file.
