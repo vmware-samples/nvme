@@ -6,6 +6,12 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2023/6/1 1.2.4.10-1vmw
+
+   Fix PR #3164697: Fix two race conditions.
+   1. Fix a race condition between IO submission and queue flushing.
+   2. Fix a race condition between two queue flusings in queue reset and hot plug respectively.
+
 2023/5/23 1.2.4.9-1vmw
 
    Add Lenovo ThinkSystem NVMe 4-tuple devID '1b4b:2241:1d49:0306'

@@ -664,7 +664,7 @@ QueueDestroy(NVMEPCIEQueueInfo *qinfo)
 
    vmk_AtomicWrite32(&qinfo->state, NVME_PCIE_QUEUE_NON_EXIST);
    while(vmk_AtomicRead32(&qinfo->refCount) != 0) {
-      WPRINT(ctrlr, "Wait for queue refcount to be zero");
+      WPRINT(ctrlr, "Wait for queue %d refcount to be zero", qinfo->id);
       vmk_WorldSleep(1000);
    }
 #ifdef NVME_STATS
@@ -2139,6 +2139,15 @@ NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
    vmk_atomic32 atomicStatus;
    int i;
 
+   /** An active command may be freed in submission path. Wait for queue
+    * refCount to be zero to avoid accessing command list when I/O
+    * submission is in progress.
+    */
+   while(vmk_AtomicRead32(&qinfo->refCount) != 0) {
+      IPRINT(qinfo->ctrlr, "Wait for queue %d refcount to be zero", qinfo->id);
+      vmk_WorldSleep(100);
+   }
+
    vmk_AtomicInc32(&qinfo->refCount);
    if (vmk_AtomicRead32(&qinfo->state) == NVME_PCIE_QUEUE_NON_EXIST) {
       WPRINT(qinfo->ctrlr, "Trying to flush non exist queue %d.", qinfo->id);
@@ -2151,6 +2160,7 @@ NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
    NVMEPCIEProcessCq(qinfo);
    vmk_SpinlockUnlock(qinfo->cqInfo->lock);
 
+   vmk_SpinlockLock(qinfo->cmdList->lock);
    for (i = 1; i <= qinfo->cmdList->idCount; i++) {
       atomicStatus = vmk_AtomicRead32(&cmdInfo->atomicStatus);
       if (atomicStatus == NVME_PCIE_CMD_STATUS_ACTIVE ||
@@ -2161,6 +2171,7 @@ NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
       }
       cmdInfo++;
    }
+   vmk_SpinlockUnlock(qinfo->cmdList->lock);
    vmk_AtomicDec32(&qinfo->refCount);
 }
 
