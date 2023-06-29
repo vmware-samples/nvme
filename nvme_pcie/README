@@ -6,6 +6,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2023/6/27 1.2.4.11-1vmw
+
+   Remove DMA 4k-alignment constraints for AWS local devices.
+
 2023/6/1 1.2.4.10-1vmw
 
    Fix PR #3164697: Fix two race conditions.

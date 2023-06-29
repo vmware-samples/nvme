@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -586,8 +586,8 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
    constraints.sgElemAlignment = 4;
    constraints.sgElemStraddle = VMK_ADDRESS_MASK_32BIT + 1;
 
-   // Customize for AWS EBS and local device, refer to PR #2126797 & PR #2196444.
-   if (NVMEPCIEIsEBSCustomDevice(ctrlr) || NVMEPCIEIsAWSLocalDevice(ctrlr) ||
+   // Customize for AWS EBS device, refer to PR #2126797 & PR #2196444.
+   if (NVMEPCIEIsEBSCustomDevice(ctrlr) ||
        NVMEPCIEIsSmallQsize(ctrlr) || nvmePCIEDma4KSwitch) {
       constraints.sgElemSizeMult = VMK_PAGE_SIZE;
       constraints.sgElemAlignment = VMK_PAGE_SIZE;
