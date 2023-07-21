@@ -498,10 +498,9 @@ QueueStatsContruct(NVMEPCIEQueueInfo *qinfo)
 static VMK_ReturnStatus
 QueueStatsDestroy(NVMEPCIEQueueInfo *qinfo)
 {
-   NVMEPCIEController *ctrlr = qinfo->ctrlr;
    NVMEPCIEFree(qinfo->stats);
    qinfo->stats = NULL;
-   DPRINT_Q(ctrlr, "Free stats for queue %d", qinfo->id);
+   DPRINT_Q(qinfo->ctrlr, "Free stats for queue %d", qinfo->id);
    return VMK_OK;
 }
 
@@ -841,7 +840,7 @@ NVMEPCIEGetCmdInfo(NVMEPCIEQueueInfo *qinfo, vmk_uint16 cid)
    cmdInfo->doneByHwTs = 0;
    cmdInfo->statsOn = VMK_FALSE;
 #endif
-   DPRINT_CMD(ctrlr, "Get cmdInfo [%d] %p from queue [%d], nrAct: %d.",
+   DPRINT_CMD(ctrlr, qinfo->id, "Get cmdInfo [%d] %p from queue [%d], nrAct: %d.",
               cmdInfo->cmdId, cmdInfo, qinfo->id,
               vmk_AtomicRead32(&qinfo->cmdList->nrAct));
 
@@ -893,7 +892,7 @@ NVMEPCIEGetCmdInfoLegacy(NVMEPCIEQueueInfo *qinfo)
    cmdInfo->doneByHwTs = 0;
    cmdInfo->statsOn = VMK_FALSE;
 #endif
-   DPRINT_CMD(ctrlr, "Get cmdInfo [%d] %p from queue [%d], nrAct: %d.",
+   DPRINT_CMD(ctrlr, qinfo->id, "Get cmdInfo [%d] %p from queue [%d], nrAct: %d.",
               cmdInfo->cmdId, cmdInfo, qinfo->id,
               vmk_AtomicRead32(&cmdList->nrAct));
 
@@ -937,7 +936,7 @@ NVMEPCIEPutCmdInfo(NVMEPCIEQueueInfo *qinfo, NVMEPCIECmdInfo *cmdInfo)
    if (!ctrlr->abortEnabled) {
       NVMEPCIEPushCmdInfo(qinfo, cmdInfo);
    }
-   DPRINT_CMD(ctrlr, "Put cmdInfo [%d] %p back to queue [%d], nrAct: %d.",
+   DPRINT_CMD(ctrlr, qinfo->id, "Put cmdInfo [%d] %p back to queue [%d], nrAct: %d.",
               cmdInfo->cmdId, cmdInfo, qinfo->id,
               vmk_AtomicRead32(&qinfo->cmdList->nrAct));
 }
@@ -1363,9 +1362,15 @@ NVMEPCIEIssueCommandToHw(NVMEPCIEQueueInfo *qinfo,
    }
 
    vmk_Memcpy(&sqInfo->subq[tail], &cmdInfo->vmkCmd->nvmeCmd, VMK_NVME_SQE_SIZE);
-   DPRINT_CMD(qinfo->ctrlr, "Issue cmdInfo [%d] %p vmkCmd %p to sq %d, tail %d.",
+   DPRINT_CMD(qinfo->ctrlr, qinfo->id, "Issue cmdInfo [%d] %p vmkCmd %p to sq %d, tail %d.",
               cmdInfo->cmdId, cmdInfo, cmdInfo->vmkCmd, qinfo->id, tail);
-   NVMEPCIEDumpSqe(qinfo->ctrlr, &cmdInfo->vmkCmd->nvmeCmd);
+#if NVME_DEBUG
+   if (((qinfo->id == 0) && (nvmePCIEDebugMask & NVME_DEBUG_ADMIN)) ||
+       ((qinfo->id > 0) &&(nvmePCIEDebugMask & NVME_DEBUG_CMD))) {
+      NVMEPCIEDumpSqe(qinfo->ctrlr, &cmdInfo->vmkCmd->nvmeCmd);
+      NVMEPCIEDumpSGL(qinfo->ctrlr, cmdInfo->vmkCmd->sgIOArray);
+   }
+#endif
    if (!qinfo->ctrlr->abortEnabled) {
       sqInfo->subq[tail].cdw0.cid = cmdInfo->cmdId;
    }
@@ -1789,8 +1794,12 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
       if (cqEntry->dw3.p != phase) {
          break;
       }
-      NVMEPCIEDumpCqe(ctrlr, cqEntry);
-
+#if NVME_DEBUG
+      if (((qinfo->id == 0) && (nvmePCIEDebugMask & NVME_DEBUG_ADMIN)) ||
+          ((qinfo->id > 0) &&(nvmePCIEDebugMask & NVME_DEBUG_CMD))) {
+         NVMEPCIEDumpCqe(ctrlr, cqEntry);
+      }
+#endif
       cid = (ctrlr->abortEnabled) ? cqEntry->dw3.cid : cqEntry->dw3.cid - 1;
       if (VMK_UNLIKELY(cid >= cmdList->idCount)) {
          EPRINT(ctrlr, "Invalid cid %d, qid: %d", cid, qinfo->id);
@@ -1860,7 +1869,7 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
       }
 #endif
 
-      DPRINT_CMD(ctrlr, "Complete cmdInfo %p, qid: %d, cid: %d, vmkCmd: %p, "
+      DPRINT_CMD(ctrlr, qinfo->id, "Complete cmdInfo %p, qid: %d, cid: %d, vmkCmd: %p, "
                  "type: %d, nvmeStatus: 0x%x, cqe: %p, cqHead: %d, "
                  "sqHead: %d, lat: %lu",
                  cmdInfo, qinfo->id, cid, cmdInfo->vmkCmd, cmdInfo->type,

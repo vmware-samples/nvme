@@ -6,6 +6,13 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2023/7/13 1.2.4.12-1vmw
+
+   Debugging facilities changes:
+   1. Fix recursive include issue: Remove "#include nvme_pcie_int.h" in nvme_pcie_debug.h.
+   2. Separate debug logs for IO and admin commands.
+   3. Add function NVMEPCIEDumpSGL to dump SG array.
+
 2023/6/27 1.2.4.11-1vmw
 
    Remove DMA 4k-alignment constraints for AWS local devices.

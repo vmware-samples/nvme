@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2018, 2020, 2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2018, 2020, 2022-2023 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -11,10 +11,12 @@
 
 #include "nvme_pcie_int.h"
 
+#if NVME_DEBUG
+
 void
 NVMEPCIEDumpSqe(NVMEPCIEController *ctrlr, vmk_NvmeSubmissionQueueEntry *sqe)
 {
-   if (!(nvmePCIEDebugMask & NVME_DEBUG_DUMP_SQE)) {
+   if (VMK_LIKELY(!(nvmePCIEDebugMask & NVME_DEBUG_DUMP_SQE))) {
       return;
    }
 
@@ -33,7 +35,7 @@ NVMEPCIEDumpSqe(NVMEPCIEController *ctrlr, vmk_NvmeSubmissionQueueEntry *sqe)
 void
 NVMEPCIEDumpCqe(NVMEPCIEController *ctrlr, vmk_NvmeCompletionQueueEntry *cqe)
 {
-   if (!(nvmePCIEDebugMask & NVME_DEBUG_DUMP_CQE)) {
+   if (VMK_LIKELY(!(nvmePCIEDebugMask & NVME_DEBUG_DUMP_CQE))) {
       return;
    }
 
@@ -43,3 +45,32 @@ NVMEPCIEDumpCqe(NVMEPCIEController *ctrlr, vmk_NvmeCompletionQueueEntry *cqe)
    DPRINT(ctrlr, "\tcid: 0x%x, p: 0x%x, sc: 0x%x, sct: 0x%x, m: 0x%x, dnr: 0x%x",
           cqe->dw3.cid, cqe->dw3.p, cqe->dw3.sc, cqe->dw3.sct, cqe->dw3.m, cqe->dw3.dnr);
 }
+
+
+void
+NVMEPCIEDumpSGL(NVMEPCIEController *ctrlr, vmk_SgArray *sgArray)
+{
+   int i;
+
+   if (VMK_LIKELY(!(nvmePCIEDebugMask & NVME_DEBUG_DUMP_SGL))) {
+      return;
+   }
+
+   if (sgArray == NULL) {
+      return;
+   }
+
+   DPRINT(ctrlr, "sgArray: %p, numE: %d", sgArray, sgArray->numElems);
+   for (i = 0; i < sgArray->numElems; i++) {
+      DPRINT(ctrlr, "\t %d/%d ioa: 0x%lx, length: %d", i, sgArray->numElems-1,
+             sgArray->elem[i].ioAddr, sgArray->elem[i].length);
+   }
+}
+
+#else
+
+void NVMEPCIEDumpSqe(NVMEPCIEController *ctrlr, vmk_NvmeSubmissionQueueEntry *sqe) {}
+void NVMEPCIEDumpCqe(NVMEPCIEController *ctrlr, vmk_NvmeCompletionQueueEntry *cqe) {}
+void NVMEPCIEDumpSGL(NVMEPCIEController *ctrlr, vmk_SgArray *sgArray) {}
+
+#endif

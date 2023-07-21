@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2018, 2020 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2018, 2020, 2023 VMware, Inc. All rights reserved.
  * -- VMware Confidential
  *****************************************************************************/
 
@@ -11,8 +11,6 @@
 
 #ifndef _NVME_DEBUG_H_
 #define _NVME_DEBUG_H_
-
-#include "nvme_pcie_int.h"
 
 /**
  * Determine whether to enable debugging facilities in the driver
@@ -162,9 +160,9 @@ enum NVMEPCIELogLevel {
 #define MOD_EPRINT(fmt, args...) \
    NVMEPCIEWarning(NVME_PCIE_DRIVER_NAME, NVME_LOG_LEVEL_ERROR, fmt, ##args)
 
-#if NVME_DEBUG
-
 extern int nvmePCIEDebugMask;
+
+#if NVME_DEBUG
 
 /** Controller level log */
 #define NVME_DEBUG_CTRLR  (1 << 0)
@@ -247,29 +245,28 @@ extern int nvmePCIEDebugMask;
 #define DPRINT_Q(ctrlr, fmt, args...) \
    NVMEPCIECtrlrDebug(ctrlr, NVME_DEBUG_Q, fmt, ##args)
 
-#define DPRINT_CMD(ctrlr, fmt, args...) \
-   NVMEPCIECtrlrDebug(ctrlr, NVME_DEBUG_CMD, fmt, ##args)
-
-#define DPRINT_ADMIN(ctrlr, fmt, args...) \
-   NVMEPCIECtrlrDebug(ctrlr, NVME_DEBUG_ADMIN, fmt, ##args)
-
 #define DPRINT_MGMT(ctrlr, fmt, args...) \
    NVMEPCIECtrlrDebug(ctrlr, NVME_DEBUG_MGMT, fmt, ##args)
 
 #define DPRINT_INIT(ctrlr, fmt, args...) \
    NVMEPCIECtrlrDebug(ctrlr, NVME_DEBUG_INIT, fmt, ##args)
 
+#define DPRINT_CMD(ctrlr, qid, fmt, args...) \
+   if (((qid == 0) && (nvmePCIEDebugMask & NVME_DEBUG_ADMIN)) ||  \
+       ((qid > 0) && (nvmePCIEDebugMask & NVME_DEBUG_CMD))) \
+      DPRINT(ctrlr, fmt, ##args)
+
 #else
 
 #define NVMEPCIEModDebug(mask, fmt, args...)
 #define NVMEPCIECtrlrDebug(ctrlr, mask, fmt, args...)
+#define DPRINT(ctrlr, fmt, args...)
 #define DPRINT_CTRLR(ctrlr, fmt, args...)
 #define DPRINT_NS(ctrlr, fmt, args...)
 #define DPRINT_Q(ctrlr, fmt, args...)
-#define DPRINT_CMD(ctrlr, fmt, args...)
-#define DPRINT_ADMIN(ctrlr, fmt, args...)
 #define DPRINT_MGMT(ctrlr, fmt, args...)
 #define DPRINT_INIT(ctrlr, fmt, args...)
+#define DPRINT_CMD(ctrlr, qid, fmt, args...)
 
 #endif /* NVME_DEBUG */
 

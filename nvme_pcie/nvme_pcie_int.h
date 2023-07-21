@@ -63,7 +63,7 @@ extern int nvmePCIEMsiEnbaled;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.11"
+#define NVME_PCIE_DRIVER_VERSION "1.2.4.12"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -536,4 +536,6 @@ void NVMEPCIEDumpSqe(NVMEPCIEController *ctrlr,
                      vmk_NvmeSubmissionQueueEntry *sqe);
 void NVMEPCIEDumpCqe(NVMEPCIEController *ctrlr,
                      vmk_NvmeCompletionQueueEntry *cqe);
+void NVMEPCIEDumpSGL(NVMEPCIEController *ctrlr,
+                     vmk_SgArray *sgArray);
 #endif // ifndef _NVME_PCIE_INT_H_

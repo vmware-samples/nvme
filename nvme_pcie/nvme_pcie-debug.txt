@@ -56,11 +56,25 @@ The higher 16 bits are used to be switches for driver debug utils in nvme_pcie_d
 
    BIT_16: NVME_DEBUG_DUMP_CTRLR   (Reserved)
    BIT_17: NVME_DEBUG_DUMP_NS      (Reserved)
-   BIT_18: NVME_DEBUG_DUMP_SQE     NVMEPCIEDumpSqe
-   BIT_19: NVME_DEBUG_DUMP_CQE     NvmeDebug_DumpCmd
+   BIT_18: NVME_DEBUG_DUMP_SQE     Dump submission queue entry
+   BIT_19: NVME_DEBUG_DUMP_CQE     Dump completion queue entry
    BIT_20: NVME_DEBUG_DUMP_PRP     (Reserved)
-   BIT_21: NVME_DEBUG_DUMP_SGL     (Reserved)
+   BIT_21: NVME_DEBUG_DUMP_SGL     Dump SG array
 
 Usage:
 
-   setting nvmePCIELogLevel=5 nvmePCIEDebugMask=0xC to enable DPRINT_Q, DPRINT_CMD.
+   There are 2 ways to config debug log.
+   1. Set module parameters. The setting will take effect after ESXi reboot or driver reload. The setting can be persisted across reboot.
+      # esxcli system module parameters set -m nvme_pcie -p "nvmePCIELogLevel=5, nvmePCIEDebugMask=0xff"
+   2. Use key-value management to dynamically set debug log. The setting cannot be saved after reboot or driver reload.
+      # /usr/lib/vmware/vmkmgmt_keyval/vmkmgmt_keyval -i nvme_pcie/VMware -k logLevel -s 5
+      # /usr/lib/vmware/vmkmgmt_keyval/vmkmgmt_keyval -i nvme_pcie/VMware -k debugMask -s 0xff
+
+Examples:
+
+   nvmePCIELogLevel=5 nvmePCIEDebugMask=0x8 print IO command logs.
+   nvmePCIELogLevel=5 nvmePCIEDebugMask=0x10 print admin command logs.
+   nvmePCIELogLevel=5 nvmePCIEDebugMask=0xc0008 print IO command logs, including sqe and cqe.
+   nvmePCIELogLevel=5 nvmePCIEDebugMask=0xc0010 print admin command logs, including sqe and cqe.
+   nvmePCIELogLevel=5 nvmePCIEDebugMask=0x2c0008 print IO command logs, including sqe, cqe and SG.
+   nvmePCIELogLevel=5 nvmePCIEDebugMask=0x2c0010 print admin command logs, including sqe, cqe and SG.
