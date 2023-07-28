@@ -63,7 +63,7 @@ extern int nvmePCIEMsiEnbaled;
 /**
  * Driver version. This should always in sync with .sc file.
  */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.12"
+#define NVME_PCIE_DRIVER_VERSION "1.2.4.13"
 
 /**
  * Driver release number. This should always in sync with .sc file.
@@ -496,6 +496,10 @@ vmk_Bool NVMEPCIEIsSmallBsIoCmd(vmk_uint32 qid,
 vmk_uint32 NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,
                                  vmk_uint32 leastPoll,
                                  vmk_uint32 budget);
+vmk_uint32
+NVMEPCIEGetHwDoneCmdNum(NVMEPCIECompQueueInfo *cqInfo,
+                        vmk_uint32 start,
+                        vmk_uint32 limit);
 void NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,
                                  vmk_uint32 leastPoll);
 void NVMEPCIEStoragePollSetup(NVMEPCIEController *ctrlr);

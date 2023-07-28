@@ -6,6 +6,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
+2023/7/24 1.2.4.13-1vmw
+
+   Optimize polling performance of low OIO workloads.
+
 2023/7/13 1.2.4.12-1vmw
 
    Debugging facilities changes:

@@ -1480,6 +1480,45 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
 }
 
 /**
+ * Get the number of cmds done by hardware while not completed by driver
+ *
+ * @param[in]  cqInfo      Completion queue instance
+ * @param[in]  start       Starting index of the completion queue
+ * @param[in]  limit       The limit length of checking
+ *
+ * @return                 The cmds number
+ */
+vmk_uint32
+NVMEPCIEGetHwDoneCmdNum(NVMEPCIECompQueueInfo *cqInfo,
+                        vmk_uint32 start,
+                        vmk_uint32 limit)
+{
+   vmk_uint32 i;
+   vmk_uint32 head = start;
+   vmk_uint32 phase = cqInfo->phase;
+   vmk_uint32 qsize = cqInfo->qsize;
+   vmk_NvmeCompletionQueueEntry *cqEntry;
+   vmk_uint32 hwDoneCmd = 0;
+
+   for (i = 0; i < limit; i++) {
+      if (head >= qsize) {
+         head = 0;
+         phase = !phase;
+      }
+
+      cqEntry = &cqInfo->compq[head];
+      if (cqEntry->dw3.p != phase) {
+         break;
+      } else {
+         hwDoneCmd++;
+      }
+      head++;
+   }
+
+   return hwDoneCmd;
+}
+
+/**
  * Delay some time to accumulate adequate IO commands to be polled.
  *
  * @param[in]  qinfo       Queue instance
@@ -1494,32 +1533,35 @@ NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,   // IN
    NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
    vmk_uint32 tryPollTimes = 0;
    vmk_uint32 tryLen = leastPoll;
-   vmk_NvmeCompletionQueueEntry *cqEntry;
-   vmk_uint16 head, tryHead, phase;
+   // Total hardware done cmds
+   vmk_uint32 hwDoneCmd1 = 0;
+   // Hardware done cmds after each iteration of sleep
+   vmk_uint32 hwDoneCmd2 = 0;
    vmk_uint32 qsize = cqInfo->qsize;
+   vmk_uint64 interval;
 
    /** Try to access CQE as more as possible. */
    tryLen = (tryLen > qsize) ? qsize : tryLen;
 
-   /**
-    * TODO:
-    * Maximum delay times, may be determined dynamically in future.
-    */
    while (tryPollTimes < 3) {
       /** Determine number of CQEs */
-      head = cqInfo->head;
-      tryHead = head + tryLen;
-      phase = cqInfo->phase;
-      if (tryHead >= qsize) {
-         tryHead -= qsize;
-         phase = !phase;
-      }
-
-      cqEntry = &cqInfo->compq[tryHead];
-      if (cqEntry->dw3.p != phase) {
+      hwDoneCmd1 += NVMEPCIEGetHwDoneCmdNum(cqInfo,
+                                            cqInfo->head + hwDoneCmd1,
+                                            tryLen - hwDoneCmd1);
+      interval = vmk_AtomicRead64(&qinfo->ctrlr->pollInterval);
+      if (hwDoneCmd1 < tryLen) {
          tryPollTimes++;
 
-         vmk_WorldSleep(vmk_AtomicRead64(&qinfo->ctrlr->pollInterval));
+         vmk_WorldSleep(interval);
+
+         hwDoneCmd2 = NVMEPCIEGetHwDoneCmdNum(cqInfo,
+                                              cqInfo->head + hwDoneCmd1,
+                                              tryLen - hwDoneCmd1);
+         // If the income of sleep is 0, give up accumulating
+         if (hwDoneCmd2 <= 0) {
+            break;
+         }
+         hwDoneCmd1 += hwDoneCmd2;
       } else {
          break;
       }
