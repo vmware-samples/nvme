@@ -1,5 +1,5 @@
 /*********************************************************************************
- * Copyright (c) 2013-2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2013-2023 VMware, Inc. All rights reserved.
  * ******************************************************************************/
 
 #ifndef _NVME_LIB_H
@@ -198,7 +198,7 @@ int
 Nvme_AdminPassthru_error(struct nvme_handle *handle, int cmd, NvmeUserIo *uio);
 
 int
-Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, int nsId, void *id);
+Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, vmk_uint32 nsId, void *id);
 
 int
 Nvme_Ioctl(struct nvme_handle *handle, int cmd, NvmeUserIo *uio);
@@ -209,7 +209,7 @@ int Nvme_FormatNvm(struct nvme_handle *handle,
                    int pi,
                    int ms,
                    int lbaf,
-                   int ns);
+                   vmk_uint32 ns);
 
 int
 Nvme_SetLogLevel(int loglevel, int debuglevel);
@@ -224,50 +224,50 @@ int
 Nvme_NsMgmtAttachSupport(struct nvme_handle *handle);
 
 int
-Nvme_ValidNsId(struct nvme_handle *handle, int nsId);
+Nvme_ValidNsId(struct nvme_handle *handle, vmk_uint32 nsId);
 
 int
-Nvme_AllocatedNsId(struct nvme_handle *handle, int nsId);
+Nvme_AllocatedNsId(struct nvme_handle *handle, vmk_uint32 nsId);
 
 int
-Nvme_AttachedNsId(struct nvme_handle *handle, int nsId);
+Nvme_AttachedNsId(struct nvme_handle *handle, vmk_uint32 nsId);
 
-int
+vmk_uint32
 Nvme_NsMgmtCreate(struct nvme_handle *handle, vmk_NvmeIdentifyNamespace *idNs,
                   int *cmdStatus);
 
 int
-Nvme_NsMgmtDelete(struct nvme_handle *handle, int nsId);
+Nvme_NsMgmtDelete(struct nvme_handle *handle, vmk_uint32 nsId);
 
 /**
  * NVMe management interfaces, IDT specific
  */
 int
 Nvme_CreateNamespace_IDT(struct nvme_handle *handle,
-                         int ns,
+                         vmk_uint32 ns,
                          vmk_uint32 snu,
                          vmk_uint32 nnu);
 
 int
-Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, int ns);
+Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, vmk_uint32 ns);
 
 int
 Nvme_NsAttach(struct nvme_handle *handle,
               int sel,
-              int nsId,
+              vmk_uint32 nsId,
               struct nvme_ctrlr_list *ctrlrList,
               int *cmdStatus);
 
 int
-Nvme_NsUpdate(struct nvme_handle *handle, int nsId);
+Nvme_NsUpdate(struct nvme_handle *handle, vmk_uint32 nsId);
 
 int
-Nvme_NsListUpdate(struct nvme_handle *handle, int sel, int nsId);
+Nvme_NsListUpdate(struct nvme_handle *handle, int sel, vmk_uint32 nsId);
 int
-Nvme_NsGetStatus(struct nvme_handle *handle, int nsId, int *status);
+Nvme_NsGetStatus(struct nvme_handle *handle, vmk_uint32 nsId, int *status);
 
 int
-Nvme_NsSetStatus(struct nvme_handle *handle, int nsId, int status);
+Nvme_NsSetStatus(struct nvme_handle *handle, vmk_uint32 nsId, int status);
 
 /**
   * NVMe firmware operation interfaces
@@ -288,7 +288,7 @@ Nvme_FWActivate(struct nvme_handle *handle, int slot, int action, int *cmdStatus
 int Nvme_GetTelemetryData(struct nvme_handle *handle, char *telemetryPath,
                           int lid, int dataArea);
 
-int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid,
+int Nvme_GetLogPage(struct nvme_handle *handle, int lid, vmk_uint32 nsid,
                     void *logData, int dataLen, vmk_uint64 offset, int rae,
                     int lsp, int lsi, int uuid);
 

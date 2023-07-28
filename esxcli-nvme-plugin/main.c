@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2014-2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2014-2023 VMware, Inc. All rights reserved.
  *****************************************************************************/
 
 /**
@@ -655,7 +655,7 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
 {
    int                         ch;
    int                         rc;
-   int                         nsId;
+   vmk_uint32                  nsId;
    struct nvme_adapter_list    list;
    const char                  *vmhba = NULL;
    struct nvme_handle          *handle;
@@ -745,7 +745,7 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
    idNs->nmic = nmic & VMK_NVME_NS_IDENT_NMIC_MC;
 
    nsId = Nvme_NsMgmtCreate(handle, idNs, &cmdStatus);
-   if (nsId == -1) {
+   if (nsId == 0) {
       switch (cmdStatus) {
          case 0x0:
             Error("Failed to execute create namespace request.");
@@ -1258,216 +1258,6 @@ out:
    Nvme_Close(handle);
 }
 
-
-void
-NvmePlugin_DeviceNsOnline(int argc, const char *argv[])
-{
-   int                      ch;
-   int                      rc;
-   const char               *vmhba = NULL;
-   struct nvme_adapter_list list;
-   struct nvme_handle       *handle;
-   vmk_uint32               nsId = 0;
-   int                      status;
-
-   while ((ch = getopt(argc, (char *const*)argv, "A:n:")) != -1) {
-      switch (ch) {
-         case 'A':
-            vmhba = optarg;
-            break;
-
-         case 'n':
-            nsId = atoi(optarg);
-            break;
-
-         default:
-            Error("Invalid parameter.");
-            return;
-      }
-   }
-
-
-   if (vmhba == NULL) {
-      Error("Invalid parameter.");
-      return;
-   }
-
-   // do stuff for nvme device namespace list -A vmhbax.
-   rc = Nvme_GetAdapterList(&list);
-   if (rc != 0) {
-      Error("Adapter not found.");
-      return;
-   }
-
-   handle = Nvme_Open(&list, vmhba);
-   if (handle == NULL) {
-      Error("Failed to open device.");
-      return;
-   }
-
-   rc = Nvme_ValidNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to validate nsId %d.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Invalid namespace Id %d.", nsId);
-      goto out;
-   }
-
-   rc = Nvme_AllocatedNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to check Namespace Id %d is created.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Namespace %d is not created.", nsId);
-      goto out;
-   }
-
-   rc = Nvme_AttachedNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to check Namespace Id %d is attached.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Namespace %d is not attached.", nsId);
-      goto out;
-   }
-
-   /* Check the namespace status.*/
-   rc = Nvme_NsGetStatus(handle, nsId, &status);
-   if (rc) {
-      Error("Failed to get device status of namespace %d.", nsId);
-      goto out;
-   }
-
-   /* If namespace is offline, Online namespace. */
-   if (status == NS_OFFLINE) {
-      rc = Nvme_NsSetStatus(handle, nsId, NS_ONLINE);
-      if (rc) {
-         Error("Failed to online namespace.");
-         goto out;
-      }
-   } else {
-      Error("Namespace is already online.");
-      goto out;
-   }
-
-   esxcli_xml_begin_output();
-   xml_list_begin("string");
-   printf("<string>Namespace %d online successfully.</string>", nsId);
-   xml_list_end();
-   esxcli_xml_end_output();
-
-out:
-   Nvme_Close(handle);
-}
-
-void
-NvmePlugin_DeviceNsOffline(int argc, const char *argv[])
-{
-   int                      ch;
-   int                      rc;
-   int                      status = 0;
-   const char              *vmhba = NULL;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-   vmk_uint32               nsId = 0;
-
-   while ((ch = getopt(argc, (char *const*)argv, "A:n:")) != -1) {
-      switch (ch) {
-         case 'A':
-            vmhba = optarg;
-            break;
-
-         case 'n':
-            nsId = atoi(optarg);
-            break;
-
-         default:
-            Error("Invalid parameter.");
-            return;
-      }
-   }
-
-
-   if (vmhba == NULL) {
-      Error("Invalid parameter.");
-      return;
-   }
-
-   // do stuff for nvme device namespace list -A vmhbax.
-   rc = Nvme_GetAdapterList(&list);
-   if (rc != 0) {
-      Error("Adapter not found.");
-      return;
-   }
-
-   handle = Nvme_Open(&list, vmhba);
-   if (handle == NULL) {
-      Error("Failed to open device.");
-      return;
-   }
-
-   /* Check the namespace status.*/
-   rc = Nvme_NsGetStatus(handle, nsId, &status);
-   if (rc) {
-      Error("Failed to get device status of namespace %d.", nsId);
-      goto out;
-   }
-
-   rc = Nvme_ValidNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to validate nsId %d.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Invalid namespace Id %d.", nsId);
-      goto out;
-   }
-
-   rc = Nvme_AllocatedNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to check Namespace Id %d is created.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Namespace %d is not created.", nsId);
-      goto out;
-   }
-
-   rc = Nvme_AttachedNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to check Namespace Id %d is attached.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Namespace %d is not attached.", nsId);
-      goto out;
-   }
-
-   if (status == NS_ONLINE) {
-      rc = Nvme_NsSetStatus(handle, nsId, NS_OFFLINE);
-      if (rc) {
-         Error("Failed to offline namespace.");
-         goto out;
-      }
-   } else {
-      Error("Namespace is already offline.");
-      goto out;
-   }
-
-   esxcli_xml_begin_output();
-   xml_list_begin("string");
-   printf("<string>Namespace %d offline successfully.</string>", nsId);
-   xml_list_end();
-   esxcli_xml_end_output();
-
-out:
-   Nvme_Close(handle);
-}
-
 void
 NvmePlugin_DeviceListController(int argc, const char *argv[])
 {
@@ -1585,7 +1375,7 @@ void
 NvmePlugin_DeviceNsList(int argc, const char *argv[])
 {
    int                      ch, rc;
-   vmk_uint32               i, j, k, numNs;
+   vmk_uint32               i, j, numNs;
    const char               *vmhba = NULL;
    struct nvme_adapter_list list;
    struct nvme_ns_list      *nsAllocatedList = NULL;
@@ -1597,7 +1387,8 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    int  *statusFlags = NULL;
    int   nsStatus;
    VMK_ReturnStatus status;
-   BOOL nsMgmtSupt = false;
+   BOOL activeNsListSupt = false;
+   BOOL allocatedNsListSupt = false;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:")) != -1) {
       switch (ch) {
@@ -1632,99 +1423,122 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    idCtrlr = malloc(sizeof(*idCtrlr));
    if (idCtrlr == NULL) {
       Error("Out of memory.");
+      LogError("Failed to allocate identify controller data.");
       goto out;
    }
-
+   memset(idCtrlr, 0, sizeof(*idCtrlr));
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
    if (rc != 0) {
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free;
    }
-
-   rc = Nvme_NsMgmtAttachSupport(handle);
-   if (rc == -1) {
-      Error("Failed to check capability of namespace management and attachment.");
+   //TODO: Support larger namesapce IDs
+   numNs = idCtrlr->nn < 1024 ? idCtrlr->nn : 1024;
+   if (numNs == 0) {
+      Error("Invalid number of namespaces.");
       goto out_free;
-   } else if (rc == 1) {
-      nsMgmtSupt = true;
+   }
+
+   if (idCtrlr->oacs & VMK_NVME_CTLR_IDENT_OACS_NS_MGMT) {
+      allocatedNsListSupt = true;
       nsAllocatedList = malloc(sizeof(*nsAllocatedList));
       if (nsAllocatedList == NULL) {
          Error("Out of memory.");
+         LogError("Failed to allocate allocated namespace list.");
          goto out_free;
       }
-
-      nsActiveList = malloc(sizeof(*nsActiveList));
-      if (nsActiveList == NULL) {
-         Error("Out of memory.");
-         goto out_free_allocated;
-      }
-
+      memset(nsAllocatedList, 0, sizeof(*nsAllocatedList));
       rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS,
                          0, 0, nsAllocatedList);
       if (rc != 0) {
          Error("Failed to get allocated namespace list, 0x%x.", rc);
-         goto out_free_active;
-      }
-
-      rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS_ACTIVE,
-                         0, 0, nsActiveList);
-      if (rc != 0) {
-         Error("Failed to attached namespace list, 0x%x.", rc);
-         goto out_free_active;
+         goto out_free;
       }
    }
 
-   numNs = idCtrlr->nn < NVME_MAX_NAMESPACE_PER_CONTROLLER ?
-           idCtrlr->nn : NVME_MAX_NAMESPACE_PER_CONTROLLER;
+   if ((idCtrlr->ver.mjr == 1 && idCtrlr->ver.mnr >=1) ||
+       (idCtrlr->ver.mjr > 1)) {
+      activeNsListSupt = true;
+      nsActiveList = malloc(sizeof(*nsActiveList));
+      if (nsActiveList == NULL) {
+         Error("Out of memory.");
+         LogError("Failed to allocate active namespace list.");
+         goto out_free;
+      }
+      memset(nsActiveList, 0, sizeof(*nsActiveList));
+      rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS_ACTIVE,
+                         0, 0, nsActiveList);
+      if (rc != 0) {
+         Error("Failed to get active namespace list, 0x%x.", rc);
+         goto out_free;
+      }
+   }
 
    devNames = (char(*)[MAX_DEV_NAME_LEN])malloc(numNs * sizeof(char) * MAX_DEV_NAME_LEN);
-   statusFlags = (int *)malloc(numNs * sizeof(int));
+   if (devNames == NULL) {
+      Error("Out of memory");
+      LogError("Failed to allocate device name list.");
+      goto out_free;
+   }
    memset(devNames, 0, numNs * sizeof(*devNames));
+
+   statusFlags = (int *)malloc(numNs * sizeof(int));
+   if (statusFlags == NULL) {
+      Error("Out of memory");
+      LogError("Failed to allocate status flag list.");
+      goto out_free;
+   }
    memset(statusFlags, 0, numNs * sizeof(*statusFlags)); // Init as NS_UNALLOCATED
 
+   if (allocatedNsListSupt) {
+      for (j = 0; j < 1024; j++) {
+         i = nsAllocatedList->nsId[j];
+         if (i == 0 || i > numNs) {
+            break;
+         } else {
+            statusFlags[i-1] = NS_ALLOCATED;
+         }
+      }
+   }
+
+   if (activeNsListSupt) {
+      for (j = 0; j < 1024; j++) {
+         i = nsActiveList->nsId[j];
+         if (i == 0 || i > numNs) {
+            break;
+         } else {
+            statusFlags[i-1] = NS_ACTIVE;
+         }
+      }
+   }
+
    for (i = 1; i <= numNs; i++) {
-      if (nsMgmtSupt) {
-         for (j = 0; j < numNs; j ++) {
-            if (nsActiveList->nsId[j] == 0 || nsActiveList->nsId[j] > i) {
-               break;
-            }
-            if (nsActiveList->nsId[j] == i) {
-               statusFlags[i-1] = NS_ACTIVE;
-               break;
-            }
-         }
-         if (statusFlags[i-1] != NS_ACTIVE) {
-            for (k = 0; k < numNs; k ++) {
-               if (nsAllocatedList->nsId[k] == 0 || nsAllocatedList->nsId[k] > i) {
-                  break;
-               }
-               if (nsAllocatedList->nsId[k] == i) {
-                  statusFlags[i-1] = NS_ALLOCATED;
-                  snprintf(devNames[i-1], MAX_DEV_NAME_LEN, "N/A");
-                  break;
-               }
-            }
-            continue;
-         }
-      } else {
+      if (!activeNsListSupt) {
          statusFlags[i-1] = NS_ACTIVE;
       }
+      if (statusFlags[i-1] == NS_ALLOCATED) {
+         snprintf(devNames[i-1], MAX_DEV_NAME_LEN, "N/A");
+      }
+      if (statusFlags[i-1] != NS_ACTIVE) {
+         continue;
+      }
+
       snprintf(runtimeName, MAX_DEV_NAME_LEN, "%s:C0:T0:L%d", vmhba, i-1);
       status = GetDeviceName(runtimeName, devNames[i-1], MAX_DEV_NAME_LEN);
       if (status == VMK_FAILURE) {
          Error("Failed to get device name of namespace %d.", i);
-         goto out_free_active;
+         goto out_free;
       }
 
       rc = Nvme_NsGetStatus(handle, i, &nsStatus);
       if (rc) {
          Error("Failed to get device status of namespace %d.", i);
-         goto out_free_active;
+         goto out_free;
       }
 
-      if (status == VMK_NOT_FOUND && nsStatus == VMK_NOT_FOUND) {
-         /* Mark statusFlags as NS_UNALLOCATED if namespace is not created */
-         statusFlags[i-1] = NS_UNALLOCATED;
+      if (nsStatus == VMK_NOT_FOUND) {
+         //Shouldn't happen
+         LogError("Namespace %d is active but is not found in driver's namespace list.", i);
       }
 
       if (status == VMK_NOT_FOUND && nsStatus == NS_ONLINE) {
@@ -1732,7 +1546,7 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
          snprintf(devNames[i-1], MAX_DEV_NAME_LEN, "N/A (Unclaimed)");
       }
 
-      if (statusFlags[i-1] == NS_ACTIVE && nsStatus == NS_OFFLINE) {
+      if (nsStatus == NS_OFFLINE) {
          /* Invalid format, namespace is not supported or namespace is offline.*/
          snprintf(devNames[i-1], MAX_DEV_NAME_LEN,
                   "N/A (Unsupported Format or Namespace Offline)");
@@ -1753,16 +1567,16 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    xml_list_end();
    esxcli_xml_end_output();
 
-out_free_active:
+out_free:
    if (nsActiveList) {
       free(nsActiveList);
    }
-out_free_allocated:
    if (nsAllocatedList) {
       free(nsAllocatedList);
    }
-out_free:
-   free(idCtrlr);
+   if (idCtrlr) {
+      free(idCtrlr);
+   }
    if (devNames) {
       free(devNames);
    }
@@ -1776,7 +1590,8 @@ out:
 void
 NvmePlugin_DeviceNsGet(int argc, const char *argv[])
 {
-   int                          ch, rc, nsId = 0;
+   int                          ch, rc = 0;
+   vmk_uint32                   nsId = 0;
    const char                   *vmhba = NULL;
    struct nvme_adapter_list     list;
    struct nvme_handle           *handle;
@@ -1798,7 +1613,7 @@ NvmePlugin_DeviceNsGet(int argc, const char *argv[])
       }
    }
 
-   if (vmhba == NULL || nsId <= 0) {
+   if (vmhba == NULL || nsId == 0) {
       Error("Invalid parameter.");
       return;
    }
@@ -1814,36 +1629,6 @@ NvmePlugin_DeviceNsGet(int argc, const char *argv[])
    if (handle == NULL) {
       Error("Failed to open device.");
       return;
-   }
-
-   rc = Nvme_ValidNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to validate nsId %d.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Invalid namespace Id %d.", nsId);
-      goto out;
-   }
-
-   rc = Nvme_AllocatedNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to check Namespace Id %d is created.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Namespace %d is not created.", nsId);
-      goto out;
-   }
-
-   rc = Nvme_AttachedNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to check Namespace Id %d is attached.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Namespace %d is not attached.", nsId);
-      goto out;
    }
 
    idNs = malloc(sizeof(*idNs));
@@ -1930,7 +1715,7 @@ void
 NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
 {
    char *vmhba = NULL;
-   int  nsId = -1;
+   vmk_uint32 nsId = 0;
    int  f = -1, s = -1, l = -1, p = -1, m = -1;
    int  rc;
    struct nvme_adapter_list    list;
@@ -2005,16 +1790,6 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
    }
    if (rc == 0) {
       Error("Invalid namespace Id %d.", nsId);
-      goto out;
-   }
-
-   rc = Nvme_AllocatedNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to check Namespace Id %d is created.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Namespace %d is not created.", nsId);
       goto out;
    }
 
@@ -2208,7 +1983,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
    char *vmhba = NULL;
    char *lidStr = NULL;
    int  lid = 0;
-   int  nsId = VMK_NVME_DEFAULT_NSID;
+   vmk_uint32  nsId = VMK_NVME_DEFAULT_NSID;
    int  elpe = 0;
    int  dataArea = 0;
    int  lsp = 0;
@@ -2440,17 +2215,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
   if (setNsid) {
       if (lid == VMK_NVME_LID_SMART_HEALTH &&
           (idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_SMART_PER_NS)) {
-         if (nsId < 1 || nsId > (int)idCtrlr->nn) {
-            rc = Nvme_AllocatedNsId(handle, nsId);
-            if (rc == -1) {
-               Error("Failed to check Namespace Id %d is created.", nsId);
-               goto out_free;
-            }
-            if (rc == 0) {
-               Error("Namespace %d is not created.", nsId);
-               goto out_free;
-            }
-
+         if (nsId != VMK_NVME_DEFAULT_NSID) {
             rc = Nvme_AttachedNsId(handle, nsId);
             if (rc == -1) {
                Error("Failed to check Namespace Id %d is attached.", nsId);
@@ -2626,8 +2391,8 @@ LookupSelect(const char *sel)
    return -1;
 }
 
-typedef void (*GetFeatureFunc)(struct nvme_handle*, int, int);
-typedef void (*SetFeatureFunc)(struct nvme_handle*, int, int, int, const char**);
+typedef void (*GetFeatureFunc)(struct nvme_handle*, int, vmk_uint32);
+typedef void (*SetFeatureFunc)(struct nvme_handle*, int, vmk_uint32, int, const char**);
 
 struct Feature {
    vmk_uint8      fid;
@@ -2939,7 +2704,7 @@ SetFeature(struct nvme_handle *handle,
    }
 }
 
-void getFeature_01h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_01h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
 
@@ -2963,7 +2728,7 @@ void getFeature_01h(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_01h(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -3060,7 +2825,7 @@ setFeature_01h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_02h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_02h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
 
@@ -3079,7 +2844,7 @@ void getFeature_02h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_02h(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void setFeature_02h(struct nvme_handle *handle, int save, vmk_uint32 nsId, int argc, const char **argv)
 {
    int   ch, rc, workload = 0, powerState = 0;
    char *workloadStr = NULL;
@@ -3154,7 +2919,7 @@ void setFeature_02h(struct nvme_handle *handle, int save, int nsId, int argc, co
    }
 }
 
-void getFeature_03h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_03h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc, numRanges, i;
    vmk_uint8 buf[4096];
@@ -3213,7 +2978,7 @@ void getFeature_03h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_04h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int rc;
    vmk_uint32 sensor = 0, overThreshold = 0, underThreshold = 0;
@@ -3281,7 +3046,7 @@ void getFeature_04h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void setFeature_04h(struct nvme_handle *handle, int save, int nsId, int argc, const char **argv)
+void setFeature_04h(struct nvme_handle *handle, int save, vmk_uint32 nsId, int argc, const char **argv)
 {
    int   ch, rc, sensor = 0, under = 0, threshold = 0;
    char *sensorStr = NULL;
@@ -3367,7 +3132,7 @@ void setFeature_04h(struct nvme_handle *handle, int save, int nsId, int argc, co
    }
 }
 
-void getFeature_05h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_05h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
    vmk_NvmeIdentifyController idCtrlr;
@@ -3411,7 +3176,7 @@ void getFeature_05h(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_05h(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -3511,7 +3276,7 @@ setFeature_05h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_06h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_06h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
    vmk_NvmeIdentifyController idCtrlr;
@@ -3544,7 +3309,7 @@ void getFeature_06h(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_06h(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -3601,7 +3366,7 @@ setFeature_06h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_07h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_07h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
 
@@ -3620,7 +3385,7 @@ void getFeature_07h(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void getFeature_08h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_08h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
 
@@ -3642,7 +3407,7 @@ void getFeature_08h(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_08h(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -3700,7 +3465,7 @@ setFeature_08h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_09h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc, vectNum, i, cdw11;
    NvmeUserIo uioVect;
@@ -3735,7 +3500,7 @@ void getFeature_09h(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_09h(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -3816,7 +3581,7 @@ setFeature_09h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_0ah(struct nvme_handle *handle, int select, int nsId)
+void getFeature_0ah(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
 
@@ -3837,7 +3602,7 @@ void getFeature_0ah(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_0ah(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -3886,7 +3651,7 @@ setFeature_0ah(struct nvme_handle *handle,
 
 }
 
-void getFeature_0bh(struct nvme_handle *handle, int select, int nsId)
+void getFeature_0bh(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
 
@@ -3917,7 +3682,7 @@ void getFeature_0bh(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_0bh(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -4008,7 +3773,7 @@ setFeature_0bh(struct nvme_handle *handle,
    }
 }
 
-void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
+void getFeature_0ch(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc, i;
    vmk_NvmeIdentifyController idCtrlr;
@@ -4052,7 +3817,7 @@ void getFeature_0ch(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
+void getFeature_0dh(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
    vmk_uint32 buf[1024];
@@ -4097,7 +3862,7 @@ void getFeature_0dh(struct nvme_handle *handle, int select, int nsId)
    esxcli_xml_end_output();
 }
 
-void getFeature_0fh(struct nvme_handle *handle, int select, int nsId)
+void getFeature_0fh(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
    vmk_NvmeIdentifyController idCtrlr;
@@ -4131,7 +3896,7 @@ void getFeature_0fh(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_0fh(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -4185,7 +3950,7 @@ setFeature_0fh(struct nvme_handle *handle,
    }
 }
 
-void getFeature_80h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_80h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
 
@@ -4206,7 +3971,7 @@ void getFeature_80h(struct nvme_handle *handle, int select, int nsId)
 void
 setFeature_80h(struct nvme_handle *handle,
                int save,
-               int nsId,
+               vmk_uint32 nsId,
                int argc,
                const char **argv)
 {
@@ -4227,7 +3992,7 @@ setFeature_80h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_81h(struct nvme_handle *handle, int select, int nsId)
+void getFeature_81h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
 {
    int value, rc;
    vmk_uint8 buf[16];
@@ -4544,22 +4309,13 @@ NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
    }
 
    if (nsId > 0 && nsId != VMK_NVME_DEFAULT_NSID) {
-      rc = Nvme_ValidNsId(handle, nsId);
+      rc = Nvme_AttachedNsId(handle, nsId);
       if (rc == -1) {
-         Error("Failed to validate nsId %d.", nsId);
+         Error("Failed to check Namespace Id %d is attached.", nsId);
          goto out;
       }
       if (rc == 0) {
-         Error("Invalid namespace Id %d.", nsId);
-         goto out;
-      }
-      rc = Nvme_AllocatedNsId(handle, nsId);
-      if (rc == -1) {
-         Error("Failed to check Namespace Id %d is created.", nsId);
-         goto out;
-      }
-      if (rc == 0) {
-         Error("Invalid parameter: Namespace %d is not created.", nsId);
+         Error("Invalid parameter: Namespace %d is not attached.", nsId);
          goto out;
       }
    }
@@ -4671,22 +4427,13 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
    }
 
    if (nsId > 0 && nsId != VMK_NVME_DEFAULT_NSID) {
-      rc = Nvme_ValidNsId(handle, nsId);
+      rc = Nvme_AttachedNsId(handle, nsId);
       if (rc == -1) {
-         Error("Failed to validate nsId %d.", nsId);
+         Error("Failed to check Namespace Id %d is attached.", nsId);
          goto out;
       }
       if (rc == 0) {
-         Error("Invalid namespace Id %d.", nsId);
-         goto out;
-      }
-      rc = Nvme_AllocatedNsId(handle, nsId);
-      if (rc == -1) {
-         Error("Failed to check Namespace Id %d is created.", nsId);
-         goto out;
-      }
-      if (rc == 0) {
-         Error("Invalid parameter: Namespace %d is not created.", nsId);
+         Error("Invalid parameter: Namespace %d is not attached.", nsId);
          goto out;
       }
    }
@@ -5492,16 +5239,6 @@ static struct Command commands[] = {
    {
       "nvme.device.controller.list",
       NvmePlugin_DeviceListController,
-      NVME_NS_MGMT,
-   },
-   {
-      "nvme.device.namespace.online",
-      NvmePlugin_DeviceNsOnline,
-      NVME_NS_MGMT,
-   },
-   {
-      "nvme.device.namespace.offline",
-      NvmePlugin_DeviceNsOffline,
       NVME_NS_MGMT,
    },
    {

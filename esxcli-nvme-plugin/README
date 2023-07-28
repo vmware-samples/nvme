@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2023/7/20 1.2.0.53-1vmw
+
+   Make the NSID check compatiable with NVMe spec.
+
 2022/5/19 1.2.0.52-1vmw
 
    Add two commands to list and set plugin's configurable parameters.

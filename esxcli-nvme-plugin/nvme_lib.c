@@ -1,5 +1,5 @@
 /*********************************************************************************
- * Copyright (c) 2013-2022 VMware, Inc. All rights reserved.
+ * Copyright (c) 2013-2023 VMware, Inc. All rights reserved.
  * ******************************************************************************/
 
 #include <assert.h>
@@ -322,7 +322,7 @@ Nvme_AdminPassthru_error(struct nvme_handle *handle,int cmd, NvmeUserIo *uio)
  * @return 0 if successful
  */
 int
-Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, int nsId, void *id)
+Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, vmk_uint32 nsId, void *id)
 {
    int rc = 0;
    NvmeUserIo uio;
@@ -392,10 +392,10 @@ out:
  *         return -1 if check failure.
  */
 int
-Nvme_ValidNsId(struct nvme_handle *handle, int nsId)
+Nvme_ValidNsId(struct nvme_handle *handle, vmk_uint32 nsId)
 {
    int                       rc = 0;
-   int                       numNs = 0;
+   vmk_uint32                numNs = 0;
    vmk_NvmeIdentifyController   *idCtrlr;
 
    idCtrlr = malloc(sizeof(*idCtrlr));
@@ -410,9 +410,9 @@ Nvme_ValidNsId(struct nvme_handle *handle, int nsId)
       goto free_id;
    }
 
-   numNs = (int)idCtrlr->nn;
+   numNs = idCtrlr->nn;
 
-   rc =  (nsId > numNs || nsId > NVME_MAX_NAMESPACE_PER_CONTROLLER || nsId < 1) ? 0 : 1;
+   rc =  (nsId > numNs || nsId < 1) ? 0 : 1;
 
 free_id:
    free(idCtrlr);
@@ -420,7 +420,7 @@ free_id:
 }
 
 /**
- * Check if namespace is created.
+ * Check if namespace is allocated.
  *
  * @retval return 1 if nsId is allocated.
  *         return 0 if nsId is not allocated.
@@ -428,24 +428,15 @@ free_id:
  * @Note   Assume nsId is valid
  */
 int
-Nvme_AllocatedNsId(struct nvme_handle *handle, int nsId)
+Nvme_AllocatedNsId(struct nvme_handle *handle, vmk_uint32 nsId)
 {
-   int                       i = 0;
-   int                       rc = 0;
-   int                       entryNum = 0;
-   struct nvme_ns_list       *nsList;
+   int                        i = 0;
+   int                        rc = 0;
+   int                        entryNum = 0;
+   struct nvme_ns_list        *nsList;
 
-   rc = Nvme_NsMgmtAttachSupport(handle);
-   if (rc == -1) {
-      goto out;
-   }
-   if (rc == 0) {
-      /**
-       * Assume valid namespace is allocated automatically on controller
-       * not supporting namespace mgmt and attachment.
-       */
-      rc = 1;
-      goto out;
+   if (nsId == 0) {
+      return 0;
    }
 
    nsList = malloc(sizeof(*nsList));
@@ -456,8 +447,12 @@ Nvme_AllocatedNsId(struct nvme_handle *handle, int nsId)
    }
 
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS,
-                      0, 0, nsList);
+                      0, nsId - 1, nsList);
    if (rc != 0) {
+      /**
+       * For NVMe controllers which don't support allocated namespace list,
+       * there is no way to check whether the namespace is allocated.
+       */
       rc = -1;
       goto free_nsList;
    }
@@ -487,35 +482,53 @@ out:
  * @Note   Assume nsId is valid
  */
 int
-Nvme_AttachedNsId(struct nvme_handle *handle, int nsId)
+Nvme_AttachedNsId(struct nvme_handle *handle, vmk_uint32 nsId)
 {
    int                       i = 0;
    int                       rc = 0;
    int                       entryNum = 0;
    struct nvme_ns_list       *nsList;
+   vmk_NvmeIdentifyController *idCtrlr;
 
-   rc = Nvme_NsMgmtAttachSupport(handle);
-   if (rc == -1) {
-      goto out;
+   if (nsId == 0) {
+      return 0;
    }
-   if (rc == 0) {
+
+   idCtrlr = malloc(sizeof(*idCtrlr));
+   if (idCtrlr == NULL) {
+      LogError("Failed to allocate identify data.");
+      return -1;
+   }
+
+   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_CONTROLLER, 0, 0, idCtrlr);
+   if (rc) {
+      rc = -1;
+      goto free_id;
+   }
+
+   if (idCtrlr->ver.mjr == 1 && idCtrlr->ver.mnr < 1) {
       /**
-       * Assume valid namespace is attached automatically on controller
-       * not supporting namespace mgmt and attachment.
+       * 1.0 NVMe controllers don't support active namespace list,
+       * and there is no definition of active and inactive NSID in
+       * spec 1.0, thus assume a valid NSID is an active NSID.
        */
-      rc = 1;
-      goto out;
+      if (nsId <= idCtrlr->nn) {
+         rc = 1;
+      } else {
+         rc = 0;
+      }
+      goto free_id;
    }
 
    nsList = malloc(sizeof(*nsList));
    if (nsList == NULL) {
       LogError("Failed to allocate ns list.");
       rc = -1;
-      goto out;
+      goto free_id;
    }
 
    rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS_ACTIVE,
-                      0, 0, nsList);
+                      0, nsId - 1, nsList);
    if (rc != 0) {
       rc = -1;
       goto free_nsList;
@@ -533,7 +546,8 @@ Nvme_AttachedNsId(struct nvme_handle *handle, int nsId)
 
 free_nsList:
    free(nsList);
-out:
+free_id:
+   free(idCtrlr);
    return rc;
 }
 
@@ -543,9 +557,9 @@ out:
   * @param [in] handle handle to a device
   * @param [in] idNs   attributes for the namespace to be created
   *
-  * @return nsId if creating namespace successfully, otherwise return -1
+  * @return nsId if creating namespace successfully, otherwise return 0
   */
-int
+vmk_uint32
 Nvme_NsMgmtCreate(struct nvme_handle *handle,
                   vmk_NvmeIdentifyNamespace *idNs,
                   int *cmdStatus)
@@ -567,10 +581,10 @@ Nvme_NsMgmtCreate(struct nvme_handle *handle,
       *cmdStatus = (uio.comp.dw3.sct << 8) | uio.comp.dw3.sc;
    }
    if (rc != 0) {
-      return -1;
+      return 0;
    }
 
-   return (int)uio.comp.dw0;
+   return uio.comp.dw0;
 }
 
 /**
@@ -583,7 +597,7 @@ Nvme_NsMgmtCreate(struct nvme_handle *handle,
   * TODO: Return status code to indicate the failure reason
   */
 int
-Nvme_NsMgmtDelete(struct nvme_handle *handle, int nsId)
+Nvme_NsMgmtDelete(struct nvme_handle *handle, vmk_uint32 nsId)
 {
    NvmeUserIo uio;
 
@@ -609,7 +623,7 @@ Nvme_NsMgmtDelete(struct nvme_handle *handle, int nsId)
   * @return 0 if successful
   */
 int
-Nvme_NsAttach(struct nvme_handle *handle, int sel, int nsId,
+Nvme_NsAttach(struct nvme_handle *handle, int sel, vmk_uint32 nsId,
               struct nvme_ctrlr_list *ctrlrList, int *cmdStatus)
 {
    NvmeUserIo uio;
@@ -633,10 +647,21 @@ Nvme_NsAttach(struct nvme_handle *handle, int sel, int nsId,
 }
 
 int
-Nvme_NsUpdate(struct nvme_handle *handle, int nsId)
+Nvme_NsUpdate(struct nvme_handle *handle, vmk_uint32 nsId)
 {
    int rc = 0;
    NvmeUserIo uio;
+
+   /**
+    * Since the namespace ID defined in uio is uint8, the value
+    * larger than UINT8_MAX is not supported.
+    * TODO: The structure NvmeUserIo change should consider the
+    * backward compatibility.
+    *
+    */
+   if (nsId > VMK_UINT8_MAX) {
+      rc = -ENOTSUP;
+   }
 
    memset(&uio, 0, sizeof(uio));
    uio.namespaceID = nsId;
@@ -650,10 +675,18 @@ Nvme_NsUpdate(struct nvme_handle *handle, int nsId)
 }
 
 int
-Nvme_NsListUpdate(struct nvme_handle *handle, int sel, int nsId)
+Nvme_NsListUpdate(struct nvme_handle *handle, int sel, vmk_uint32 nsId)
 {
    int rc = 0;
    NvmeUserIo uio;
+
+   /**
+    * Since the namespace ID defined in uio is uint8, the value
+    * larger than UINT8_MAX is not supported.
+    */
+   if (nsId > VMK_UINT8_MAX) {
+      rc = -ENOTSUP;
+   }
 
    memset(&uio, 0, sizeof(uio));
    uio.namespaceID = nsId;
@@ -668,10 +701,18 @@ Nvme_NsListUpdate(struct nvme_handle *handle, int sel, int nsId)
 }
 
 int
-Nvme_NsGetStatus(struct nvme_handle *handle, int nsId, int *status)
+Nvme_NsGetStatus(struct nvme_handle *handle, vmk_uint32 nsId, int *status)
 {
    int rc = 0;
    NvmeUserIo uio;
+
+   /**
+    * Since the namespace ID defined in uio is uint8, the value
+    * larger than UINT8_MAX is not supported.
+    */
+   if (nsId > VMK_UINT8_MAX) {
+      rc = -ENOTSUP;
+   }
 
    memset(&uio, 0, sizeof(uio));
    uio.namespaceID = nsId;
@@ -685,11 +726,19 @@ Nvme_NsGetStatus(struct nvme_handle *handle, int nsId, int *status)
 }
 
 int
-Nvme_NsSetStatus(struct nvme_handle *handle, int nsId, int status)
+Nvme_NsSetStatus(struct nvme_handle *handle, vmk_uint32 nsId, int status)
 {
    int rc = 0;
    int cmd;
    NvmeUserIo uio;
+
+   /**
+    * Since the namespace ID defined in uio is uint8, the value
+    * larger than UINT8_MAX is not supported.
+    */
+   if (nsId > VMK_UINT8_MAX) {
+      rc = -ENOTSUP;
+   }
 
    memset(&uio, 0, sizeof(uio));
    uio.namespaceID = nsId;
@@ -721,7 +770,7 @@ Nvme_NsSetStatus(struct nvme_handle *handle, int nsId, int status)
   */
 int
 Nvme_CreateNamespace_IDT(struct nvme_handle *handle,
-                         int ns,
+                         vmk_uint32 ns,
                          vmk_uint32 snu,
                          vmk_uint32 nnu)
 {
@@ -751,7 +800,7 @@ Nvme_CreateNamespace_IDT(struct nvme_handle *handle,
  *
  * return 0 if successful
  */
-int Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, int ns)
+int Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, vmk_uint32 ns)
 {
    int rc = 0;
    NvmeUserIo uio;
@@ -1062,7 +1111,7 @@ Nvme_FormatNvm(struct nvme_handle *handle,
                int pi,
                int ms,
                int lbaf,
-               int ns)
+               vmk_uint32 ns)
 {
    int rc = 0;
    NvmeUserIo uio;
@@ -1388,7 +1437,7 @@ Nvme_GetPersistentEventLog(struct nvme_handle *handle,
    return rc;
 }
 
-int Nvme_GetLogPage(struct nvme_handle *handle, int lid, int nsid, void *logData,
+int Nvme_GetLogPage(struct nvme_handle *handle, int lid, vmk_uint32 nsid, void *logData,
                     int dataLen, vmk_uint64 offset, int rae, int lsp, int lsi, int uuid)
 {
    int rc = -1;
