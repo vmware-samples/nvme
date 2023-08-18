@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2023/8/17 1.2.0.54-1vmw
+
+   Fix PR #3266820: Correct the controller version check in Nvme_AttachedNsId().
+
 2023/7/20 1.2.0.53-1vmw
 
    Make the NSID check compatiable with NVMe spec.

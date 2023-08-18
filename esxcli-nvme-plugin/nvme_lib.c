@@ -506,7 +506,8 @@ Nvme_AttachedNsId(struct nvme_handle *handle, vmk_uint32 nsId)
       goto free_id;
    }
 
-   if (idCtrlr->ver.mjr == 1 && idCtrlr->ver.mnr < 1) {
+   if ((idCtrlr->ver.mjr == 1 && idCtrlr->ver.mnr < 1) ||
+       idCtrlr->ver.mjr < 1) {
       /**
        * 1.0 NVMe controllers don't support active namespace list,
        * and there is no definition of active and inactive NSID in
