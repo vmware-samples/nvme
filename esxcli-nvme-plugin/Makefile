@@ -1,5 +1,4 @@
 # Copyright (c) 2015-2023 VMware, Inc. All rights reserved.
-# VMware Confidential
 #
 # Makefile
 #
@@ -14,7 +13,7 @@
 #
 
 UWTOOL = esxcli-nvme-plugin
-UWTOOL_VERSION = 1.2.0.52-1vmw
+UWTOOL_VERSION = 1.2.0.55-1vmw
 
 UWTOOL_SOURCES = main.c esxcli_xml.c nvme_lib.c
 

@@ -6,6 +6,11 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2023/9/5 1.2.0.55-1vmw
+
+   Fix PR #3244777: Refine function NvmePlugin_DeviceNsList().
+   This change also uses uio.cmd.cmd.nsId instead of uio.namespaceID to pass namespace ID to driver.
+
 2023/8/17 1.2.0.54-1vmw
 
    Fix PR #3266820: Correct the controller version check in Nvme_AttachedNsId().

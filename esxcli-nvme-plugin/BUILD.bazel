@@ -1,5 +1,4 @@
 # Copyright (c) 2023 VMware, Inc.  All rights reserved.
-# VMware Confidential
 
 load("//bora/bazel/esx:esx_debug_binary.bzl", "esx_debug_binary")
 

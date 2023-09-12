@@ -333,8 +333,6 @@ Nvme_Identify(struct nvme_handle *handle, int cns, int cntId, vmk_uint32 nsId, v
    uio.cmd.identify.cdw10.cns = cns;
    uio.cmd.identify.cdw10.cntid = cntId;
    uio.cmd.identify.nsid = nsId;
-
-   uio.namespaceID = nsId;
    uio.direction = XFER_FROM_DEV;
 
    uio.timeoutUs = adminTimeout;
@@ -653,19 +651,14 @@ Nvme_NsUpdate(struct nvme_handle *handle, vmk_uint32 nsId)
    int rc = 0;
    NvmeUserIo uio;
 
-   /**
-    * Since the namespace ID defined in uio is uint8, the value
-    * larger than UINT8_MAX is not supported.
-    * TODO: The structure NvmeUserIo change should consider the
-    * backward compatibility.
-    *
-    */
-   if (nsId > VMK_UINT8_MAX) {
-      rc = -ENOTSUP;
-   }
-
    memset(&uio, 0, sizeof(uio));
-   uio.namespaceID = nsId;
+   /* Before ESXi 8.0U3, driver uses uio.namespaceID. To make this tool work on older
+    * ESXi releases, also assign nsID to uio.namespaceID.
+    */
+   if (nsId <= VMK_UINT8_MAX) {
+      uio.namespaceID = nsId;
+   }
+   uio.cmd.cmd.nsid = nsId;
 
    rc = Nvme_Ioctl(handle, NVME_IOCTL_UPDATE_NS, &uio);
    if (!rc) {
@@ -681,16 +674,14 @@ Nvme_NsListUpdate(struct nvme_handle *handle, int sel, vmk_uint32 nsId)
    int rc = 0;
    NvmeUserIo uio;
 
-   /**
-    * Since the namespace ID defined in uio is uint8, the value
-    * larger than UINT8_MAX is not supported.
-    */
-   if (nsId > VMK_UINT8_MAX) {
-      rc = -ENOTSUP;
-   }
-
    memset(&uio, 0, sizeof(uio));
-   uio.namespaceID = nsId;
+   /* Before ESXi 8.0U3, driver uses uio.namespaceID. To make this tool work on older
+    * ESXi releases, also assign nsID to uio.namespaceID.
+    */
+   if (nsId <= VMK_UINT8_MAX) {
+      uio.namespaceID = nsId;
+   }
+   uio.cmd.nsAttach.nsid = nsId;
    uio.cmd.nsAttach.cdw10.sel = sel;
 
    rc = Nvme_Ioctl(handle, NVME_IOCTL_UPDATE_NS_LIST, &uio);
@@ -707,16 +698,14 @@ Nvme_NsGetStatus(struct nvme_handle *handle, vmk_uint32 nsId, int *status)
    int rc = 0;
    NvmeUserIo uio;
 
-   /**
-    * Since the namespace ID defined in uio is uint8, the value
-    * larger than UINT8_MAX is not supported.
-    */
-   if (nsId > VMK_UINT8_MAX) {
-      rc = -ENOTSUP;
-   }
-
    memset(&uio, 0, sizeof(uio));
-   uio.namespaceID = nsId;
+   /* Before ESXi 8.0U3, driver uses uio.namespaceID. To make this tool work on older
+    * ESXi releases, also assign nsID to uio.namespaceID.
+    */
+   if (nsId <= VMK_UINT8_MAX) {
+      uio.namespaceID = nsId;
+   }
+   uio.cmd.cmd.nsid = nsId;
 
    rc = Nvme_Ioctl(handle, NVME_IOCTL_GET_NS_STATUS, &uio);
    if (!rc) {
@@ -733,16 +722,14 @@ Nvme_NsSetStatus(struct nvme_handle *handle, vmk_uint32 nsId, int status)
    int cmd;
    NvmeUserIo uio;
 
-   /**
-    * Since the namespace ID defined in uio is uint8, the value
-    * larger than UINT8_MAX is not supported.
-    */
-   if (nsId > VMK_UINT8_MAX) {
-      rc = -ENOTSUP;
-   }
-
    memset(&uio, 0, sizeof(uio));
-   uio.namespaceID = nsId;
+   /* Before ESXi 8.0U3, driver uses uio.namespaceID. To make this tool work on older
+    * ESXi releases, also assign nsID to uio.namespaceID.
+    */
+   if (nsId <= VMK_UINT8_MAX) {
+      uio.namespaceID = nsId;
+   }
+   uio.cmd.cmd.nsid = nsId;
 
    if (status == NS_ONLINE) {
      cmd = NVME_IOCTL_SET_NS_ONLINE;
@@ -785,7 +772,6 @@ Nvme_CreateNamespace_IDT(struct nvme_handle *handle,
    uio.cmd.vendorSpecificCmd.cdw13 = snu;
    uio.cmd.vendorSpecificCmd.cdw14 = nnu;
    uio.cmd.vendorSpecificCmd.nsid = ns;
-   uio.namespaceID = ns;
    uio.timeoutUs = adminTimeout;
 
    rc = Nvme_AdminPassthru(handle, &uio);
@@ -808,7 +794,6 @@ int Nvme_DeleteNamespace_IDT(struct nvme_handle *handle, vmk_uint32 ns)
    memset(&uio, 0, sizeof(uio));
    uio.cmd.vendorSpecificCmd.cdw0.opc = IDT_SYSTEM_CONFIG;
    uio.cmd.vendorSpecificCmd.cdw12 = IDT_DELETE_NAMESPACE;
-   uio.namespaceID = ns;
    uio.cmd.vendorSpecificCmd.nsid = ns;
    uio.timeoutUs = adminTimeout;
    rc = Nvme_AdminPassthru(handle, &uio);
@@ -1125,7 +1110,6 @@ Nvme_FormatNvm(struct nvme_handle *handle,
    uio.cmd.format.cdw10.pi = pi;
    uio.cmd.format.cdw10.mset = ms;
    uio.cmd.format.cdw10.lbaf = lbaf;
-   uio.namespaceID = ns;
    /* Set timeout as 30mins, we do see some devices need
     * ~20 minutes to format.
     */
@@ -1133,6 +1117,13 @@ Nvme_FormatNvm(struct nvme_handle *handle,
       uio.timeoutUs = FORMAT_TIMEOUT;
    } else {
       uio.timeoutUs = adminTimeout;
+   }
+   /* NVMe driver will check the namespace status before executing format command.
+    * Before ESXi 8.0U3, driver uses uio.namespaceID. To make this tool work on older
+    * ESXi releases, also assign nsID to uio.namespaceID.
+    */
+   if (ns <= VMK_UINT8_MAX) {
+      uio.namespaceID = ns;
    }
    rc = Nvme_AdminPassthru(handle, &uio);
 

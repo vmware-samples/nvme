@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2020  VMware, Inc. All rights reserved.
+ * Copyright (c) 2020, 2023 VMware, Inc. All rights reserved.
  *****************************************************************************/
 
 /*
@@ -110,7 +110,17 @@ typedef struct NvmeUserIo {
       vmk_NvmeSubmissionQueueEntry cmd;
    } cmd;
    vmk_NvmeCompletionQueueEntry comp; /* Completion entry */
-   vmk_uint8 namespaceID;             /* Namespace ID, -1 for non-specific */
+   /**
+    * Before ESXi 8.0 U3, namespaceID is used in following IOCTLs to pass
+    * namespace ID to driver. The max supported namespace ID is 0xff.
+    *    NVME_IOCTL_SET_NS_ONLINE
+    *    NVME_IOCTL_SET_NS_OFFLINE
+    *    NVME_IOCTL_UPDATE_NS
+    *    NVME_IOCTL_GET_NS_STATUS
+    * Since ESXi 8.0 U3, this namespaceID is obsolete. All IOCTLs will
+    * use cmd.cmd.nsid to pass namespace ID.
+    */
+   vmk_uint8 namespaceID;
    vmk_uint8 direction;               /* direction TO_DEVICE/FROM_DEVICE */
    vmk_uint16 reserved;               /* reserved */
    vmk_uint32 status;                 /* Command status */

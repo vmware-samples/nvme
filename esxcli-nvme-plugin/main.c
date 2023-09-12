@@ -1371,11 +1371,20 @@ out:
    Nvme_Close(handle);
 }
 
+struct NamespaceInfo {
+   vmk_uint32 nsId;
+   int status;
+   char devName[MAX_DEV_NAME_LEN];
+};
+
 void
 NvmePlugin_DeviceNsList(int argc, const char *argv[])
 {
    int                      ch, rc;
-   vmk_uint32               i, j, numNs;
+   vmk_uint32               i, j, k = 0;
+   vmk_uint32               numAllocated = 0;
+   vmk_uint32               numActive = 0;
+   vmk_uint32               numNs = 0;
    const char               *vmhba = NULL;
    struct nvme_adapter_list list;
    struct nvme_ns_list      *nsAllocatedList = NULL;
@@ -1383,12 +1392,11 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    struct nvme_handle       *handle;
    vmk_NvmeIdentifyController  *idCtrlr = NULL;
    char runtimeName[MAX_DEV_NAME_LEN];
-   char (*devNames)[MAX_DEV_NAME_LEN] = NULL;
-   int  *statusFlags = NULL;
    int   nsStatus;
    VMK_ReturnStatus status;
    BOOL activeNsListSupt = false;
    BOOL allocatedNsListSupt = false;
+   struct NamespaceInfo *nsList = NULL;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:")) != -1) {
       switch (ch) {
@@ -1432,12 +1440,6 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
       Error("Failed to get controller identify information, 0x%x.", rc);
       goto out_free;
    }
-   //TODO: Support larger namesapce IDs
-   numNs = idCtrlr->nn < 1024 ? idCtrlr->nn : 1024;
-   if (numNs == 0) {
-      Error("Invalid number of namespaces.");
-      goto out_free;
-   }
 
    if (idCtrlr->oacs & VMK_NVME_CTLR_IDENT_OACS_NS_MGMT) {
       allocatedNsListSupt = true;
@@ -1454,6 +1456,13 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
          Error("Failed to get allocated namespace list, 0x%x.", rc);
          goto out_free;
       }
+      for (i = 0; i < 1024; i ++) {
+         if (nsAllocatedList->nsId[i] == 0) {
+            break;
+         }
+         LogDebug("Allocated nsId %d: %d", i, nsAllocatedList->nsId[i]);
+      }
+      numAllocated = i;
    }
 
    if ((idCtrlr->ver.mjr == 1 && idCtrlr->ver.mnr >=1) ||
@@ -1472,102 +1481,133 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
          Error("Failed to get active namespace list, 0x%x.", rc);
          goto out_free;
       }
+      for (i = 0; i < 1024; i ++) {
+         if (nsActiveList->nsId[i] == 0) {
+            break;
+         }
+         LogDebug("Active nsId %d: %d", i, nsActiveList->nsId[i]);
+      }
+      numActive = i;
    }
 
-   devNames = (char(*)[MAX_DEV_NAME_LEN])malloc(numNs * sizeof(char) * MAX_DEV_NAME_LEN);
-   if (devNames == NULL) {
+   if (allocatedNsListSupt || activeNsListSupt) {
+      // There are numAllocated+numActive namespaces at most.
+      numNs = numAllocated + numActive;
+   } else { // 1.0 controller
+      numNs = idCtrlr->nn;
+   }
+   if (numNs == 0) {
+      goto print_list;
+   }
+   nsList = malloc(numNs * sizeof(struct NamespaceInfo));
+   if (nsList == NULL) {
       Error("Out of memory");
-      LogError("Failed to allocate device name list.");
+      LogError("Failed to allocate namespace list, num %d", numNs);
       goto out_free;
    }
-   memset(devNames, 0, numNs * sizeof(*devNames));
+   memset(nsList, 0, numNs * sizeof(struct NamespaceInfo));
 
-   statusFlags = (int *)malloc(numNs * sizeof(int));
-   if (statusFlags == NULL) {
-      Error("Out of memory");
-      LogError("Failed to allocate status flag list.");
-      goto out_free;
-   }
-   memset(statusFlags, 0, numNs * sizeof(*statusFlags)); // Init as NS_UNALLOCATED
-
-   if (allocatedNsListSupt) {
-      for (j = 0; j < 1024; j++) {
-         i = nsAllocatedList->nsId[j];
-         if (i == 0 || i > numNs) {
-            break;
+   i = 0;
+   j = 0;
+   k = 0;
+   while (i < numAllocated || j < numActive) {
+      if (i < numAllocated && j < numActive) {
+         if (nsAllocatedList->nsId[i] < nsActiveList->nsId[j]) {
+            nsList[k].nsId = nsAllocatedList->nsId[i];
+            nsList[k].status = NS_ALLOCATED;
+            k ++;
+            i ++;
+         } else if (nsAllocatedList->nsId[i] == nsActiveList->nsId[j]) {
+            nsList[k].nsId = nsAllocatedList->nsId[i];
+            nsList[k].status = NS_ACTIVE;
+            k ++;
+            i ++;
+            j ++;
          } else {
-            statusFlags[i-1] = NS_ALLOCATED;
+            nsList[k].nsId = nsActiveList->nsId[j];
+            nsList[k].status = NS_ACTIVE;
+            k ++;
+            j ++;
          }
+      } else if (i < numAllocated) {
+         nsList[k].nsId = nsAllocatedList->nsId[i];
+         nsList[k].status = NS_ALLOCATED;
+         k ++;
+         i ++;
+      } else { // j < numActive
+         nsList[k].nsId = nsActiveList->nsId[j];
+         nsList[k].status = NS_ACTIVE;
+         k ++;
+         j ++;
       }
    }
 
-   if (activeNsListSupt) {
-      for (j = 0; j < 1024; j++) {
-         i = nsActiveList->nsId[j];
-         if (i == 0 || i > numNs) {
-            break;
-         } else {
-            statusFlags[i-1] = NS_ACTIVE;
-         }
+   for (i = 0; i < numNs; i++) {
+      if (!allocatedNsListSupt && !activeNsListSupt) {
+         /* For 1.0 NVMe controller, suppose all namespaces are active.*/
+         nsList[i].nsId = i + 1;
+         nsList[i].status = NS_ACTIVE;
       }
-   }
 
-   for (i = 1; i <= numNs; i++) {
-      if (!activeNsListSupt) {
-         statusFlags[i-1] = NS_ACTIVE;
+      if (nsList[i].nsId == 0) {
+         break;
       }
-      if (statusFlags[i-1] == NS_ALLOCATED) {
-         snprintf(devNames[i-1], MAX_DEV_NAME_LEN, "N/A");
-      }
-      if (statusFlags[i-1] != NS_ACTIVE) {
+
+      if (nsList[i].status == NS_ALLOCATED) {
+         snprintf(nsList[i].devName, MAX_DEV_NAME_LEN, "N/A");
          continue;
       }
 
-      snprintf(runtimeName, MAX_DEV_NAME_LEN, "%s:C0:T0:L%d", vmhba, i-1);
-      status = GetDeviceName(runtimeName, devNames[i-1], MAX_DEV_NAME_LEN);
+      snprintf(runtimeName, MAX_DEV_NAME_LEN, "%s:C0:T0:L%d", vmhba, nsList[i].nsId-1);
+      status = GetDeviceName(runtimeName, nsList[i].devName, MAX_DEV_NAME_LEN);
       if (status == VMK_FAILURE) {
-         Error("Failed to get device name of namespace %d.", i);
+         Error("Failed to get device name of namespace %d.", nsList[i].nsId);
          goto out_free;
       }
 
-      rc = Nvme_NsGetStatus(handle, i, &nsStatus);
+      rc = Nvme_NsGetStatus(handle, nsList[i].nsId, &nsStatus);
       if (rc) {
-         Error("Failed to get device status of namespace %d.", i);
+         Error("Failed to get device status of namespace %d.", nsList[i].nsId);
          goto out_free;
       }
 
       if (nsStatus == VMK_NOT_FOUND) {
-         //Shouldn't happen
-         LogError("Namespace %d is active but is not found in driver's namespace list.", i);
+         /* Shouldn't happen.*/
+         LogError("Namespace %d is active but is not found in driver's namespace list.",
+                  nsList[i].nsId);
       }
 
       if (status == VMK_NOT_FOUND && nsStatus == NS_ONLINE) {
          /* The path is unclaimed by upper layer.*/
-         snprintf(devNames[i-1], MAX_DEV_NAME_LEN, "N/A (Unclaimed)");
+         snprintf(nsList[i].devName, MAX_DEV_NAME_LEN, "N/A (Unclaimed)");
       }
 
       if (nsStatus == NS_OFFLINE) {
          /* Invalid format, namespace is not supported or namespace is offline.*/
-         snprintf(devNames[i-1], MAX_DEV_NAME_LEN,
+         snprintf(nsList[i].devName, MAX_DEV_NAME_LEN,
                   "N/A (Unsupported Format or Namespace Offline)");
       }
    }
 
+   numNs = i;
+
+print_list:
    esxcli_xml_begin_output();
    xml_list_begin("structure");
    for (i = 0; i < numNs; i++) {
-      if (statusFlags[i] > NS_UNALLOCATED) {
-         xml_struct_begin("NamespaceList");
-         PINT("Namespace ID", i+1);
-         PSTR("Status", nsStatusString[statusFlags[i]]);
-         PSTR("Device Name", devNames[i]);
-         xml_struct_end();
-      }
+      xml_struct_begin("NamespaceList");
+      PINT("Namespace ID", nsList[i].nsId);
+      PSTR("Status", nsStatusString[nsList[i].status]);
+      PSTR("Device Name", nsList[i].devName);
+      xml_struct_end();
    }
    xml_list_end();
    esxcli_xml_end_output();
 
 out_free:
+   if (nsList) {
+      free(nsList);
+   }
    if (nsActiveList) {
       free(nsActiveList);
    }
@@ -1576,12 +1616,6 @@ out_free:
    }
    if (idCtrlr) {
       free(idCtrlr);
-   }
-   if (devNames) {
-      free(devNames);
-   }
-   if (statusFlags) {
-      free(statusFlags);
    }
 out:
    Nvme_Close(handle);
