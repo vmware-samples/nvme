@@ -1,6 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2022 VMware, Inc. All rights reserved.
- * -- VMware Confidential
+ * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
  *****************************************************************************/
 
 /*

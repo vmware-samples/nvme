@@ -1,5 +1,4 @@
 # Copyright (c) 2022-2023 VMware, Inc. All rights reserved.
-# # VMware Confidential
 
 """ Driver definition for nvme_pcie driver.
 """
