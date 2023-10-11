@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2023/9/25 1.2.0.56-1vmw
+
+   Fix PR #3285073: Remove unnecessary valid NSID check.
+
 2023/9/5 1.2.0.55-1vmw
 
    Fix PR #3244777: Refine function NvmePlugin_DeviceNsList().

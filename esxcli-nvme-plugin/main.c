@@ -837,12 +837,7 @@ NvmePlugin_DeviceNsDelete(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_ValidNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to validate nsId %d.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
+   if (nsId == 0) {
       Error("Invalid namespace Id %d.", nsId);
       goto out;
    }
@@ -967,12 +962,7 @@ NvmePlugin_DeviceNsAttach(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_ValidNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to validate nsId %d.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
+   if (nsId == 0) {
       Error("Invalid namespace Id %d.", nsId);
       goto out;
    }
@@ -1130,12 +1120,7 @@ NvmePlugin_DeviceNsDetach(int argc, const char *argv[])
       goto out;
    }
 
-   rc = Nvme_ValidNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to validate nsId %d.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
+   if (nsId == 0) {
       Error("Invalid namespace Id %d.", nsId);
       goto out;
    }
@@ -1321,12 +1306,7 @@ NvmePlugin_DeviceListController(int argc, const char *argv[])
    }
 
    if (setNs) {
-      rc = Nvme_ValidNsId(handle, nsId);
-      if (rc == -1) {
-         Error("Failed to validate nsId %d.", nsId);
-         goto out_free;
-      }
-      if (rc == 0) {
+      if (nsId == 0) {
          Error("Invalid namespace Id %d.", nsId);
          goto out_free;
       }
@@ -1815,16 +1795,6 @@ NvmePlugin_DeviceNsFormat(int argc, const char *argv[])
    if (handle == NULL) {
       Error("Failed to open device.");
       return;
-   }
-
-   rc = Nvme_ValidNsId(handle, nsId);
-   if (rc == -1) {
-      Error("Failed to validate nsId %d.", nsId);
-      goto out;
-   }
-   if (rc == 0) {
-      Error("Invalid namespace Id %d.", nsId);
-      goto out;
    }
 
    rc = Nvme_AttachedNsId(handle, nsId);
