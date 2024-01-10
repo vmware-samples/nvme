@@ -7,6 +7,23 @@ load(
     "//bora/bazel/esx:device_driver.bzl",
     "device_driver",
 )
+load(
+    "//bora/bazel/esx/package/vibs:driver_package.bzl",
+    "add_binary_payload",
+    "define_device_spec",
+    "driver_package",
+)
+load(":nvme_pcie_devices.bzl", "NVME_PCIE_DEV")
+
+_DRIVER_NAME = "nvme_pcie"
+
+_BINARY_COMPAT = "yes"
+
+_VENDOR = "VMware"
+
+_VERSION_BUMP = "1"
+
+_DRIVER_VER = "1.2.4.13"
 
 device_driver(
     name = "nvme_pcie",
@@ -24,4 +41,45 @@ device_driver(
     vendor = "VMware",
     version = "1.2.4.13",
     version_bump = "1",
+)
+
+binary_payload_metadata = add_binary_payload(
+    name = "{}-binary".format(_DRIVER_NAME),
+    payload_srcs = [":stripped-{}".format(_DRIVER_NAME)],
+)
+
+device_spec_metadata = define_device_spec(
+    name = "{}-device-def".format(_DRIVER_NAME),
+    device_spec_list = [
+        NVME_PCIE_DEV,
+    ],
+)
+
+driver_package(
+    name = "{}-vib".format(_DRIVER_NAME),
+    acceptance_level = "certified",
+    binary_compat = _BINARY_COMPAT,
+    binary_payload_metadata = binary_payload_metadata,
+    component_name_spec = {
+        "name": "VMware-NVMe-PCIe",
+        "uistring": "VMware NVMe PCI Express Storage Driver",
+    },
+    description = "Non-Volatile memory controller driver",
+    device_spec_metadata = device_spec_metadata,
+    live_install_allowed = False,
+    live_remove_allowed = False,
+    maintenance_mode = True,
+    overlay = False,
+    payload = [
+        ":{}-binary".format(_DRIVER_NAME),
+        ":{}-device-def".format(_DRIVER_NAME),
+    ],
+    platforms = [{"productLineID": "ESXi"}],
+    stateless_ready = True,
+    summary = "Non-Volatile memory controller driver",
+    vendor = _VENDOR,
+    vendor_code = "VMW",
+    vendor_email = "support@vmware.com",
+    version = _DRIVER_VER,
+    version_bump = _VERSION_BUMP,
 )
