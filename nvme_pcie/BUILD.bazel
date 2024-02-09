@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2023 VMware, Inc. All rights reserved.
+# Copyright (c) 2022-2024 VMware, Inc. All rights reserved.
 
 """ Driver definition for nvme_pcie driver.
 """
@@ -21,12 +21,12 @@ _BINARY_COMPAT = "yes"
 
 _VENDOR = "VMware"
 
-_VERSION_BUMP = "1"
-
 _DRIVER_VER = "1.2.4.13"
 
+_VERSION_BUMP = "1"
+
 device_driver(
-    name = "nvme_pcie",
+    name = _DRIVER_NAME,
     srcs = [
         "nvme_pcie.c",
         "nvme_pcie_adapter.c",
@@ -36,11 +36,11 @@ device_driver(
         "nvme_pcie_module.c",
         "nvme_pcie_os.c",
     ],
-    binary_compat = "yes",
+    binary_compat = _BINARY_COMPAT,
     license = "BSD",
-    vendor = "VMware",
-    version = "1.2.4.13",
-    version_bump = "1",
+    vendor = _VENDOR,
+    version = _DRIVER_VER,
+    version_bump = _VERSION_BUMP,
 )
 
 binary_payload_metadata = add_binary_payload(
