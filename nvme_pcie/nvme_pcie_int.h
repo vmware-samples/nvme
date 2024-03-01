@@ -1,5 +1,7 @@
 /*****************************************************************************
- * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
  *****************************************************************************/
 
 /*
@@ -364,8 +366,13 @@ NVMEPCIEWritel(vmk_uint32 value, vmk_VA addr)
 static inline vmk_uint64
 NVMEPCIEReadq(vmk_VA addr)
 {
+   vmk_uint64 value;
+
    vmk_CPUMemFenceRead();
-   return (*(volatile vmk_uint64 *)(addr));
+   value = NVMEPCIEReadl(addr);
+   value |= (vmk_uint64)NVMEPCIEReadl(addr+4) << 32;
+
+   return value;
 }
 
 

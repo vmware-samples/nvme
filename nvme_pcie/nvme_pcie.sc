@@ -1,6 +1,8 @@
 """
 * *******************************************************************************
-* Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
+* Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
+* Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+* and/or its subsidiaries.
 * *******************************************************************************
 """
 # Driver definition for nvme driver.
@@ -32,7 +34,7 @@ nvme_pcie_identification = {
    "binary compat"   : "yes",
    "summary"         : "Non-Volatile memory controller driver",
    "description"     : "Non-Volatile memory controller driver",
-   "version"         : "1.2.4.13",
+   "version"         : "1.2.4.14",
    "version_bump"    : 1,
    "license"         : VMK_MODULE_LICENSE_BSD,
    "vendor"          : "VMware",
