@@ -1,13 +1,15 @@
 """
 ********************************************************************************
-* Copyright (c) 2016-2019, 2021, 2023 VMware, Inc. All rights reserved.
+* Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
+* Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+* and/or its subsidiaries.
 ********************************************************************************
 """
 
 # Device Spec definition for nvme_pcie driver.
 
 # buildifier: disable=unsorted-dict-items
-NVME_PCIE_DEV = {
+DEV = {
     "priority": "default",
     "bus type": "pci",
     "device info": {

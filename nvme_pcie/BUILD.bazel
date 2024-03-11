@@ -15,7 +15,7 @@ load(
     "define_device_spec",
     "driver_package",
 )
-load(":nvme_pcie_devices.bzl", "NVME_PCIE_DEV")
+load(":nvme_pcie_devices.bzl", NVME_PCIE_DEV = "DEV")
 
 _DRIVER_NAME = "nvme_pcie"
 
