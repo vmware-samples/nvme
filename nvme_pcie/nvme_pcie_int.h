@@ -62,16 +62,6 @@ extern int nvmePCIEMsiEnbaled;
 #define NVME_PCIE_DRIVER_NAME "nvme_pcie"
 
 /**
- * Driver version. This should always in sync with .sc file.
- */
-#define NVME_PCIE_DRIVER_VERSION "1.2.4.13"
-
-/**
- * Driver release number. This should always in sync with .sc file.
- */
-#define NVME_PCIE_DRIVER_RELEASE "1"
-
-/**
  * Driver identifier, concatenation of driver name, version, and release
  */
 #define NVME_PCIE_DRIVER_IDENT (NVME_PCIE_DRIVER_NAME "_" NVME_PCIE_DRIVER_VERSION \
