@@ -6,10 +6,6 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
 
 == Change Log ==
 
-2024/3/21 1.2.4.15-1vmw
-
-   Print error messages if sync command timeout.
-
 2024/2/29 1.2.4.14-1vmw
 
    Fix PR #3356947: Split 64-bit MMIO loads into two 32-bit loads.

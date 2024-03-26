@@ -1,7 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
- * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
- * and/or its subsidiaries.
+ * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
  *****************************************************************************/
 
 /*
@@ -1977,8 +1975,7 @@ CreateSq(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo)
    if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_GC_SUCCESS) {
       DPRINT_Q(ctrlr, "sq [%d] created", qinfo->sqInfo->id);
    } else {
-      EPRINT(ctrlr, "Create sq [%d] command failed, 0x%x",
-             qinfo->sqInfo->id, vmkCmd->nvmeStatus);
+      EPRINT(ctrlr, "Create sq command failed, 0x%x", vmkCmd->nvmeStatus);
       vmkStatus = VMK_FAILURE;
    }
 
@@ -2019,8 +2016,7 @@ CreateCq(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo)
    if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_GC_SUCCESS) {
       DPRINT_Q(ctrlr, "cq [%d] created", qinfo->cqInfo->id);
    } else {
-      EPRINT(ctrlr, "Create cq [%d] command failed, 0x%x",
-             qinfo->sqInfo->id, vmkCmd->nvmeStatus);
+      EPRINT(ctrlr, "Create cq command failed, 0x%x", vmkCmd->nvmeStatus);
       vmkStatus = VMK_FAILURE;
    }
 
@@ -2046,15 +2042,13 @@ DeleteSq(NVMEPCIEController *ctrlr, vmk_uint16 qid)
    vmkStatus = NVMEPCIESubmitSyncCommand(ctrlr, vmkCmd, 0, NULL, 0, ADMIN_TIMEOUT);
 
    if (VMK_UNLIKELY(vmkStatus == VMK_TIMEOUT)) {
-      EPRINT(ctrlr, "Delete sq [%d] command timeout", qid);
       return vmkStatus;
    }
 
    if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_GC_SUCCESS) {
       DPRINT_Q(ctrlr, "sq [%d] deleted", qid);
    } else {
-      EPRINT(ctrlr, "Delete sq [%d] command failed, 0x%x",
-             qid, vmkCmd->nvmeStatus);
+      EPRINT(ctrlr, "Delete sq command failed, 0x%x", vmkCmd->nvmeStatus);
       vmkStatus = VMK_FAILURE;
    }
    NVMEPCIEFree(vmkCmd);
@@ -2080,15 +2074,13 @@ DeleteCq(NVMEPCIEController *ctrlr, vmk_uint16 qid)
    vmkStatus = NVMEPCIESubmitSyncCommand(ctrlr, vmkCmd, 0, NULL, 0, ADMIN_TIMEOUT);
 
    if (VMK_UNLIKELY(vmkStatus == VMK_TIMEOUT)) {
-      EPRINT(ctrlr, "Delete cq [%d] command timeout", qid);
       return vmkStatus;
    }
 
    if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_GC_SUCCESS) {
       DPRINT_Q(ctrlr, "cq [%d] deleted", qid);
    } else {
-      EPRINT(ctrlr, "Delete cq [%d] command failed, 0x%x",
-             qid, vmkCmd->nvmeStatus);
+      EPRINT(ctrlr, "Delete cq command failed, 0x%x", vmkCmd->nvmeStatus);
       vmkStatus = VMK_FAILURE;
    }
    NVMEPCIEFree(vmkCmd);
@@ -2341,13 +2333,13 @@ NVMEPCIEStartQueue(NVMEPCIEQueueInfo *qinfo)
 
    vmkStatus = CreateCq(ctrlr, qinfo);
    if (vmkStatus != VMK_OK) {
-      EPRINT(ctrlr, "Failed to create cq [%d], %'us.", qinfo->id, vmkStatus);
+      EPRINT(ctrlr, "Failed to create cq [%d], 0x%x.", qinfo->id, vmkStatus);
       return vmkStatus;
    }
 
    vmkStatus = CreateSq(ctrlr, qinfo);
    if (vmkStatus != VMK_OK) {
-      EPRINT(ctrlr, "Failed to create sq [%d], %'us.", qinfo->id, vmkStatus);
+      EPRINT(ctrlr, "Failed to create sq [%d], 0x%x.", qinfo->id, vmkStatus);
       DeleteCq(ctrlr, qinfo->id);
       return vmkStatus;
    }

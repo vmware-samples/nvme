@@ -1,7 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
- * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
- * and/or its subsidiaries.
+ * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
  *****************************************************************************/
 
 /*
@@ -340,7 +338,7 @@ SetNumberIOQueues(vmk_NvmeController controller,
 
    vmkStatus = RequestIoQueues(ctrlr, &nrIoQueues);
    if (vmkStatus != VMK_OK) {
-      EPRINT(ctrlr, "Failed to allocate hardware IO queues, %'us.", vmkStatus);
+      EPRINT(ctrlr, "Failed to allocate hardware IO queues.");
       return vmkStatus;
    }
    *numQueuesAllocated = nrIoQueues;
