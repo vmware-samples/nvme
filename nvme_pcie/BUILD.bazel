@@ -23,7 +23,7 @@ _BINARY_COMPAT = "yes"
 
 _VENDOR = "VMware"
 
-_DRIVER_VER = "1.2.4.14"
+_DRIVER_VER = "1.2.4.15"
 
 _VERSION_BUMP = "1"
 
@@ -39,6 +39,10 @@ device_driver(
         "nvme_pcie_os.c",
     ],
     binary_compat = _BINARY_COMPAT,
+    defines = [
+        'NVME_PCIE_DRIVER_VERSION=\\"%s\\"' % _DRIVER_VER,
+        'NVME_PCIE_DRIVER_RELEASE=\\"%s\\"' % _VERSION_BUMP,
+    ],
     license = "BSD",
     vendor = _VENDOR,
     version = _DRIVER_VER,
