@@ -1,6 +1,15 @@
-# Copyright (c) 2023 VMware, Inc.  All rights reserved.
+# Copyright (c) 2023-2024 Broadcom. All Rights Reserved.
+# Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+# and/or its subsidiaries.
 
 load("//bora/bazel/esx:esx_debug_binary.bzl", "esx_debug_binary")
+
+exports_files(
+    [
+        "esxcli-nvme.xml",
+    ],
+    visibility = ["//bora/bazel/esx/package/vibs/esxcli_nvme_plugin:__pkg__"],
+)
 
 esx_debug_binary(
     name = "esxcli-nvme-plugin",
