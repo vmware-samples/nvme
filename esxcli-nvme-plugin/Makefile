@@ -1,4 +1,6 @@
-# Copyright (c) 2015-2023 VMware, Inc. All rights reserved.
+# Copyright (c) 2015-2024 Broadcom. All Rights Reserved.
+# Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+# and/or its subsidiaries.
 #
 # Makefile
 #
@@ -13,7 +15,7 @@
 #
 
 UWTOOL = esxcli-nvme-plugin
-UWTOOL_VERSION = 1.2.0.56-1vmw
+UWTOOL_VERSION = 1.4.0.0-1vmw
 
 UWTOOL_SOURCES = main.c esxcli_xml.c nvme_lib.c
 

@@ -1,5 +1,7 @@
-/******************************************************************************
- * Copyright (c) 2014-2023 VMware, Inc. All rights reserved.
+/*****************************************************************************
+ * Copyright (c) 2014-2024 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
  *****************************************************************************/
 
 /**
@@ -35,6 +37,7 @@ typedef enum __bool {false = 0, true,} BOOL;
 #define MAX_DEV_NAME_LEN 100
 
 #define MAX_ERROR_LOG_ENTRIES 64
+#define CMD_EFFECTS_LOG_ENTRIES 1024
 
 static const char *nsStatusString [] = {
 "Unallocated",
@@ -423,6 +426,38 @@ PrintFwSlotLog(vmk_NvmeFirmwareSlotInfo *fwSlotLog)
    P8BYTE("Firmware Revision for Slot 6", (char *)(&fwSlotLog->frs[5]));
    P8BYTE("Firmware Revision for Slot 7", (char *)(&fwSlotLog->frs[6]));
    xml_struct_end();
+   esxcli_xml_end_output();
+}
+
+static void
+PrintCmdEffectsLog(vmk_NvmeCommandsSupportedEffectsLogEntry *cmdEffectsLog)
+{
+   esxcli_xml_begin_output();
+   xml_list_begin("structure");
+   /* According to NVMe spec, currently only the first 512 entries are defined.*/
+   for (int i = 0; i < 512; i ++) {
+      if (cmdEffectsLog[i].csupp) {
+         xml_struct_begin("CommandEffectsLog");
+         /* Entries 0 to 255 contain the info for admin commands with opcodes 0 to 255.*/
+         if (i < 256) {
+            PSTR("Type", "Admin");
+            PINTS("Opcode", i);
+         /* Entries 256 to 511 contain the info for I/O commands with opcodes 0 to 255.*/
+         } else {
+            PSTR("Type", "I/O");
+            PINTS("Opcode", i - 256);
+         }
+         PINT("CSUPP", cmdEffectsLog[i].csupp);
+         PINT("LBCC", cmdEffectsLog[i].lbcc);
+         PINT("NCC", cmdEffectsLog[i].ncc);
+         PINT("NIC", cmdEffectsLog[i].nic);
+         PINT("CCC", cmdEffectsLog[i].ccc);
+         PINT("CSE", cmdEffectsLog[i].cse);
+         PINT("UUID", cmdEffectsLog[i].uuidSelectionSupported);
+         xml_struct_end();
+      }
+   }
+   xml_list_end();
    esxcli_xml_end_output();
 }
 
@@ -2019,6 +2054,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       vmk_NvmeErrorInfoLogEntry errLog[MAX_ERROR_LOG_ENTRIES];
       vmk_NvmeSmartInfoEntry smartLog;
       vmk_NvmeFirmwareSlotInfo fwSlotLog;
+      vmk_NvmeCommandsSupportedEffectsLogEntry cmdEffectsLog[CMD_EFFECTS_LOG_ENTRIES];
    } log;
    vmk_uint8 *logData = NULL;
 
@@ -2116,6 +2152,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
          case VMK_NVME_LID_ERROR_INFO:
          case VMK_NVME_LID_SMART_HEALTH:
          case VMK_NVME_LID_FW_SLOT:
+         case VMK_NVME_LID_CMD_EFFECTS_LOG:
          case VMK_NVME_LID_TELEMETRY_HOST_INITIATED:
          case VMK_NVME_LID_TELEMETRY_CONTROLLER_INITIATED:
          case NVME_LID_PERSISTENT_EVENT:
@@ -2215,8 +2252,15 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       }
    }
 
-  /* Check the optional parameters: nsId, elpe, logPath, dataArea and action. */
-  if (setNsid) {
+   if (lid == VMK_NVME_LID_CMD_EFFECTS_LOG) {
+      if (!(idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_CMD_EFFECTS)) {
+         Error("Commands supported and effects log page is not supported.");
+         goto out_free;
+      }
+   }
+
+   /* Check the optional parameters: nsId, elpe, logPath, dataArea and action. */
+   if (setNsid) {
       if (lid == VMK_NVME_LID_SMART_HEALTH &&
           (idCtrlr->lpa & VMK_NVME_CTLR_IDENT_LPA_SMART_PER_NS)) {
          if (nsId != VMK_NVME_DEFAULT_NSID) {
@@ -2319,7 +2363,7 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       goto out_free;
    }
 
-   /* Get error, smart or firmware log. */
+   /* Get error, smart, firmware, or commands effects log. */
    switch (lid)
    {
       case VMK_NVME_LID_ERROR_INFO:
@@ -2333,6 +2377,10 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
       case VMK_NVME_LID_FW_SLOT:
          logData = (vmk_uint8 *)&log.fwSlotLog;
          dataLen = sizeof(vmk_NvmeFirmwareSlotInfo);
+         break;
+      case VMK_NVME_LID_CMD_EFFECTS_LOG:
+         logData = (vmk_uint8 *)&log.cmdEffectsLog;
+         dataLen = sizeof(vmk_NvmeCommandsSupportedEffectsLogEntry) * CMD_EFFECTS_LOG_ENTRIES;
          break;
       default:
          Error("Invalid parameter.");
@@ -2362,6 +2410,9 @@ NvmePlugin_DeviceLogGet(int argc, const char *argv[])
          break;
       case VMK_NVME_LID_FW_SLOT:
          PrintFwSlotLog(&log.fwSlotLog);
+         break;
+      case VMK_NVME_LID_CMD_EFFECTS_LOG:
+         PrintCmdEffectsLog(log.cmdEffectsLog);
          break;
       default:
          Error("Invalid log page.");

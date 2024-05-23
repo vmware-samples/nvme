@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2024/5/7 1.4.0.0-1vmw
+
+   Add commands supported and effects log.
+
 2023/9/25 1.2.0.56-1vmw
 
    Fix PR #3285073: Remove unnecessary valid NSID check.
@@ -127,7 +131,7 @@ This is the plugin of esxcli for NVMe device management.
 
 2017/6/8 1.2.0.28-1vmw
 
-   Fix PR #1893469：Failure when get feature er for nvme controller.
+   Fix PR #1893469: Failure when get feature er for nvme controller.
 
 2017/6/8 1.2.0.27-1vmw
 

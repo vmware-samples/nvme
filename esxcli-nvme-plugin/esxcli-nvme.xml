@@ -87,6 +87,9 @@
       <namespace path="nvme.device.log.persistentevent">
          <description>NVMe persistent event log page operations</description>
       </namespace>
+      <namespace path="nvme.device.log.commandeffects">
+         <description>NVMe commands supported and effects log page operations</description>
+      </namespace>
       <namespace path="nvme.device.firmware">
          <description>NVMe firmware operations</description>
       </namespace>
@@ -732,6 +735,35 @@
             <formatter>simple</formatter>
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i 0xd -b 1 -s $val{action} $if{path, -p $val{path}}</execute>
+      </command>
+      <command path="nvme.device.log.commandeffects.get">
+         <description>Get NVMe commands supported and effects log</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="structure">
+               <structure typeName="CommandEffectsLog">
+                  <field name="Type"> <string/> </field>
+                  <field name="Opcode"> <string/> </field>
+                  <field name="CSUPP"> <int/> </field>
+                  <field name="LBCC"> <int/> </field>
+                  <field name="NCC"> <int/> </field>
+                  <field name="NIC"> <int/> </field>
+                  <field name="CCC"> <int/> </field>
+                  <field name="CSE"> <int/> </field>
+                  <field name="UUID"> <int/> </field>
+               </structure>
+            </list>
+         </output-spec>
+         <format-parameters>
+            <formatter>table</formatter>
+            <format-parameter name="fields:CommandEffectsLog">Type,Opcode,CSUPP,LBCC,NCC,NIC,CCC,CSE,UUID</format-parameter>
+            <format-parameter name="show-header:CommandEffectsLog">true</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.log.get -A $val{adapter} -i 0x5 -b 1</execute>
       </command>
       <command path="nvme.device.feature.cap">
          <description>Get NVMe device feature supported capabilities information</description>
