@@ -126,7 +126,10 @@ NVMEPCIEQueueDestroy(NVMEPCIEController *ctrlr, vmk_uint32 qid, vmk_NvmeStatus s
    }
 
    vmkStatus = NVMEPCIEStopQueue(qinfo, status);
-   vmkStatus = QueueDestroy(qinfo);
+   if (vmkStatus != VMK_OK) {
+      return vmkStatus;
+   }
+   QueueDestroy(qinfo);
 
    if (qid > 0) {
       vmk_AtomicDec32(&ctrlr->numIoQueues);
@@ -1293,6 +1296,14 @@ NVMEPCIECompleteSyncCommand(NVMEPCIEQueueInfo *qinfo, NVMEPCIECmdInfo *cmdInfo)
             NVMEPCIEFree(dmaEntry);
             cmdInfo->doneData = NULL;
          }
+         if ((cmdInfo->vmkCmd->nvmeCmd.cdw0.opc == VMK_NVME_ADMIN_CMD_DELETE_IO_SQ ||
+             cmdInfo->vmkCmd->nvmeCmd.cdw0.opc == VMK_NVME_ADMIN_CMD_DELETE_IO_CQ) &&
+             qinfo->id == 0) {
+            vmk_uint16 qid = cmdInfo->vmkCmd->nvmeCmd.cdw10 & 0xffff;
+            IPRINT(qinfo->ctrlr, "The timeout queue %d deletion command 0x%x completed, status 0x%x",
+                   qid, cmdInfo->vmkCmd->nvmeCmd.cdw0.opc, cmdInfo->vmkCmd->nvmeStatus);
+            vmk_AtomicWrite8(&qinfo->ctrlr->queueList[qid].isHwQDeleting, 0);
+         }
          NVMEPCIEFree(cmdInfo->vmkCmd);
          NVMEPCIEPutCmdInfo(qinfo, cmdInfo);
          return;
@@ -2043,7 +2054,7 @@ DeleteSq(NVMEPCIEController *ctrlr, vmk_uint16 qid)
    deleteSqCmd->cdw0.opc= VMK_NVME_ADMIN_CMD_DELETE_IO_SQ;
    deleteSqCmd->cdw10.qid = qid;
 
-   vmkStatus = NVMEPCIESubmitSyncCommand(ctrlr, vmkCmd, 0, NULL, 0, ADMIN_TIMEOUT);
+   vmkStatus = NVMEPCIESubmitSyncCommand(ctrlr, vmkCmd, 0, NULL, 0, ADMIN_DELETE_Q_TIMEOUT);
 
    if (VMK_UNLIKELY(vmkStatus == VMK_TIMEOUT)) {
       EPRINT(ctrlr, "Delete sq [%d] command timeout", qid);
@@ -2051,11 +2062,15 @@ DeleteSq(NVMEPCIEController *ctrlr, vmk_uint16 qid)
    }
 
    if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_GC_SUCCESS) {
-      DPRINT_Q(ctrlr, "sq [%d] deleted", qid);
+      IPRINT(ctrlr, "sq [%d] deleted", qid);
    } else {
       EPRINT(ctrlr, "Delete sq [%d] command failed, 0x%x",
              qid, vmkCmd->nvmeStatus);
-      vmkStatus = VMK_FAILURE;
+      if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_CS_INVALID_QUEUE_ID) {
+         return VMK_OK;
+      } else {
+         vmkStatus = VMK_FAILURE;
+      }
    }
    NVMEPCIEFree(vmkCmd);
 
@@ -2077,7 +2092,7 @@ DeleteCq(NVMEPCIEController *ctrlr, vmk_uint16 qid)
    deleteCqCmd->cdw0.opc= VMK_NVME_ADMIN_CMD_DELETE_IO_CQ;
    deleteCqCmd->cdw10.qid = qid;
 
-   vmkStatus = NVMEPCIESubmitSyncCommand(ctrlr, vmkCmd, 0, NULL, 0, ADMIN_TIMEOUT);
+   vmkStatus = NVMEPCIESubmitSyncCommand(ctrlr, vmkCmd, 0, NULL, 0, ADMIN_DELETE_Q_TIMEOUT);
 
    if (VMK_UNLIKELY(vmkStatus == VMK_TIMEOUT)) {
       EPRINT(ctrlr, "Delete cq [%d] command timeout", qid);
@@ -2085,11 +2100,15 @@ DeleteCq(NVMEPCIEController *ctrlr, vmk_uint16 qid)
    }
 
    if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_GC_SUCCESS) {
-      DPRINT_Q(ctrlr, "cq [%d] deleted", qid);
+      IPRINT(ctrlr, "cq [%d] deleted", qid);
    } else {
       EPRINT(ctrlr, "Delete cq [%d] command failed, 0x%x",
              qid, vmkCmd->nvmeStatus);
-      vmkStatus = VMK_FAILURE;
+      if (vmkCmd->nvmeStatus == VMK_NVME_STATUS_CS_INVALID_QUEUE_ID) {
+         return VMK_OK;
+      } else {
+         vmkStatus = VMK_FAILURE;
+      }
    }
    NVMEPCIEFree(vmkCmd);
 
@@ -2191,7 +2210,7 @@ NVMEPCIEResumeQueue(NVMEPCIEQueueInfo *qinfo)
  * return VMK_ReturnStatus
  */
 void
-NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
+NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status, vmk_Bool flushAll)
 {
    NVMEPCIECmdInfo *cmdInfo = NULL;
    vmk_atomic32 atomicStatus;
@@ -2218,18 +2237,20 @@ NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
    NVMEPCIEProcessCq(qinfo);
    vmk_SpinlockUnlock(qinfo->cqInfo->lock);
 
-   vmk_SpinlockLock(qinfo->cmdList->lock);
-   for (i = 1; i <= qinfo->cmdList->idCount; i++) {
-      atomicStatus = vmk_AtomicRead32(&cmdInfo->atomicStatus);
-      if (atomicStatus == NVME_PCIE_CMD_STATUS_ACTIVE ||
-          atomicStatus == NVME_PCIE_CMD_STATUS_FREE_ON_COMPLETE) {
-         cmdInfo->vmkCmd->nvmeStatus = status;
-         VMK_ASSERT(cmdInfo->done);
-         cmdInfo->done(qinfo, cmdInfo);
+   if (flushAll == VMK_TRUE) {
+      vmk_SpinlockLock(qinfo->cmdList->lock);
+      for (i = 1; i <= qinfo->cmdList->idCount; i++) {
+         atomicStatus = vmk_AtomicRead32(&cmdInfo->atomicStatus);
+         if (atomicStatus == NVME_PCIE_CMD_STATUS_ACTIVE ||
+             atomicStatus == NVME_PCIE_CMD_STATUS_FREE_ON_COMPLETE) {
+            cmdInfo->vmkCmd->nvmeStatus = status;
+            VMK_ASSERT(cmdInfo->done);
+            cmdInfo->done(qinfo, cmdInfo);
+         }
+         cmdInfo++;
       }
-      cmdInfo++;
+      vmk_SpinlockUnlock(qinfo->cmdList->lock);
    }
-   vmk_SpinlockUnlock(qinfo->cmdList->lock);
    vmk_AtomicDec32(&qinfo->refCount);
 }
 
@@ -2250,6 +2271,9 @@ NVMEPCIEStopQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
 {
    NVMEPCIEController *ctrlr = qinfo->ctrlr;
    vmk_NvmeRegCsts csts;
+   vmk_NvmeRegCc cc;
+   VMK_ReturnStatus vmkStatus = VMK_OK;
+   vmk_Bool flushAll = VMK_TRUE;
 
    NVMEPCIESuspendQueue(qinfo);
 
@@ -2257,14 +2281,44 @@ NVMEPCIEStopQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status)
       *(vmk_uint32*)&csts = NVMEPCIEReadl(qinfo->ctrlr->regs + VMK_NVME_REG_CSTS);
       /** Delete hw sq and cq. If controller is disabled, no need to delete queues.*/
       if (qinfo->id != 0 && csts.rdy && !csts.cfs) {
-         DeleteSq(ctrlr, qinfo->id);
-         DeleteCq(ctrlr, qinfo->id);
+         if (vmk_AtomicRead8(&qinfo->isHwQDeleting) == 0) {
+            /** No active hw queue deletion command. */
+            vmk_AtomicWrite8(&qinfo->isHwQDeleting, 1);
+            vmkStatus = DeleteSq(ctrlr, qinfo->id);
+            if ((vmkStatus != VMK_OK) && (status == VMK_NVME_STATUS_VMW_IN_RESET)) {
+               flushAll = VMK_FALSE;
+            } else {
+               vmkStatus = DeleteCq(ctrlr, qinfo->id);
+               if ((vmkStatus != VMK_OK) && (status == VMK_NVME_STATUS_VMW_IN_RESET)) {
+                  flushAll = VMK_FALSE;
+               }
+            }
+            if (vmkStatus != VMK_TIMEOUT) {
+               vmk_AtomicWrite8(&qinfo->isHwQDeleting, 0);
+            }
+         } else {
+            *(vmk_uint32*)&cc = NVMEPCIEReadl(qinfo->ctrlr->regs + VMK_NVME_REG_CC);
+            IPRINT(ctrlr, "Queue %d deletion command is still stuck, cc.en %d", qinfo->id, cc.en);
+            /** cc.en is set to 0 but csts.rdy is not 0, it is very likely that the device is faulty. */
+            if (cc.en == 0 || status != VMK_NVME_STATUS_VMW_IN_RESET) {
+               IPRINT(ctrlr, "Force flushing queue %d", qinfo->id);
+            } else {
+               vmkStatus = VMK_TIMEOUT;
+               flushAll = VMK_FALSE;
+            }
+         }
       }
    }
 
-   NVMEPCIEFlushQueue(qinfo, status);
+   if (status != VMK_NVME_STATUS_VMW_IN_RESET) {
+      /** Always return OK in shutdown case. */
+      vmkStatus = VMK_OK;
+      flushAll = VMK_TRUE;
+   }
 
-   return VMK_OK;
+   NVMEPCIEFlushQueue(qinfo, status, flushAll);
+
+   return vmkStatus;
 }
 
 static VMK_ReturnStatus

@@ -1,5 +1,7 @@
 /*****************************************************************************
- * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
+ * Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
  *****************************************************************************/
 
 /*
@@ -24,7 +26,7 @@ static VMK_ReturnStatus DmaCleanup(NVMEPCIEController *ctrlr);
 static VMK_ReturnStatus SetupAdminQueue(NVMEPCIEController *ctrlr);
 static void DestroyAdminQueue(NVMEPCIEController *ctrlr);
 extern void NVMEPCIESuspendQueue(NVMEPCIEQueueInfo *qinfo);
-extern void NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status);
+extern void NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status, vmk_Bool flushAll);
 
 /**
  * Wait for CSTS.RDY to become expected value
@@ -382,7 +384,7 @@ QuiesceDevice(vmk_Device device)
       for (qid = 0; qid <= ctrlr->numIoQueues; qid ++) {
          qinfo = &ctrlr->queueList[ctrlr->numIoQueues - qid];
          NVMEPCIESuspendQueue(qinfo);
-         NVMEPCIEFlushQueue(qinfo, VMK_NVME_STATUS_VMW_QUIESCED);
+         NVMEPCIEFlushQueue(qinfo, VMK_NVME_STATUS_VMW_QUIESCED, VMK_TRUE);
       }
    }
    return VMK_OK;

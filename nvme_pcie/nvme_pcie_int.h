@@ -82,6 +82,8 @@ extern int nvmePCIEMsiEnbaled;
 
 /* Admin command timeout, 2 seconds in microseconds */
 #define ADMIN_TIMEOUT (2 * 1000 * 1000)
+/* Admin delete sq/cq command timeout, 10 seconds in microseconds */
+#define ADMIN_DELETE_Q_TIMEOUT (10 * 1000 * 1000)
 
 #define NVME_PCIE_PRP_ENTRY_SIZE sizeof(vmk_uint64)
 #define NVME_PCIE_MAX_PRPS (VMK_PAGE_SIZE/NVME_PCIE_PRP_ENTRY_SIZE)
@@ -261,6 +263,8 @@ typedef struct NVMEPCIEQueueInfo {
     */
    vmk_atomic32 iopsLastSec;
    vmk_atomic32 numCmdComplThisSec;
+   /** Whether there is active hw queue deletion command. */
+   vmk_atomic8 isHwQDeleting;
 } NVMEPCIEQueueInfo;
 
 /* to mark the special device needs some workaround */

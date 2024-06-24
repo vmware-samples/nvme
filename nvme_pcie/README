@@ -2,9 +2,16 @@
 
 == Description ==
 
-This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.2.1.
+This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
+
+2024/6/11 1.4.0.0-1vmw
+
+   Fix PR #3383005: Enhance error handling in DeleteIOQueue().
+   1. Increase timeout for queue deletion command.
+   2. When deleting an IO queue for RESET reason, do not flush queues until
+      queue deletion command succeeds or cc.en is set to 0.
 
 2024/3/21 1.2.4.15-1vmw
 
