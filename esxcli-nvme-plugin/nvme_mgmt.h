@@ -1,5 +1,7 @@
 /*****************************************************************************
- * Copyright (c) 2020, 2023 VMware, Inc. All rights reserved.
+ * Copyright (c) 2020, 2023-2024 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
  *****************************************************************************/
 
 /*
@@ -57,6 +59,7 @@ enum {
    NVME_IOCTL_GET_TIMEOUT,       /* Get timeout value */
    NVME_IOCTL_UPDATE_NS_LIST,    /* Update namespace list */
    NVME_IOCTL_GET_MAX_XFER_LEN,  /* Get controller max data transfer length */
+   NVME_IOCTL_UPDATE_CTRLR,      /* Update controller identify data */
 };
 
 enum {

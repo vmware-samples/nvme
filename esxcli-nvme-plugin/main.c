@@ -4653,12 +4653,13 @@ NvmePlugin_DeviceFirmwareActivate(int argc, const char *argv[])
    char *vmhba = NULL;
    int  slot = -1;
    int  maxSlot = 0;
-   int  rc;
+   int  rc, rc2;
    int  action = -1;
    int  status = 0;
    struct nvme_adapter_list    list;
    struct nvme_handle          *handle;
    vmk_NvmeIdentifyController  *idCtrlr;
+   NvmeUserIo uio;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:s:a:")) != -1) {
       switch (ch) {
@@ -4736,7 +4737,13 @@ NvmePlugin_DeviceFirmwareActivate(int argc, const char *argv[])
          printf("<string>Commit firmware successfully,"
                 " but activation requires reboot.</string>");
       } else {
-         printf("<string>Commit firmware successfully.</string>");
+         rc2 = Nvme_Ioctl(handle, NVME_IOCTL_UPDATE_CTRLR, &uio);
+         if (rc2 == 0) {
+            printf("<string>Commit firmware successfully.</string>");
+         } else {
+            printf("<string>Commit firmware successfully, but failed to update"
+                   " controller identify. Please reboot to update.</string>");
+         }
       }
       xml_list_end();
       esxcli_xml_end_output();
