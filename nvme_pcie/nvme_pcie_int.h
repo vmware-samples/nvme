@@ -94,14 +94,36 @@ extern int nvmePCIEMsiEnbaled;
 #define NVME_PCIE_SYNC_CMD_NUM 10
 #define NVME_PCIE_SYNC_CMD_ID 0xffff
 
-// Time interval (one second) of recording IOPs for a queue
-#define NVME_PCIE_IOPS_RECORD_FREQ VMK_USEC_PER_SEC
+// Time interval (one second) of recording performance stats
+#define NVME_PCIE_PERF_RECORD_FREQ VMK_USEC_PER_SEC
 
 #define NVME_PCIE_KV_MGMT_VERSION (VMK_REVISION_FROM_NUMBERS(1,0,0,0))
 
 typedef struct NVMEPCIEController NVMEPCIEController;
 typedef struct NVMEPCIECmdInfo NVMEPCIECmdInfo;
 typedef struct NVMEPCIEQueueInfo NVMEPCIEQueueInfo;
+
+#if NVME_PCIE_STORAGE_POLL
+/**
+ * Performance statistics of interrupt and polling
+ */
+typedef struct NVMEPCIEPerfStats {
+   // The count of polling callback invoked
+   vmk_atomic64 pollCount;
+   // The count of polling callback returns to interrupt
+   vmk_atomic64 pollBackToIntrCount;
+   // The count of polling callback tries to sleep to accumulate IOs
+   vmk_atomic64 pollAccuCount;
+   // The number of IO commands done in polling callback
+   vmk_atomic64 pollCmdDone;
+   // The number of IO commands affected by the sleep of polling accumulation
+   vmk_atomic64 pollAccuCmd;
+   // The count of IO queue interrupt
+   vmk_atomic64 intrCount;
+   // The number of IO commands done in interrupt
+   vmk_atomic64 intrCmdDone;
+} NVMEPCIEPerfStats;
+#endif
 
 /**
  * Submission queue
@@ -242,6 +264,8 @@ typedef struct NVMEPCIEQueueInfo {
    NVMEPCIECompQueueInfo *cqInfo;
    NVMEPCIECmdInfoList *cmdList;
    NVMEPCIEQueueStats *stats;
+   // The count of queue interrupt
+   vmk_atomic64 intrCount;
    /** Help to ensure vmk_IntrEnable/Disable appear in pairs. */
    vmk_atomic8 isIntrEnabled;
 #if NVME_PCIE_STORAGE_POLL
@@ -256,10 +280,10 @@ typedef struct NVMEPCIEQueueInfo {
    vmk_StoragePoll pollHandler;
 #endif
    /**
-    * Will update per second by 'iopsTimer'
+    * Will update per second by 'perfTimer'
     *
     * 'iopsLastSec' and 'numCmdComplThisSec' are valid only when
-    * 'iopsTimerQueue' and 'iopsTimer' are not NULL
+    * 'perfTimerQueue' and 'perfTimer' are not NULL
     */
    vmk_atomic32 iopsLastSec;
    vmk_atomic32 numCmdComplThisSec;
@@ -290,10 +314,10 @@ typedef struct NVMEPCIEController {
    NVMEPCIEWorkaround workaround;
    vmk_uint32 dstrd;
    vmk_Bool statsEnabled;
-   // Timer queue to record IOPs
-   vmk_TimerQueue iopsTimerQueue;
-   // Timer hanndler to record IOPs
-   vmk_Timer iopsTimer;
+   // Timer queue to record performance stats
+   vmk_TimerQueue perfTimerQueue;
+   // Timer hanndler to record performance stats
+   vmk_Timer perfTimer;
 #if NVME_PCIE_STORAGE_POLL
    /**
     * Always setup poll handlers, and it depends on 'pollAct' to activate
@@ -302,9 +326,10 @@ typedef struct NVMEPCIEController {
    vmk_atomic8 pollAct;
    vmk_atomic32 pollOIOThr;
    vmk_atomic64 pollInterval;
+   NVMEPCIEPerfStats perfStats;
 #endif
 #if NVME_PCIE_BLOCKSIZE_AWARE
-   vmk_atomic8 blkSizeAwarePollAct;
+       vmk_atomic8 blkSizeAwarePollAct;
 #endif
    vmk_MgmtHandle kvMgmtHandle;
    vmk_MgmtApiSignature kvMgmtSig;

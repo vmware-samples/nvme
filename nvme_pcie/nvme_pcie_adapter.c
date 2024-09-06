@@ -18,11 +18,11 @@ extern vmk_uint32 nvmePCIEFakeAdminQSize;
 
 static VMK_ReturnStatus RequestIoQueues(NVMEPCIEController *ctrlr,
                                         vmk_uint32 *nrIoQueues);
-static void NVMEPCIEIOPsTimerHandler(vmk_TimerCookie data);
-static void NVMEPCIECreateIOPsTimer(NVMEPCIEController *ctrlr);
-static void NVMEPCIEStartIOPsTimer(NVMEPCIEController *ctrlr);
-static void NVMEPCIEStopIOPsTimer(NVMEPCIEController *ctrlr);
-static void NVMEPCIEDestroyIOPsTimer(NVMEPCIEController *ctrlr);
+static void NVMEPCIEPerfTimerHandler(vmk_TimerCookie data);
+static void NVMEPCIECreatePerfTimer(NVMEPCIEController *ctrlr);
+static void NVMEPCIEStartPerfTimer(NVMEPCIEController *ctrlr);
+static void NVMEPCIEStopPerfTimer(NVMEPCIEController *ctrlr);
+static void NVMEPCIEDestroyPerfTimer(NVMEPCIEController *ctrlr);
 
 /**
  * startAdapter callback of adapter ops
@@ -682,12 +682,12 @@ NVMEPCIEAdapterDestroy(NVMEPCIEController *ctrlr)
 }
 
 /**
- * Timer handler which will update each queue's IOPs last second.
+ * Timer handler which will update performance stats of last second.
  *
  * @param[in] data  Controller instance
  */
 static void
-NVMEPCIEIOPsTimerHandler(vmk_TimerCookie data)
+NVMEPCIEPerfTimerHandler(vmk_TimerCookie data)
 {
    NVMEPCIEController *ctrlr = (NVMEPCIEController *) data.ptr;
    NVMEPCIEQueueInfo *qinfo = NULL;
@@ -710,7 +710,7 @@ NVMEPCIEIOPsTimerHandler(vmk_TimerCookie data)
 }
 
 static void
-NVMEPCIECreateIOPsTimer(NVMEPCIEController *ctrlr)
+NVMEPCIECreatePerfTimer(NVMEPCIEController *ctrlr)
 {
    VMK_ReturnStatus status = VMK_OK;
    vmk_TimerQueueProps timerQueueProps;
@@ -718,11 +718,11 @@ NVMEPCIECreateIOPsTimer(NVMEPCIEController *ctrlr)
    status = vmk_NameFormat(&timerQueueProps.name,
                            "timerQueue-%s", NVMEPCIEGetCtrlrName(ctrlr));
    if (status != VMK_OK) {
-      EPRINT(ctrlr, "Failed to name IOPs timer queue! %s.",
+      EPRINT(ctrlr, "Failed to name timer queue! %s.",
                     vmk_StatusToString(status));
 
-      ctrlr->iopsTimerQueue = VMK_INVALID_TIMER_QUEUE;
-      ctrlr->iopsTimer = VMK_INVALID_TIMER;
+      ctrlr->perfTimerQueue = VMK_INVALID_TIMER_QUEUE;
+      ctrlr->perfTimer = VMK_INVALID_TIMER;
 
       return;
    }
@@ -731,42 +731,42 @@ NVMEPCIECreateIOPsTimer(NVMEPCIEController *ctrlr)
    timerQueueProps.heapID = NVME_PCIE_DRIVER_RES_HEAP_ID;
    timerQueueProps.attribs = VMK_TIMER_QUEUE_ATTR_NONE;
 
-   status = vmk_TimerQueueCreate(&timerQueueProps, &ctrlr->iopsTimerQueue);
+   status = vmk_TimerQueueCreate(&timerQueueProps, &ctrlr->perfTimerQueue);
    if (status != VMK_OK) {
-      EPRINT(ctrlr, "Failed to create IOPs timer queue! %s.",
+      EPRINT(ctrlr, "Failed to create timer queue! %s.",
                     vmk_StatusToString(status));
 
-      ctrlr->iopsTimerQueue = VMK_INVALID_TIMER_QUEUE;
-      ctrlr->iopsTimer = VMK_INVALID_TIMER;
+      ctrlr->perfTimerQueue = VMK_INVALID_TIMER_QUEUE;
+      ctrlr->perfTimer = VMK_INVALID_TIMER;
    }
 }
 
 static void
-NVMEPCIEStartIOPsTimer(NVMEPCIEController *ctrlr)
+NVMEPCIEStartPerfTimer(NVMEPCIEController *ctrlr)
 {
    VMK_ReturnStatus status = VMK_OK;
 
-   if (VMK_LIKELY(ctrlr->iopsTimerQueue != VMK_INVALID_TIMER_QUEUE)) {
-      status = vmk_TimerSchedule(ctrlr->iopsTimerQueue,
-                                 (vmk_TimerCallback) NVMEPCIEIOPsTimerHandler,
+   if (VMK_LIKELY(ctrlr->perfTimerQueue != VMK_INVALID_TIMER_QUEUE)) {
+      status = vmk_TimerSchedule(ctrlr->perfTimerQueue,
+                                 (vmk_TimerCallback)NVMEPCIEPerfTimerHandler,
                                  ctrlr,
-                                 NVME_PCIE_IOPS_RECORD_FREQ,
+                                 NVME_PCIE_PERF_RECORD_FREQ,
                                  VMK_TIMER_DEFAULT_TOLERANCE,
                                  VMK_TIMER_ATTR_PERIODIC,
                                  VMK_LOCKDOMAIN_INVALID,
                                  VMK_SPINLOCK_UNRANKED,
-                                 &ctrlr->iopsTimer);
+                                 &ctrlr->perfTimer);
 
       if (status != VMK_OK) {
-         EPRINT(ctrlr, "Failed to start IOPs timer! %s.",
+         EPRINT(ctrlr, "Failed to start timer! %s.",
                         vmk_StatusToString(status));
 
-         ctrlr->iopsTimer = VMK_INVALID_TIMER;
+         ctrlr->perfTimer = VMK_INVALID_TIMER;
       }
    } else {
-      EPRINT(ctrlr, "Failed to start IOPs timer! Empty timer queue.");
+      EPRINT(ctrlr, "Failed to start timer! Empty timer queue.");
 
-      ctrlr->iopsTimer = VMK_INVALID_TIMER;
+      ctrlr->perfTimer = VMK_INVALID_TIMER;
    }
 }
 
@@ -806,9 +806,9 @@ NVMEPCIEControllerInit(NVMEPCIEController *ctrlr)
 
    ctrlr->osRes.vmkController = vmkController;
 
-   // Create Timer to record IOPs for this queue
-   NVMEPCIECreateIOPsTimer(ctrlr);
-   NVMEPCIEStartIOPsTimer(ctrlr);
+   // Create Timer to record performance stats
+   NVMEPCIECreatePerfTimer(ctrlr);
+   NVMEPCIEStartPerfTimer(ctrlr);
 
    // Init StoragePoll related configs
 #if NVME_PCIE_STORAGE_POLL
@@ -824,27 +824,27 @@ NVMEPCIEControllerInit(NVMEPCIEController *ctrlr)
 }
 
 static void
-NVMEPCIEStopIOPsTimer(NVMEPCIEController *ctrlr)
+NVMEPCIEStopPerfTimer(NVMEPCIEController *ctrlr)
 {
    VMK_ReturnStatus status = VMK_OK;
 
-   if (VMK_LIKELY(ctrlr->iopsTimer != VMK_INVALID_TIMER)) {
-         status = vmk_TimerCancel(ctrlr->iopsTimer, VMK_TRUE);
+   if (VMK_LIKELY(ctrlr->perfTimer != VMK_INVALID_TIMER)) {
+         status = vmk_TimerCancel(ctrlr->perfTimer, VMK_TRUE);
          if (status != VMK_OK) {
-            EPRINT(ctrlr, "Failed to stop IOPs timer! %s.",
+            EPRINT(ctrlr, "Failed to stop timer! %s.",
                           vmk_StatusToString(status));
          }
    }
 
-   ctrlr->iopsTimer = VMK_INVALID_TIMER;
+   ctrlr->perfTimer = VMK_INVALID_TIMER;
 }
 
 static void
-NVMEPCIEDestroyIOPsTimer(NVMEPCIEController *ctrlr)
+NVMEPCIEDestroyPerfTimer(NVMEPCIEController *ctrlr)
 {
-   if (VMK_LIKELY(ctrlr->iopsTimerQueue != VMK_INVALID_TIMER_QUEUE)) {
-      vmk_TimerQueueDestroy(ctrlr->iopsTimerQueue);
-      ctrlr->iopsTimerQueue = VMK_INVALID_TIMER_QUEUE;
+   if (VMK_LIKELY(ctrlr->perfTimerQueue != VMK_INVALID_TIMER_QUEUE)) {
+      vmk_TimerQueueDestroy(ctrlr->perfTimerQueue);
+      ctrlr->perfTimerQueue = VMK_INVALID_TIMER_QUEUE;
    }
 }
 
@@ -859,8 +859,8 @@ VMK_ReturnStatus
 NVMEPCIEControllerDestroy(NVMEPCIEController *ctrlr)
 {
    NVMEPCIEKeyValDestory(ctrlr);
-   NVMEPCIEStopIOPsTimer(ctrlr);
-   NVMEPCIEDestroyIOPsTimer(ctrlr);
+   NVMEPCIEStopPerfTimer(ctrlr);
+   NVMEPCIEDestroyPerfTimer(ctrlr);
    vmk_NvmeUnregisterController(ctrlr->osRes.vmkController);
    vmk_NvmeFreeController(ctrlr->osRes.vmkController);
    ctrlr->osRes.vmkController = NULL;

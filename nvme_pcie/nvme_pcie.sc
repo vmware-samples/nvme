@@ -34,7 +34,7 @@ nvme_pcie_identification = {
    "binary compat"   : "yes",
    "summary"         : "Non-Volatile memory controller driver",
    "description"     : "Non-Volatile memory controller driver",
-   "version"         : "1.4.0.0",
+   "version"         : "1.4.0.1",
    "version_bump"    : 1,
    "license"         : VMK_MODULE_LICENSE_BSD,
    "vendor"          : "VMware",
@@ -63,6 +63,9 @@ module_def = {
       "NVME_PCIE_DRIVER_RELEASE=\\\"%s\\\"" % nvme_pcie_identification["version_bump"],
                        ],
    "cc warnings"     : [
+                       ],
+   "cc flags"        : [
+      "-Werror=unused-variable",
                        ]
 }
 nvme_pcie_module = defineKernelModule(module_def)

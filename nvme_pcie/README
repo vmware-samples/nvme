@@ -1,3 +1,7 @@
+# Copyright (c) 2024 Broadcom. All Rights Reserved.
+# Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+# and/or its subsidiaries.
+
 = VMware Native NVMe PCIe Driver for NVMe Next Generation Driver Framework =
 
 == Description ==
@@ -5,6 +9,10 @@
 This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
+
+2024/8/30 1.4.0.1-1vmw
+
+   Add a new keyval entry for interrupt and polling performance statistics.
 
 2024/6/11 1.4.0.0-1vmw
 

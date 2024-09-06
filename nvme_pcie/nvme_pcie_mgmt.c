@@ -1,6 +1,10 @@
-/*****************************************************************************
- * Copyright (c) 2022-2023 VMware, Inc. All rights reserved.
- *****************************************************************************/
+/*
+ * ******************************************************************
+ * Copyright (c) 2022-2024 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
+ * ******************************************************************
+ */
 
 /**
  * @file: nvme_pcie_mgmt.c --
@@ -30,6 +34,10 @@ static VMK_ReturnStatus
 NVMEPCIEKeyPollIntervalGet(vmk_uint64 cookie, void *keyVal);
 static VMK_ReturnStatus
 NVMEPCIEKeyPollIntervalSet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfStatsSet(vmk_uint64 cookie, void *keyVal);
 #endif
 #if NVME_PCIE_BLOCKSIZE_AWARE
 static VMK_ReturnStatus
@@ -80,6 +88,14 @@ static NVMEPCIEKVMgmtData nvmePCIEKVMgmtData[] = {
       " Valid if poll activated.",
       NVMEPCIEKeyPollIntervalSet,
       "Set pollInterval",
+   },
+   {
+      "perfStats",
+      VMK_MGMT_KEY_TYPE_STRING,
+      NVMEPCIEKeyPerfStatsGet,
+      "Display the performance statistics of the device.",
+      NVMEPCIEKeyPerfStatsSet,
+      "Clear all the performance statistics to 0.",
    },
 #endif
 #if NVME_PCIE_BLOCKSIZE_AWARE
@@ -231,6 +247,90 @@ NVMEPCIEKeyPollIntervalSet(vmk_uint64 cookie, void *keyVal)
    vmk_AtomicWrite64(&ctrlr->pollInterval, pollInterval);
 
    IPRINT(ctrlr, "pollInterval is set as %lu.", pollInterval);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal)
+{
+   VMK_ReturnStatus status;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+   vmk_uint8 *buf = NULL;
+   vmk_ByteCount out_len = 0;
+   vmk_uint64 pollCount, pollBackToIntrCount, pollAccuCount;
+   vmk_uint64 pollAccuCmd, pollCmdDone;
+   vmk_uint64 intrCount, intrCmdDone;
+   vmk_uint32 i;
+   char *perfStatsStr = "{\n"
+                        "\tpollCount: %lu,\n"
+                        "\tpollBackToIntrCount: %lu,\n"
+                        "\tpollBackToIntrCount ratio: %lu/10000,\n"
+                        "\tpollAccuCount: %lu,\n"
+                        "\tpollAccuCount ratio: %lu/10000,\n"
+                        "\tpollCmdDone: %lu,\n"
+                        "\tpollAccuCmd: %lu,\n"
+                        "\tpollAccuCmd ratio: %lu/10000,\n"
+                        "\tintrCount: %lu,\n"
+                        "\tintrCmdDone: %lu,\n"
+                        "}";
+
+   buf = NVMEPCIEAlloc(NVMEPCIE_KVMGMT_BUF_SIZE, 0);
+   if (buf == NULL) {
+      MOD_IPRINT("Failed to allocate buffer.");
+      goto fail_alloc_buf;
+   }
+
+   pollCount = vmk_AtomicRead64(&ctrlr->perfStats.pollCount);
+   pollBackToIntrCount = vmk_AtomicRead64(&ctrlr->perfStats.pollBackToIntrCount);
+   pollAccuCount = vmk_AtomicRead64(&ctrlr->perfStats.pollAccuCount);
+   pollCmdDone = vmk_AtomicRead64(&ctrlr->perfStats.pollCmdDone);
+   pollAccuCmd = vmk_AtomicRead64(&ctrlr->perfStats.pollAccuCmd);
+   for (i = 1; i <= ctrlr->numIoQueues; i++) {
+      vmk_AtomicAdd64(&ctrlr->perfStats.intrCount,
+                      vmk_AtomicRead64(&ctrlr->queueList[i].intrCount));
+   }
+   intrCount = vmk_AtomicRead64(&ctrlr->perfStats.intrCount);
+   intrCmdDone = vmk_AtomicRead64(&ctrlr->perfStats.intrCmdDone);
+   status = vmk_StringFormat(buf, NVMEPCIE_KVMGMT_BUF_SIZE,
+                             &out_len, perfStatsStr,
+                             pollCount, pollBackToIntrCount,
+                             pollCount ? ((pollBackToIntrCount * 10000) / pollCount) : 0,
+                             pollAccuCount,
+                             pollCount ? ((pollAccuCount * 10000) / pollCount) : 0,
+                             pollCmdDone, pollAccuCmd,
+                             pollCmdDone ? ((pollAccuCmd * 10000) / pollCmdDone) : 0,
+                             intrCount, intrCmdDone);
+   if (status != VMK_OK) {
+      goto fail_to_get_perfStats;
+   }
+
+   vmk_StringCopy(keyVal, buf, out_len + 1);
+
+fail_to_get_perfStats:
+   NVMEPCIEFree(buf);
+fail_alloc_buf:
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfStatsSet(vmk_uint64 cookie, void *keyVal)
+{
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+   vmk_uint32 i;
+
+   vmk_AtomicWrite64(&ctrlr->perfStats.pollCount, 0);
+   vmk_AtomicWrite64(&ctrlr->perfStats.pollBackToIntrCount, 0);
+   vmk_AtomicWrite64(&ctrlr->perfStats.pollAccuCount, 0);
+   vmk_AtomicWrite64(&ctrlr->perfStats.pollAccuCmd, 0);
+   vmk_AtomicWrite64(&ctrlr->perfStats.pollCmdDone, 0);
+   vmk_AtomicWrite64(&ctrlr->perfStats.intrCount, 0);
+   for (i = 0; i <= ctrlr->numIoQueues; i++) {
+      vmk_AtomicWrite64(&ctrlr->queueList[i].intrCount, 0);
+   }
+   vmk_AtomicWrite64(&ctrlr->perfStats.intrCmdDone, 0);
 
    return VMK_OK;
 }
@@ -586,4 +686,3 @@ NVMEPCIEGlobalKeyValDestroy()
       NVME_PCIE_DRIVER_MGMT_HANDLE = NULL;
    }
 }
-

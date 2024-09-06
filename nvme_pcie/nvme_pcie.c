@@ -544,7 +544,7 @@ NVMEPCIEStatsWalkThrough(NVMEPCIEQueueInfo *qinfo, vmk_Bool countIntr)
 
    // In interruption mode, count interrupts while not in polling mode
    if (countIntr) {
-      stats->intrCount ++;
+      stats->intrCount = vmk_AtomicRead64(&qinfo->intrCount);
    }
 
    while (1) {
@@ -715,7 +715,7 @@ void
 NVMEPCIECtrlMsiHandler(void *handlerData, vmk_IntrCookie intrCookie)
 {
    NVMEPCIEController *ctrlr = (NVMEPCIEController *)handlerData;
-   NVMEPCIEQueueInfo *qinfo = (NVMEPCIEQueueInfo *)handlerData;
+   NVMEPCIEQueueInfo *qinfo;
    int i;
 
    NVMEPCIEQueueIntrHandler(&ctrlr->queueList[0], intrCookie);
@@ -739,9 +739,11 @@ NVMEPCIECtrlMsiHandler(void *handlerData, vmk_IntrCookie intrCookie)
 VMK_ReturnStatus
 NVMEPCIEQueueIntrAck(void *handlerData, vmk_IntrCookie intrCookie)
 {
-#if NVME_STATS
    NVMEPCIEQueueInfo *qinfo = (NVMEPCIEQueueInfo *)handlerData;
 
+   vmk_AtomicInc64(&qinfo->intrCount);
+
+#if NVME_STATS
    NVMEPCIEStatsWalkThrough(qinfo, VMK_TRUE);
 #endif
    return VMK_OK;
@@ -760,6 +762,8 @@ NVMEPCIEQueueIntrHandler(void *handlerData, vmk_IntrCookie intrCookie)
 {
    NVMEPCIEQueueInfo *qinfo = (NVMEPCIEQueueInfo *)handlerData;
 #if NVME_PCIE_STORAGE_POLL
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   vmk_uint32 intrCmdDone = 0;
    vmk_StoragePollState pollState = VMK_STORAGEPOLL_DISABLED;
 #endif
 
@@ -778,12 +782,15 @@ NVMEPCIEQueueIntrHandler(void *handlerData, vmk_IntrCookie intrCookie)
          // Do not synchronize interrupt here to avoid endless waiting
          NVMEPCIEDisableIntr(qinfo, VMK_FALSE);
          vmk_StoragePollActivate(qinfo->pollHandler);
+
+         return;
       }
-   } else {
-      vmk_SpinlockLock(qinfo->cqInfo->lock);
-      NVMEPCIEProcessCq(qinfo);
-      vmk_SpinlockUnlock(qinfo->cqInfo->lock);
    }
+
+   vmk_SpinlockLock(qinfo->cqInfo->lock);
+   intrCmdDone = NVMEPCIEProcessCq(qinfo);
+   vmk_AtomicAdd64(&ctrlr->perfStats.intrCmdDone, intrCmdDone);
+   vmk_SpinlockUnlock(qinfo->cqInfo->lock);
 #else
    vmk_SpinlockLock(qinfo->cqInfo->lock);
    NVMEPCIEProcessCq(qinfo);
@@ -1443,9 +1450,12 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
 {
    vmk_StoragePollState pollState = VMK_STORAGEPOLL_DISABLED;
    NVMEPCIEQueueInfo *qinfo = driverData.ptr;
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
    vmk_StoragePoll pollHandler = qinfo->pollHandler;
    vmk_uint32 ret = 0;
    vmk_Bool needPoll = VMK_FALSE;
+
+   vmk_AtomicInc64(&ctrlr->perfStats.pollCount);
 
    if (VMK_LIKELY(budget != 0)) {
       NVMEPCIEStoragePollAccumCmd(qinfo, leastPoll);
@@ -1457,6 +1467,8 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
       ret += NVMEPCIEProcessCq(qinfo);
       vmk_SpinlockUnlock(qinfo->cqInfo->lock);
 
+      vmk_AtomicAdd64(&ctrlr->perfStats.pollCmdDone, ret);
+
       /** Check if the number of completed IO commands is valid */
       if (ret >= leastPoll && ret <= budget) {
          needPoll = VMK_TRUE;
@@ -1466,6 +1478,7 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
    vmk_StoragePollCheckState(pollHandler, &pollState);
    if ((!needPoll) &&
        VMK_LIKELY(pollState != VMK_STORAGEPOLL_DISABLED)) {
+      vmk_AtomicInc64(&ctrlr->perfStats.pollBackToIntrCount);
       NVMEPCIEEnableIntr(qinfo);
 
       /**
@@ -1482,7 +1495,7 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
 #if NVME_STATS
       NVMEPCIEStatsWalkThrough(qinfo, VMK_FALSE);
 #endif
-      NVMEPCIEProcessCq(qinfo);
+      vmk_AtomicAdd64(&ctrlr->perfStats.pollCmdDone, NVMEPCIEProcessCq(qinfo));
       vmk_SpinlockUnlock(qinfo->cqInfo->lock);
    } else if (VMK_UNLIKELY(pollState == VMK_STORAGEPOLL_DISABLED)) {
       vmk_AtomicWrite8(&qinfo->isPollHdlrEnabled, VMK_FALSE);
@@ -1543,6 +1556,7 @@ NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,   // IN
 {
    // Get pending info in CQ
    NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
    vmk_uint32 tryPollTimes = 0;
    vmk_uint32 tryLen = leastPoll;
    // Total hardware done cmds
@@ -1560,9 +1574,11 @@ NVMEPCIEStoragePollAccumCmd(NVMEPCIEQueueInfo *qinfo,   // IN
       hwDoneCmd1 += NVMEPCIEGetHwDoneCmdNum(cqInfo,
                                             cqInfo->head + hwDoneCmd1,
                                             tryLen - hwDoneCmd1);
-      interval = vmk_AtomicRead64(&qinfo->ctrlr->pollInterval);
+      interval = vmk_AtomicRead64(&ctrlr->pollInterval);
       if (hwDoneCmd1 < tryLen) {
          tryPollTimes++;
+         vmk_AtomicInc64(&ctrlr->perfStats.pollAccuCount);
+         vmk_AtomicAdd64(&ctrlr->perfStats.pollAccuCmd, hwDoneCmd1);
 
          vmk_WorldSleep(interval);
 
@@ -1692,12 +1708,13 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
    vmk_atomic32 *nrActPtr = &qinfo->cmdList->nrAct;
    vmk_atomic32 *iopsLastSecPtr;
    vmk_Bool doSwitch = VMK_FALSE;
+   vmk_uint32 pollOIOThr;
 
    /**
-    * If 'iopsTimer' is invalid, queue's 'iopsLastSec' will never be reset,
+    * If 'perfTimer' is invalid, queue's 'iopsLastSec' will never be reset,
     * thus, mark 'iopsLastSec' as invalid by setting 'iopsLastSecPtr' as NULL.
     */
-   iopsLastSecPtr = (ctrlr->iopsTimer != VMK_INVALID_TIMER) ?
+   iopsLastSecPtr = (ctrlr->perfTimer != VMK_INVALID_TIMER) ?
                     &qinfo->iopsLastSec : NULL;
    /**
     * Just poll for IO queues if StoragePoll feature enabled and handler
@@ -1714,18 +1731,19 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
        *    but the OIO is low, device may have low latency feature, enable
        *    polling as well
        */
-      if ((vmk_AtomicRead32(nrActPtr) >=
-           vmk_AtomicRead32(&ctrlr->pollOIOThr)) ||
-          ((iopsLastSecPtr != NULL) && (vmk_AtomicRead32(iopsLastSecPtr) >=
-           NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE))) {
-#if NVME_PCIE_BLOCKSIZE_AWARE
-         if (NVMEPCIEStoragePollBlkSizeAwareSwitch(qinfo)) {
-            doSwitch = VMK_TRUE;
-         }
-#else
+      pollOIOThr = vmk_AtomicRead32(&ctrlr->pollOIOThr);
+      if (vmk_AtomicRead32(nrActPtr) >= pollOIOThr) {
          doSwitch = VMK_TRUE;
-#endif
+      } else if (VMK_LIKELY(iopsLastSecPtr != NULL) &&
+                 (vmk_AtomicRead32(iopsLastSecPtr) >=
+                  NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE)) {
+         doSwitch = VMK_TRUE;
       }
+#if NVME_PCIE_BLOCKSIZE_AWARE
+      if (doSwitch && !NVMEPCIEStoragePollBlkSizeAwareSwitch(qinfo)) {
+         doSwitch = VMK_FALSE;
+      }
+#endif
    }
 
    return doSwitch;
