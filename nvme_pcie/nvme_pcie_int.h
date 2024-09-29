@@ -118,8 +118,6 @@ typedef struct NVMEPCIEPerfStats {
    vmk_atomic64 pollCmdDone;
    // The number of IO commands affected by the sleep of polling accumulation
    vmk_atomic64 pollAccuCmd;
-   // The count of IO queue interrupt
-   vmk_atomic64 intrCount;
    // The number of IO commands done in interrupt
    vmk_atomic64 intrCmdDone;
 } NVMEPCIEPerfStats;

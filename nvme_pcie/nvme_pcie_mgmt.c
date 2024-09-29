@@ -261,7 +261,7 @@ NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal)
    vmk_ByteCount out_len = 0;
    vmk_uint64 pollCount, pollBackToIntrCount, pollAccuCount;
    vmk_uint64 pollAccuCmd, pollCmdDone;
-   vmk_uint64 intrCount, intrCmdDone;
+   vmk_uint64 intrCount = 0, intrCmdDone;
    vmk_uint32 i;
    char *perfStatsStr = "{\n"
                         "\tpollCount: %lu,\n"
@@ -288,10 +288,8 @@ NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal)
    pollCmdDone = vmk_AtomicRead64(&ctrlr->perfStats.pollCmdDone);
    pollAccuCmd = vmk_AtomicRead64(&ctrlr->perfStats.pollAccuCmd);
    for (i = 1; i <= ctrlr->numIoQueues; i++) {
-      vmk_AtomicAdd64(&ctrlr->perfStats.intrCount,
-                      vmk_AtomicRead64(&ctrlr->queueList[i].intrCount));
+      intrCount += vmk_AtomicRead64(&ctrlr->queueList[i].intrCount);
    }
-   intrCount = vmk_AtomicRead64(&ctrlr->perfStats.intrCount);
    intrCmdDone = vmk_AtomicRead64(&ctrlr->perfStats.intrCmdDone);
    status = vmk_StringFormat(buf, NVMEPCIE_KVMGMT_BUF_SIZE,
                              &out_len, perfStatsStr,
@@ -326,7 +324,6 @@ NVMEPCIEKeyPerfStatsSet(vmk_uint64 cookie, void *keyVal)
    vmk_AtomicWrite64(&ctrlr->perfStats.pollAccuCount, 0);
    vmk_AtomicWrite64(&ctrlr->perfStats.pollAccuCmd, 0);
    vmk_AtomicWrite64(&ctrlr->perfStats.pollCmdDone, 0);
-   vmk_AtomicWrite64(&ctrlr->perfStats.intrCount, 0);
    for (i = 0; i <= ctrlr->numIoQueues; i++) {
       vmk_AtomicWrite64(&ctrlr->queueList[i].intrCount, 0);
    }

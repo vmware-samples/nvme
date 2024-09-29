@@ -10,6 +10,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
 
+2024/9/27 1.4.0.2-1vmw
+
+   Remove 'intrCount' from struct 'NVMEPCIEPerfStats' and calculate alone.
+
 2024/8/30 1.4.0.1-1vmw
 
    Add a new keyval entry for interrupt and polling performance statistics.
