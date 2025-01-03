@@ -1400,6 +1400,7 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    vmk_uint32               numAllocated = 0;
    vmk_uint32               numActive = 0;
    vmk_uint32               numNs = 0;
+   vmk_uint32               nsId = 0;
    const char               *vmhba = NULL;
    struct nvme_adapter_list list;
    struct nvme_ns_list      *nsAllocatedList = NULL;
@@ -1413,10 +1414,14 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    BOOL allocatedNsListSupt = false;
    struct NamespaceInfo *nsList = NULL;
 
-   while ((ch = getopt(argc, (char *const*)argv, "A:")) != -1) {
+   while ((ch = getopt(argc, (char *const*)argv, "A:n:")) != -1) {
       switch (ch) {
          case 'A':
             vmhba = optarg;
+            break;
+
+         case 'n':
+            nsId = atoi(optarg);
             break;
 
          default:
@@ -1428,6 +1433,10 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    if (vmhba == NULL) {
       Error("Invalid parameter.");
       return;
+   }
+
+   if (nsId > 0) {
+      nsId = nsId - 1;
    }
 
    // do stuff for nvme device namespace list -A vmhbax.
@@ -1466,7 +1475,7 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
       }
       memset(nsAllocatedList, 0, sizeof(*nsAllocatedList));
       rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS,
-                         0, 0, nsAllocatedList);
+                         0, nsId, nsAllocatedList);
       if (rc != 0) {
          Error("Failed to get allocated namespace list, 0x%x.", rc);
          goto out_free;
@@ -1491,7 +1500,7 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
       }
       memset(nsActiveList, 0, sizeof(*nsActiveList));
       rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_IDS_ACTIVE,
-                         0, 0, nsActiveList);
+                         0, nsId, nsActiveList);
       if (rc != 0) {
          Error("Failed to get active namespace list, 0x%x.", rc);
          goto out_free;
@@ -1508,6 +1517,9 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
    if (allocatedNsListSupt || activeNsListSupt) {
       // There are numAllocated+numActive namespaces at most.
       numNs = numAllocated + numActive;
+      if (numNs > 1024) {
+         numNs = 1024;
+      }
    } else { // 1.0 controller
       numNs = idCtrlr->nn;
    }
@@ -1554,6 +1566,9 @@ NvmePlugin_DeviceNsList(int argc, const char *argv[])
          nsList[k].status = NS_ACTIVE;
          k ++;
          j ++;
+      }
+      if (k == numNs) {
+         break;
       }
    }
 

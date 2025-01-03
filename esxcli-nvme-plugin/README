@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2024/12/19 1.4.0.2-1vmw
+
+   Add an optional parameter for "esxcli nvme device namespace list" to specify starting namespace ID.
+
 2024/8/12 1.4.0.1-1vmw
 
    Fix PR #3331227: Update controller identify data after activating the firmware without reset.

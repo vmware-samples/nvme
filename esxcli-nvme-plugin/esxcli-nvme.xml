@@ -276,10 +276,13 @@
       </command>
       <!-- esxcli nvme device namespace list -->
       <command path="nvme.device.namespace.list">
-         <description>List namespace on NVMe device</description>
+         <description>List namespace on NVMe device. A list of up to 1024 entries is returned in increasing order.</description>
          <input-spec>
             <parameter name="adapter" type="string" required="true" shortname="A">
                <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="namespace" type="int" required="false" shortname="n">
+               <description>Namespace ID to start from in the list. The default value is 1.</description>
             </parameter>
          </input-spec>
          <output-spec>
@@ -296,7 +299,7 @@
             <format-parameter name="fields:NamespaceList">Namespace ID,Status,Device Name</format-parameter>
             <format-parameter name="show-header:NamespaceList">true</format-parameter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.list -A $val{adapter}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.list -A $val{adapter} $if{namespace, -n $val{namespace}}</execute>
       </command>
 
       <!-- esxcli nvme device namespace create -->
