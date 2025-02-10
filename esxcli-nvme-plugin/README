@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2025/2/6 1.4.0.3-1vmw
+
+   Update parameters for namespace creating.
+
 2024/12/19 1.4.0.2-1vmw
 
    Add an optional parameter for "esxcli nvme device namespace list" to specify starting namespace ID.

@@ -1,6 +1,8 @@
-/*********************************************************************************
- * Copyright (c) 2013-2023 VMware, Inc. All rights reserved.
- * ******************************************************************************/
+/*****************************************************************************
+ * Copyright (c) 2013-2025 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
+ *****************************************************************************/
 
 #ifndef _NVME_LIB_H
 #define _NVME_LIB_H
@@ -45,11 +47,6 @@ extern vmk_uint64 adminTimeout;
 #define FORMAT_TIMEOUT (30 * 60 * 1000 * 1000)   /* 30 minutes */
 #define FIRMWARE_DOWNLOAD_TIMEOUT (30 * 60 * 1000 * 1000)   /* 30 minutes */
 #define FIRMWARE_ACTIVATE_TIMEOUT (30 * 60 * 1000 * 1000)   /* 30 minutes */
-
-/**
- * maximum number of namespaces supported per controller
- */
-#define NVME_MAX_NAMESPACE_PER_CONTROLLER (1024)
 
 /**
  * for firmware download
@@ -111,6 +108,30 @@ typedef struct nvme_persistent_event_log_header {
    vmk_uint8 reserved3[108];
    vmk_uint8 bitmap[32];
 } VMK_ATTRIBUTE_PACKED nvme_persistent_event_log_header;
+
+/**
+ * Namespace Management - Host Software Specified Fields
+ */
+typedef struct nvme_namespace_management_data {
+   vmk_uint64 nsze;
+   vmk_uint64 ncap;
+   vmk_uint8 reserved1[10];
+   vmk_uint8 flbas;
+   vmk_uint8 reserved2[2];
+   vmk_uint8 dps;
+   vmk_uint8 nmic;
+   vmk_uint8 reserved3[61];
+   vmk_uint32 anagrpid;
+   vmk_uint8 reserved4[4];
+   vmk_uint16 nvmsetid;
+   vmk_uint16 endgid;
+   vmk_uint8 reserved5[280];
+   vmk_uint64 lbstm;
+   vmk_uint16 nphndls;
+   vmk_uint8 reserved6[118];
+   vmk_uint16 phl[128];
+   vmk_uint8 reserved7[3328];
+} VMK_ATTRIBUTE_PACKED nvme_namespace_management_data;
 
 /**
  * Adapter instance list
@@ -233,7 +254,8 @@ int
 Nvme_AttachedNsId(struct nvme_handle *handle, vmk_uint32 nsId);
 
 vmk_uint32
-Nvme_NsMgmtCreate(struct nvme_handle *handle, vmk_NvmeIdentifyNamespace *idNs,
+Nvme_NsMgmtCreate(struct nvme_handle *handle,
+                  struct nvme_namespace_management_data *nsMgmtData,
                   int *cmdStatus);
 
 int

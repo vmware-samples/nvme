@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2014-2024 Broadcom. All Rights Reserved.
+ * Copyright (c) 2014-2025 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  *****************************************************************************/
@@ -654,6 +654,63 @@ GetCtrlrId(struct nvme_handle *handle)
    return rc;
 }
 
+/**
+ * Parse the comma-separated Placement Handle list to Placement Handle array.
+ *
+ * @param [in]  phlStr  Comma-separated Placement Handle list
+ * @param [out] phl     Placement Handle array
+ * @param [in]  phlLen  The length of Placement Handle array
+ * @param [out] nphndls Number of Placement Handles
+ *
+ * @retval return 0 if Placement Handles are parsed successfully, otherwise -1.
+ */
+static int
+ParsePlacementHandleList(char *phlStr, vmk_uint16 *phl, vmk_uint16 phlLen, vmk_uint16 *nphndls)
+{
+   int rc = 0;
+   int count = 0;
+   vmk_uint16 ruhId = 0;
+   char *tmp = NULL;
+
+   if (nphndls == NULL) {
+      LogError("NULL nphndls");
+      return -1;
+   }
+
+   if (phlStr == NULL) {
+      *nphndls = 0;
+      return 0;
+   }
+
+   if (phl == NULL || phlLen == 0) {
+      LogError("Empty placement handle list");
+      return -1;
+   }
+
+   tmp = strtok(phlStr, ",");
+   while (tmp != NULL) {
+      ruhId = stoul(tmp, 10, VMK_UINT16_MAX, &rc);
+      if (rc != 0) {
+         LogError("Failed to parse %s to ruhId", tmp);
+         break;
+      }
+      if (count >= phlLen) {
+         LogError("Number of placement handles exceeds the length of placement handle list");
+         rc = -1;
+         break;
+      }
+      phl[count] = ruhId;
+      count ++;
+      tmp = strtok(NULL, ",");
+   }
+
+   *nphndls = count;
+   for (int i = 0; i < *nphndls; i++) {
+      LogDebug("Placement handle %d associated RUH %d", i, phl[i]);
+   }
+   return rc;
+}
+
 void
 NvmePlugin_DeviceList(int argc, const char *argv[])
 {
@@ -694,24 +751,31 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
    struct nvme_adapter_list    list;
    const char                  *vmhba = NULL;
    struct nvme_handle          *handle;
-   vmk_NvmeIdentifyNamespace   *idNs;
+   struct nvme_namespace_management_data *nsMgmtData = NULL;
    vmk_uint64                  size        = 0;
    vmk_uint64                  capacity    = 0;
-   vmk_uint8                   fmtLbaSize  = -1;
-   vmk_uint8                   dataProtSet = -1;
-   vmk_uint8                   nmic        = -1;
+   vmk_uint8                   fmtLbaSize  = 0xff;
+   vmk_uint8                   dataProtSet = 0;
+   vmk_uint8                   nmic        = 0;
+   vmk_uint16                  anaGroupId  = 0;
+   vmk_uint16                  nvmSetId    = 0;
+   vmk_uint16                  enduranceGroupId = 0;
+   vmk_uint64                  lbstm       = 0;
+   char                        *phlStr     = NULL;
    int                         cmdStatus   = 0;
+   vmk_uint16                  nphndls     = 0;
+   vmk_uint16                  phl[128]    = {0};
 
-   while ((ch = getopt(argc, (char *const*)argv, "A:s:c:f:p:m:")) != -1) {
+   while ((ch = getopt(argc, (char *const*)argv, "A:s:c:f:p:m:a:N:e:l:P:")) != -1) {
       switch (ch) {
          case 'A':
             vmhba = optarg;
             break;
          case 's':
-            size = (vmk_uint64)atoll(optarg);
+            size = stoul(optarg, 10, VMK_UINT64_MAX, &rc);
             break;
          case 'c':
-            capacity = (vmk_uint64)atoll(optarg);
+            capacity = stoul(optarg, 10, VMK_UINT64_MAX, &rc);
             break;
          case 'f':
             fmtLbaSize = atoi(optarg);
@@ -722,15 +786,28 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
          case 'm':
             nmic = atoi(optarg);
             break;
-
+         case 'a':
+            anaGroupId = atoi(optarg);
+            break;
+         case 'N':
+            nvmSetId = atoi(optarg);
+            break;
+         case 'e':
+            enduranceGroupId = atoi(optarg);
+            break;
+         case 'l':
+            lbstm = stoul(optarg, 10, VMK_UINT64_MAX, &rc);
+            break;
+         case 'P':
+            phlStr = optarg;
+            break;
          default:
             Error("Invalid parameter.");
             return;
       }
    }
 
-   if (vmhba == NULL || size == 0 || capacity == 0 || fmtLbaSize  == -1 ||
-       dataProtSet == -1 || nmic == -1) {
+   if (vmhba == NULL || size == 0 || capacity == 0 || fmtLbaSize  == 0xff) {
       Error("Invalid parameter.");
       return;
    }
@@ -739,6 +816,12 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
    if (nmic == 1) {
       Error("Multi-path I/O and Namespace Sharing Capabilities (NMIC) are not supported "
             "by ESXi.");
+      return;
+   }
+
+   rc = ParsePlacementHandleList(phlStr, phl, 128, &nphndls);
+   if (rc != 0) {
+      Error("Invalid placement handle list.");
       return;
    }
 
@@ -765,21 +848,29 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
       goto out;
    }
 
-   idNs = malloc(sizeof(*idNs));
-   if (idNs == NULL) {
+   nsMgmtData = malloc(sizeof(*nsMgmtData));
+   if (nsMgmtData == NULL) {
       Error("Out of memory.");
       goto out;
    }
 
-   memset(idNs, 0, sizeof(*idNs));
+   memset(nsMgmtData, 0, sizeof(*nsMgmtData));
 
-   idNs->nsze = size;
-   idNs->ncap = capacity;
-   idNs->flbas = fmtLbaSize;
-   idNs->dps = dataProtSet;
-   idNs->nmic = nmic & VMK_NVME_NS_IDENT_NMIC_MC;
+   nsMgmtData->nsze = size;
+   nsMgmtData->ncap = capacity;
+   nsMgmtData->flbas = fmtLbaSize;
+   nsMgmtData->dps = dataProtSet;
+   nsMgmtData->nmic = nmic & VMK_NVME_NS_IDENT_NMIC_MC;
+   nsMgmtData->anagrpid = anaGroupId;
+   nsMgmtData->nvmsetid = nvmSetId;
+   nsMgmtData->endgid = enduranceGroupId;
+   nsMgmtData->lbstm = lbstm;
+   nsMgmtData->nphndls = nphndls;
+   if (nphndls > 0) {
+      memcpy(nsMgmtData->phl, phl, sizeof(vmk_uint16) * nphndls);
+   }
 
-   nsId = Nvme_NsMgmtCreate(handle, idNs, &cmdStatus);
+   nsId = Nvme_NsMgmtCreate(handle, nsMgmtData, &cmdStatus);
    if (nsId == 0) {
       switch (cmdStatus) {
          case 0x0:
@@ -797,6 +888,12 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
          case 0x11b:
             Error("Thin provisioning is not supported by the controller.");
             break;
+         case 0x124:
+            Error("The ANA Group Identifer is invalid.");
+            break;
+         case 0x129:
+            Error("The I/O Command Set is not supported.");
+            break;
          default:
             Error("Failed to create namespace, 0x%x.", cmdStatus);
             break;
@@ -811,7 +908,7 @@ NvmePlugin_DeviceNsCreate(int argc, const char *argv[])
    esxcli_xml_end_output();
 
 out_free:
-   free(idNs);
+   free(nsMgmtData);
 out:
    Nvme_Close(handle);
 }

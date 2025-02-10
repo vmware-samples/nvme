@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2024 Broadcom. All Rights Reserved.
+# Copyright (c) 2015-2025 Broadcom. All Rights Reserved.
 # Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
 # and/or its subsidiaries.
 #
@@ -15,7 +15,7 @@
 #
 
 UWTOOL = esxcli-nvme-plugin
-UWTOOL_VERSION = 1.4.0.2-1vmw
+UWTOOL_VERSION = 1.4.0.3-1vmw
 
 UWTOOL_SOURCES = main.c esxcli_xml.c nvme_lib.c
 

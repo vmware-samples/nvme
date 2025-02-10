@@ -319,13 +319,28 @@
                <description>Formatted LBA Size</description>
                <constraint type="range"> <range min="0" max="15"/> </constraint>
             </parameter>
-            <parameter name="dps" type="int" required="true" shortname="p">
-               <description>End-to-End Data Protection Type Settings</description>
+            <parameter name="dps" type="int" required="false" shortname="p">
+               <description>End-to-End Data Protection Type Settings. The default value is 0.</description>
                <constraint type="range"> <range min="0" max="3"/> </constraint>
             </parameter>
-            <parameter name="nmic" type="int" required="true" shortname="m">
-               <description>Namespace Multi-path IO and Namespace Sharing Capabilities</description>
+            <parameter name="nmic" type="int" required="false" shortname="m">
+               <description>Namespace Multi-path IO and Namespace Sharing Capabilities. The default value is 0.</description>
                <constraint type="range"> <range min="0" max="1"/> </constraint>
+            </parameter>
+            <parameter name="anagrpid" type="int" required="false" shortname="a">
+               <description>ANA Group Identifier. The default value is 0.</description>
+            </parameter>
+            <parameter name="nvmsetid" type="int" required="false" shortname="N">
+               <description>NVM Set Identifier. The default value is 0.</description>
+            </parameter>
+            <parameter name="endgid" type="int" required="false" shortname="e">
+               <description>Endurance Group Identifier. The default value is 0.</description>
+            </parameter>
+            <parameter name="lbstm" type="int" required="false" shortname="l">
+               <description>Logical Block Storage Tag Mask. The default value is 0.</description>
+            </parameter>
+            <parameter name="phl" type="string" required="false" shortname="P">
+               <description>Comma-separated list of Placement Handle Associated RUH</description>
             </parameter>
          </input-spec>
          <output-spec>
@@ -334,7 +349,7 @@
          <format-parameters>
             <formatter>simple</formatter>
          </format-parameters>
-         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.create -A $val{adapter} -s $val{size} -c $val{capacity} -f $val{flbas} -p $val{dps} -m $val{nmic}</execute>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.namespace.create -A $val{adapter} -s $val{size} -c $val{capacity} -f $val{flbas} $if{dps, -p $val{dps}} $if{nmic, -m $val{nmic}} $if{anagrpid, -a $val{anagrpid}} $if{nvmsetid, -N $val{nvmsetid}} $if{endgid, -e $val{endgid}} $if{lbstm, -l $val{lbstm}} $if{phl, -P $val{phl}}</execute>
       </command>
 
       <!-- esxcli nvme device namespace delete -->

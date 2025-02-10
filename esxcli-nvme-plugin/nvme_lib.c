@@ -1,6 +1,8 @@
-/*********************************************************************************
- * Copyright (c) 2013-2023 VMware, Inc. All rights reserved.
- * ******************************************************************************/
+/*****************************************************************************
+ * Copyright (c) 2013-2025 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
+ *****************************************************************************/
 
 #include <assert.h>
 #include <string.h>
@@ -553,14 +555,15 @@ free_id:
 /**
   * Namespace Management Create
   *
-  * @param [in] handle handle to a device
-  * @param [in] idNs   attributes for the namespace to be created
+  * @param [in]  handle     handle to a device
+  * @param [in]  nsMgmtData attributes for the namespace to be created
+  * @param [out] cmdStatus  command status
   *
   * @return nsId if creating namespace successfully, otherwise return 0
   */
 vmk_uint32
 Nvme_NsMgmtCreate(struct nvme_handle *handle,
-                  vmk_NvmeIdentifyNamespace *idNs,
+                  struct nvme_namespace_management_data *nsMgmtData,
                   int *cmdStatus)
 {
    int rc = 0;
@@ -572,8 +575,8 @@ Nvme_NsMgmtCreate(struct nvme_handle *handle,
    uio.direction = XFER_TO_DEV;
    uio.timeoutUs = adminTimeout;
    uio.cmd.nsMgmt.cdw10.sel = VMK_NVME_NS_MGMT_CREATE;
-   uio.addr = (vmk_uintptr_t)idNs;
-   uio.length = sizeof(*idNs);
+   uio.addr = (vmk_uintptr_t)nsMgmtData;
+   uio.length = sizeof(*nsMgmtData);
 
    rc = Nvme_AdminPassthru(handle, &uio);
    if (cmdStatus) {
