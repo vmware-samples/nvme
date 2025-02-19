@@ -266,15 +266,17 @@ Nvme_AdminPassthru(struct nvme_handle *handle, NvmeUserIo *uio)
 {
    int rc, i;
    vmk_uint32 *ptr;
+   vmk_NvmeSubmissionQueueEntry *sqe = &uio->cmd.cmd;
 
    LogDebug("%s, uio %p, opc 0x%x, timeout %lu, addr 0x%lx, length %d",
-            handle->name, uio, uio->cmd.cmd.cdw0.opc, uio->timeoutUs,
+            handle->name, uio, sqe->cdw0.opc, uio->timeoutUs,
             uio->addr, uio->length);
-   ptr = (vmk_uint32 *)&uio->cmd.cmd;
-   for (i = 0; i < sizeof(uio->cmd)/sizeof(vmk_uint32); i += 4) {
-       LogDebug("%02x: %08x %08x %08x %08x", i,
-                ptr[i], ptr[i+1], ptr[i+2], ptr[i+3]);
-   }
+   LogDebug("cdw0: 0x%x, nsid: 0x%x, reserved: 0x%lx, mptr: 0x%lx",
+            *(vmk_uint32*)&sqe->cdw0, sqe->nsid, sqe->reserved, sqe->mptr);
+   LogDebug("prp1: 0x%lx, prp2: 0x%lx, cdw10: 0x%x, cdw11: 0x%x",
+            sqe->dptr.prps.prp1.pbao, sqe->dptr.prps.prp2.pbao, sqe->cdw10, sqe->cdw11);
+   LogDebug("cdw12: 0x%x, cdw13: 0x%x, cdw14: 0x%x, cdw15: 0x%x",
+            sqe->cdw12, sqe->cdw13, sqe->cdw14, sqe->cdw15);
    rc = Nvme_Ioctl(handle, NVME_IOCTL_ADMIN_CMD, uio);
 
    /**

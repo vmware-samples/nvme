@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2025/2/18 1.4.0.4-1vmw
+
+   Fix PR #3486169: Avoid "address-of-packed-member" warnings when compiling this plugin.
+
 2025/2/6 1.4.0.3-1vmw
 
    Update parameters for namespace creating.
