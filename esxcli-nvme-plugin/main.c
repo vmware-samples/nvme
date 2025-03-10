@@ -2558,7 +2558,7 @@ LookupSelect(const char *sel)
    return -1;
 }
 
-typedef void (*GetFeatureFunc)(struct nvme_handle*, int, vmk_uint32);
+typedef void (*GetFeatureFunc)(struct nvme_handle*, int, vmk_uint32, int, const char**);
 typedef void (*SetFeatureFunc)(struct nvme_handle*, int, vmk_uint32, int, const char**);
 
 struct Feature {
@@ -2871,7 +2871,11 @@ SetFeature(struct nvme_handle *handle,
    }
 }
 
-void getFeature_01h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_01h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
 
@@ -2992,7 +2996,11 @@ setFeature_01h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_02h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_02h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
 
@@ -3086,7 +3094,11 @@ void setFeature_02h(struct nvme_handle *handle, int save, vmk_uint32 nsId, int a
    }
 }
 
-void getFeature_03h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_03h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc, numRanges, i;
    vmk_uint8 buf[4096];
@@ -3145,7 +3157,11 @@ void getFeature_03h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
    esxcli_xml_end_output();
 }
 
-void getFeature_04h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_04h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int rc;
    vmk_uint32 sensor = 0, overThreshold = 0, underThreshold = 0;
@@ -3299,7 +3315,11 @@ void setFeature_04h(struct nvme_handle *handle, int save, vmk_uint32 nsId, int a
    }
 }
 
-void getFeature_05h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_05h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
    vmk_NvmeIdentifyController idCtrlr;
@@ -3443,7 +3463,11 @@ setFeature_05h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_06h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_06h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
    vmk_NvmeIdentifyController idCtrlr;
@@ -3533,7 +3557,11 @@ setFeature_06h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_07h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_07h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
 
@@ -3552,7 +3580,11 @@ void getFeature_07h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
    esxcli_xml_end_output();
 }
 
-void getFeature_08h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_08h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
 
@@ -3632,7 +3664,11 @@ setFeature_08h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_09h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_09h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc, vectNum, i, cdw11;
    NvmeUserIo uioVect;
@@ -3748,7 +3784,11 @@ setFeature_09h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_0ah(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_0ah(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
 
@@ -3818,7 +3858,11 @@ setFeature_0ah(struct nvme_handle *handle,
 
 }
 
-void getFeature_0bh(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_0bh(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
 
@@ -3940,7 +3984,11 @@ setFeature_0bh(struct nvme_handle *handle,
    }
 }
 
-void getFeature_0ch(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_0ch(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc, i;
    vmk_NvmeIdentifyController idCtrlr;
@@ -3984,7 +4032,11 @@ void getFeature_0ch(struct nvme_handle *handle, int select, vmk_uint32 nsId)
    esxcli_xml_end_output();
 }
 
-void getFeature_0dh(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_0dh(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
    vmk_uint32 buf[1024];
@@ -4029,7 +4081,11 @@ void getFeature_0dh(struct nvme_handle *handle, int select, vmk_uint32 nsId)
    esxcli_xml_end_output();
 }
 
-void getFeature_0fh(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_0fh(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
    vmk_NvmeIdentifyController idCtrlr;
@@ -4117,7 +4173,93 @@ setFeature_0fh(struct nvme_handle *handle,
    }
 }
 
-void getFeature_80h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_1dh(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
+{
+   int value = 0;
+   int rc = 0;
+   vmk_uint16 enduranceGroupId = 0;
+   vmk_uint32 cdw11;
+   int ch = 0;
+
+   optind = 1;
+   while ((ch = getopt(argc, (char *const*)argv, ":e:")) != -1) {
+      switch (ch) {
+         case 'e':
+            enduranceGroupId = atoi(optarg);
+            break;
+      }
+   }
+
+   cdw11 = enduranceGroupId;
+   rc = Nvme_GetFeature(handle, 0, NVME_FEATURE_ID_FLEXIBLE_DATA_PLACEMENT,
+                        select, cdw11, 0, 0, 0, 0, NULL, 0, &value);
+   if (rc) {
+      Error("Failed to get feature, 0x%x.", rc);
+      return;
+   }
+
+   esxcli_xml_begin_output();
+   xml_struct_begin("FlexibleDataPlacement");
+   PBOOL("Flexible Data Placement Enable", value & 0x1);
+   PINT("Flexible Data Placement Configuration Index", (value & 0xff00) >> 8);
+   xml_struct_end();
+   esxcli_xml_end_output();
+}
+
+void
+setFeature_1dh(struct nvme_handle *handle,
+               int save,
+               vmk_uint32 nsId,
+               int argc,
+               const char **argv)
+{
+   vmk_uint16 enduranceGroupId = 0;
+   vmk_uint8 configId = 0;
+   vmk_uint8 enable = 0;
+   vmk_uint32 cdw11;
+   vmk_uint32 cdw12;
+   int ch = 0;
+   int rc;
+
+   optind = 1;
+   while ((ch = getopt(argc, (char *const*)argv, ":e:c:E:")) != -1) {
+      switch (ch) {
+         case 'e':
+            enduranceGroupId = atoi(optarg);
+            break;
+         case 'c':
+            configId = atoi(optarg);
+            break;
+         case 'E':
+            enable = atoi(optarg);
+            break;
+      }
+   }
+
+   cdw11 = enduranceGroupId;
+   cdw12 = (configId << 8) | enable;
+   rc  = Nvme_SetFeature(handle, 0, NVME_FEATURE_ID_FLEXIBLE_DATA_PLACEMENT,
+                         save, cdw11, cdw12, 0, 0, 0, NULL, 0);
+   if (rc) {
+      Error("Failed to set feature, 0x%x", rc);
+   } else {
+      esxcli_xml_begin_output();
+      xml_list_begin("string");
+      xml_format("string", "Feature set successfully!");
+      xml_list_end();
+      esxcli_xml_end_output();
+   }
+}
+
+void getFeature_80h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
 
@@ -4159,7 +4301,11 @@ setFeature_80h(struct nvme_handle *handle,
    }
 }
 
-void getFeature_81h(struct nvme_handle *handle, int select, vmk_uint32 nsId)
+void getFeature_81h(struct nvme_handle *handle,
+                    int select,
+                    vmk_uint32 nsId,
+                    int argc,
+                    const char **argv)
 {
    int value, rc;
    vmk_uint8 buf[16];
@@ -4281,6 +4427,13 @@ struct Feature features[] = {
       0,
       getFeature_0fh,
       setFeature_0fh,
+   },
+   {
+      NVME_FEATURE_ID_FLEXIBLE_DATA_PLACEMENT,
+      "Flexible Data Placement",
+      0,
+      getFeature_1dh,
+      setFeature_1dh,
    },
    {
       VMK_NVME_FEATURE_ID_SOFTWARE_PROGRESS_MARKER,
@@ -4489,7 +4642,7 @@ NvmePlugin_DeviceFeatureGet(int argc, const char *argv[])
 
    if (builtin) {
       if (feature->getFeature) {
-         feature->getFeature(handle, select, nsId);
+         feature->getFeature(handle, select, nsId, argc, argv);
       } else {
          Error("Invalid operation: Not allow to get feature %s.", feature->desc);
       }
@@ -4616,55 +4769,6 @@ NvmePlugin_DeviceFeatureSet(int argc, const char *argv[])
    }
 
 out:
-   Nvme_Close(handle);
-}
-
-void
-NvmePlugin_DeviceFeatureList(int argc, const char *argv[])
-{
-   int                      ch, i;
-   int                      rc;
-   const char              *vmhba = NULL;
-   struct nvme_adapter_list list;
-   struct nvme_handle      *handle;
-
-   while ((ch = getopt(argc, (char *const*)argv, "A:")) != -1) {
-      switch (ch) {
-         case 'A':
-            vmhba = optarg;
-            break;
-
-         default:
-            Error("Invalid parameter.");
-            return;
-      }
-   }
-
-   if (vmhba == NULL) {
-      Error("Invalid parameter.");
-      return;
-   }
-
-   // do stuff for nvme device namespace list -A vmhbax.
-   rc = Nvme_GetAdapterList(&list);
-   if (rc != 0) {
-      Error("Failed to get adapter list.");
-      return;
-   }
-
-   handle = Nvme_Open(&list, vmhba);
-   if (handle == NULL) {
-      Error("Failed to open device.");
-      return;
-   }
-
-   for (i = 0; i < NUM_FEATURES; i++) {
-      if (features[i].getFeature == NULL) {
-         continue;
-      }
-      features[i].getFeature(handle, 0, 0);
-   }
-
    Nvme_Close(handle);
 }
 
@@ -5338,11 +5442,6 @@ static struct Command commands[] = {
    {
       "nvme.device.log.get",
       NvmePlugin_DeviceLogGet,
-      NVME_NORMAL,
-   },
-   {
-      "nvme.device.feature.list",
-      NvmePlugin_DeviceFeatureList,
       NVME_NORMAL,
    },
    {

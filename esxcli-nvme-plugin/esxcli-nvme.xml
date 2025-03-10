@@ -57,6 +57,9 @@
       <namespace path="nvme.device.feature.kat">
          <description>NVMe feature keep alive timer configuration operations</description>
       </namespace>
+      <namespace path="nvme.device.feature.fdp">
+         <description>NVMe feature flexible data placement configuration operations</description>
+      </namespace>
       <namespace path="nvme.device.feature.spm">
          <description>NVMe feature software progress marker configuration operations</description>
       </namespace>
@@ -1522,6 +1525,57 @@
             <formatter>simple</formatter>
          </format-parameters>
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0xf $if{save, -S} -t $val{timeout}</execute>
+      </command>
+      <command path="nvme.device.feature.fdp.get">
+         <description>Get NVMe device feature flexible data placement information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="select" type="string" required="false" shortname="S">
+               <description>specify which value of the attributes to return, "current", "default", "saved"</description>
+            </parameter>
+            <parameter name="endgid" type="int" required="true" shortname="e">
+               <description>Endurance Group Identifier</description>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <structure typeName="FlexibleDataPlacement">
+               <field name="Flexible Data Placement Enable"> <bool/> </field>
+               <field name="Flexible Data Placement Configuration Index"> <int/> </field>
+            </structure>
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+	    <format-parameter name="header:FlexibleDataPlacement">Flexible Data Placement Info:</format-parameter>
+            <format-parameter name="fields:FlexibleDataPlacement">Flexible Data Placement Enable,Flexible Data Placement Configuration Index</format-parameter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.get -b 1 -A $val{adapter} -f 0x1d $if{select, -S $val{select}} -e $val{endgid}</execute>
+      </command>
+      <command path="nvme.device.feature.fdp.set">
+         <description>Set NVMe device feature flexible data placement information</description>
+         <input-spec>
+            <parameter name="adapter" type="string" required="true" shortname="A">
+               <description>Adapter to operate on</description>
+            </parameter>
+            <parameter name="endgid" type="int" required="true" shortname="e">
+               <description>Endurance group identifier</description>
+            </parameter>
+            <parameter name="fdpcidx" type="int" required="true" shortname="c">
+               <description>Flexible data placement configuration index</description>
+            </parameter>
+            <parameter name="enable" type="int" required="true" shortname="E">
+               <description>Flexible data placement enable value to be set. 0: disable. 1: enable.</description>
+               <constraint type="range"> <range min="0" max="1"/> </constraint>
+            </parameter>
+         </input-spec>
+         <output-spec>
+            <list type="string" />
+         </output-spec>
+         <format-parameters>
+            <formatter>simple</formatter>
+         </format-parameters>
+         <execute>/opt/vmware/nvme/esxcli-nvme-plugin --op nvme.device.feature.set -b 1 -A $val{adapter} -f 0x1d -S -e $val{endgid} -c $val{fdpcidx} -E $val{enable}</execute>
       </command>
       <command path="nvme.device.feature.spm.get">
          <description>Get NVMe device feature software progress marker information</description>

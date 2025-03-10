@@ -75,7 +75,7 @@ extern vmk_uint64 adminTimeout;
 #define NVME_FIRMWARE_ACTIVATE_ACTION_RESERVED     4
 
 /**
- * for download telemetry data
+ * for telemetry data
  */
 #define NVME_TELEMETRY_DATA_BLK_SIZE 512
 
@@ -108,6 +108,11 @@ typedef struct nvme_persistent_event_log_header {
    vmk_uint8 reserved3[108];
    vmk_uint8 bitmap[32];
 } VMK_ATTRIBUTE_PACKED nvme_persistent_event_log_header;
+
+/**
+ * for flexible data placement
+ */
+#define NVME_FEATURE_ID_FLEXIBLE_DATA_PLACEMENT 0x1d
 
 /**
  * Namespace Management - Host Software Specified Fields

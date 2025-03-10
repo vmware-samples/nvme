@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2025/3/6 1.4.0.5-1vmw
+
+   Add two commands to get and set flexible data placement feature.
+
 2025/2/18 1.4.0.4-1vmw
 
    Fix PR #3486169: Avoid "address-of-packed-member" warnings when compiling this plugin.
