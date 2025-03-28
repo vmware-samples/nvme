@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2024 Broadcom. All Rights Reserved.
+# Copyright (c) 2022-2025 Broadcom. All Rights Reserved.
 # Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
 # and/or its subsidiaries.
 
@@ -75,6 +75,7 @@ driver_package(
     },
     description = "Non-Volatile memory controller driver",
     device_spec_metadata = device_spec_metadata,
+    esxio_vibs = True,
     live_install_allowed = False,
     live_remove_allowed = False,
     maintenance_mode = True,
