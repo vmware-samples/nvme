@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2025/5/8 1.4.0.6-1vmw
+
+   Use esxcliNvmePluginDom for namespace list/detach/format commands.
+
 2025/3/6 1.4.0.5-1vmw
 
    Add two commands to get and set flexible data placement feature.
