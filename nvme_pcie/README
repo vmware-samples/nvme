@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Broadcom. All Rights Reserved.
+# Copyright (c) 2024-2025 Broadcom. All Rights Reserved.
 # Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
 # and/or its subsidiaries.
 
@@ -9,6 +9,10 @@
 This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
+
+2025/5/28 1.4.0.3-1vmw
+
+   Fix the gcc format-nonliteral error of performance statistics format string.
 
 2024/9/27 1.4.0.2-1vmw
 

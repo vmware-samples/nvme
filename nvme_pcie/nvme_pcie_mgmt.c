@@ -1,6 +1,6 @@
 /*
  * ******************************************************************
- * Copyright (c) 2022-2024 Broadcom. All Rights Reserved.
+ * Copyright (c) 2022-2025 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  * ******************************************************************
@@ -263,7 +263,8 @@ NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal)
    vmk_uint64 pollAccuCmd, pollCmdDone;
    vmk_uint64 intrCount = 0, intrCmdDone;
    vmk_uint32 i;
-   char *perfStatsStr = "{\n"
+   const char perfStatsStr[] =
+                        "{\n"
                         "\tpollCount: %lu,\n"
                         "\tpollBackToIntrCount: %lu,\n"
                         "\tpollBackToIntrCount ratio: %lu/10000,\n"

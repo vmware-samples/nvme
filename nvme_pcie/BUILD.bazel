@@ -23,7 +23,7 @@ _BINARY_COMPAT = "yes"
 
 _VENDOR = "VMware"
 
-_DRIVER_VER = "1.4.0.2"
+_DRIVER_VER = "1.4.0.3"
 
 _VERSION_BUMP = "1"
 
