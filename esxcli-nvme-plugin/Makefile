@@ -15,7 +15,8 @@
 #
 
 UWTOOL = esxcli-nvme-plugin
-UWTOOL_VERSION = 1.4.0.6-1vmw
+PLUGIN_VERSION = 1.4.0.6
+UWTOOL_VERSION = $(PLUGIN_VERSION)-1vmw
 
 UWTOOL_SOURCES = main.c esxcli_xml.c nvme_lib.c
 
@@ -91,7 +92,7 @@ DESC_ESX_VERSION=$(shell echo $(VMKAPIDDK_ROOT) | cut -d '-' -f2)
 
 
 DEV_VIB_BASENAME = vmware-esx-$(UWTOOL)
-
+DEV_VIB_VERSION = $(PLUGIN_VERSION)
 DESC_NAME=$(DEV_VIB_BASENAME)
 
 ################################################################
@@ -243,8 +244,11 @@ VMW_EXTRA_DEFS += -I$(VMKAPI_LOCATION) \
         -DVMK_DEVKIT_HAS_API_VMKAPI_NVME \
         -DVMK_DEVKIT_HAS_API_VMKAPI_NVME_DRV \
         -DVMK_DEVKIT_USES_PUBLIC_APIS \
-	-DVMK_DEVKIT_USES_BINARY_INCOMPATIBLE_APIS \
         -DVMK_DEVKIT_USES_BINARY_COMPATIBLE_APIS
+
+ifeq ($(shell [ "$(DESC_ESX_VERSION)" \< "8.0.3" ] && echo true),true)
+VMW_EXTRA_DEFS += -DVMK_DEVKIT_USES_BINARY_INCOMPATIBLE_APIS
+endif
 
 .PHONY: clean
 
@@ -271,6 +275,9 @@ package:
 		$(MKDIR) -p $(STAGE_XML_DIR); \
 		$(CP) $(PLUGIN_XML) \
 			$(STAGE_XML_DIR)/$(PLUGIN_XML); \
+	fi
+	if [ "$(DESC_ESX_VERSION)" \< "9.1.0" ]; then \
+		$(SED) -i 's/++securitydom=esxcliNvmePluginDom //g' $(STAGE_XML_DIR)/$(PLUGIN_XML); \
 	fi
 	# Now put it all together for the ESX installer.
 	$(MAKE) -f Makefile vib-bundle
