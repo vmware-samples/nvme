@@ -10,6 +10,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
 
+2025/6/12 1.4.0.4-1vmw
+
+   Fix PR #3518263: Set the world wait time to 100ms in sync command processing.
+
 2025/5/28 1.4.0.3-1vmw
 
    Fix the gcc format-nonliteral error of performance statistics format string.

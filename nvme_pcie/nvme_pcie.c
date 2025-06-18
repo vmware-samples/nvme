@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
+ * Copyright (c) 2016-2025 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  *****************************************************************************/
@@ -1162,6 +1162,7 @@ NVMEPCIESubmitSyncCommand(NVMEPCIEController *ctrlr,
    NVMEPCIEQueueInfo *qinfo;
    NVMEPCIECmdInfo *cmdInfo;
    vmk_uint64 timeout = 0;
+   vmk_uint32 waitTimeMs = 100;
    vmk_NvmeStatus nvmeStatus;
    vmk_atomic32 existingStatus;
    NVMEPCIEDmaEntry *dmaEntry = NULL;
@@ -1211,6 +1212,9 @@ NVMEPCIESubmitSyncCommand(NVMEPCIEController *ctrlr,
 
    cmdInfo->vmkCmd = vmkCmd;
    cmdInfo->type = NVME_PCIE_SYNC_CONTEXT;
+   if (waitTimeMs > timeoutUs / 1000) {
+      waitTimeMs = timeoutUs / 1000;
+   }
 
    nvmeStatus = NVMEPCIEIssueCommandToHw(qinfo, cmdInfo,
                                          NVMEPCIECompleteSyncCommand);
@@ -1229,8 +1233,8 @@ NVMEPCIESubmitSyncCommand(NVMEPCIEController *ctrlr,
    timeout = NVMEPCIEGetTimerUs() + timeoutUs;
    do {
       vmkStatus = vmk_WorldWait((vmk_WorldEventID)cmdInfo, VMK_LOCK_INVALID,
-                                timeoutUs / 1000, __FUNCTION__);
-   } while(vmkStatus == VMK_OK &&
+                                waitTimeMs, __FUNCTION__);
+   } while((vmkStatus == VMK_OK || vmkStatus == VMK_TIMEOUT) &&
            vmk_AtomicRead32(&cmdInfo->atomicStatus) == NVME_PCIE_CMD_STATUS_ACTIVE &&
            timeout > NVMEPCIEGetTimerUs());
 
