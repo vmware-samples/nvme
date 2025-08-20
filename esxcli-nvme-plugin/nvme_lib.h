@@ -48,6 +48,8 @@ extern vmk_uint64 adminTimeout;
 #define FIRMWARE_DOWNLOAD_TIMEOUT (30 * 60 * 1000 * 1000)   /* 30 minutes */
 #define FIRMWARE_ACTIVATE_TIMEOUT (30 * 60 * 1000 * 1000)   /* 30 minutes */
 
+#define NVME_CNS_IDENTIFY_NAMESPACE_ALLOCATED 0x11
+
 /**
  * for firmware download
  */

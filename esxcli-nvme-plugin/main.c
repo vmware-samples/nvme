@@ -282,7 +282,10 @@ PrintIdentifyCtrlr(vmk_NvmeIdentifyController *id)
 static void
 PrintIdentifyNs(vmk_NvmeIdentifyNamespace *idNs)
 {
+   vmk_uint8 *data = (vmk_uint8*)idNs;
    int lbaIndex;
+   int lbafNum;
+
    esxcli_xml_begin_output();
    xml_struct_begin("NamespaceInfo");
    PULL("Namespace Size", idNs->nsze);
@@ -294,8 +297,16 @@ PrintIdentifyNs(vmk_NvmeIdentifyNamespace *idNs)
          idNs->nsfeat & VMK_NVME_NS_ATOMICITY);
    PBOOL("Deallocated or Unwritten Logical Block Error Support",
          idNs->nsfeat & VMK_NVME_NS_DEALLOCATED_ERROR);
+   PBOOL("UID Reuse",
+         idNs->nsfeat & (1 << 3));
+   PINT("Optional Write Performance",
+        (idNs->nsfeat >> 4) & 0x3);
+   PBOOL("Multiple Atomicity Mode",
+         idNs->nsfeat & (1 << 6));
+   PBOOL("Optional Read Performance",
+         idNs->nsfeat & (1 << 7));
    PINT("Number of LBA Formats", idNs->nlbaf);
-   PINT("LBA Format", idNs->flbas & 0xf);
+   PINT("LBA Format", ((idNs->flbas >> 1) & 0x30) | (idNs->flbas & 0xf));
    PBOOL("Extended Metadata", (idNs->flbas & 0x10) >> 4);
    PBOOL("Metadata as Seperate Buffer Support", (idNs->mc & 0x2) >> 1);
    PBOOL("Metadata as Extended Buffer Support", idNs->mc & 0x1);
@@ -315,6 +326,8 @@ PrintIdentifyNs(vmk_NvmeIdentifyNamespace *idNs)
    }
    PBOOL("Namespace Shared by Multiple Controllers",
          idNs->nmic & VMK_NVME_NS_IDENT_NMIC_MC);
+   PBOOL("Dispersed Namespace",
+         idNs->nmic & 0x2);
    PBOOL("Persist Through Power Loss Support",
          idNs->rescap & VMK_NVME_RESCAP_PERSIST_POWER_LOSS);
    PBOOL("Write Exclusive Reservation Type Support",
@@ -329,20 +342,48 @@ PrintIdentifyNs(vmk_NvmeIdentifyNamespace *idNs)
          idNs->rescap & VMK_NVME_RESCAP_EX_WRITE_RESERVE_ALL);
    PBOOL("Exclusive Access All Registrants Reservation Type Support",
          idNs->rescap & VMK_NVME_RESCAP_EX_ACCESS_RESERVE_ALL);
+   PBOOL("Ignore Existing Key Support",
+         idNs->rescap & (1 << 7));
    PBOOL("Format Progress Indicator Support", idNs->fpi & 0x80);
    PINT("Percentage Remains to Be Formatted", idNs->fpi & 0x7f);
+   PINT("Guard Deallocation Status", (idNs->dlfeat & 0x10) >> 4);
+   PBOOL("Write Zeroes Deallocation Support", idNs->dlfeat & (1<<3));
+   PINT("Deallocation Read Behavior", idNs->dlfeat & 0x7);
    PINT("Namespace Atomic Write Unit Normal", idNs->nawun);
    PINT("Namespace Atomic Write Unit Power Fail", idNs->nawupf);
    PINT("Namespace Atomic Compare and Write Unit", idNs->nacwu);
    PINT("Namespace Atomic Boundary Size Normal", idNs->nabsn);
    PINT("Namespace Atomic Boundary Offset", idNs->nabo);
    PINT("Namespace Atomic Boundary Size Power Fail", idNs->nabspf);
+   PINT("Namespace Optimal IO Boundary", idNs->noiob);
    P128BIT("NVM Capacity", idNs->nvmcap);
+   PINT("Namespace Preferred Write Granularity", idNs->npwg);
+   PINT("Namespace Preferred Write Alignment", idNs->npwa);
+   PINT("Namespace Preferred Deallocate Granularity", idNs->npdg);
+   PINT("Namespace Preferred Deallocate Alignment", idNs->npda);
+   PINT("Namespace Optimal Write Size", idNs->nows);
+   PINT("Maximum Single Source Range Length", idNs->mssrl);
+   PINT("Maximum Copy Length", idNs->mcl);
+   PINT("Maximum Source Range Count", idNs->msrc);
+   PBOOL("Key Per IO Enabled", data[81] & 0x1);
+   PBOOL("Key Per IO Supported", data[81] & 0x2);
+   PINT("Number of Unique Attribute LBA Formats", data[82]);
+   PINT("Key Per IO Data Access Alignment and Granularity", *(vmk_uint32 *)&data[84]);
+   PINT("ANA Group Identifier", idNs->anagroupid);
+   PBOOL("Write Protected", idNs->nsattr & 0x1);
+   PINT("NVM Set Identifier", idNs->nvmsetid);
+   PINT("Endurance Group Identifier", idNs->endgid);
    PID("Namespace Globally Unique Identifier", (vmk_uint8 *)&idNs->nguid, 16);
    PID("IEEE Extended Unique Identifier", (vmk_uint8 *)&idNs->eui64, 8);
+   lbafNum = idNs->nlbaf + data[82] + 1;
+   if (lbafNum > 64) {
+      LogError("Invalid number of LBA formats, nlbaf %d, nulbaf %d.",
+               idNs->nlbaf, data[82]);
+      lbafNum = 64;
+   }
    xml_field_begin("LBA Format Support");
    xml_list_begin("structure");
-      for (lbaIndex = 0; lbaIndex <= idNs->nlbaf; lbaIndex ++) {
+      for (lbaIndex = 0; lbaIndex < lbafNum; lbaIndex ++) {
          xml_struct_begin("LBAFormatSupport");
          PINT("Format ID", lbaIndex);
          PINT("Metadata Size", idNs->lbaf[lbaIndex].ms);
@@ -1757,6 +1798,7 @@ NvmePlugin_DeviceNsGet(int argc, const char *argv[])
    struct nvme_adapter_list     list;
    struct nvme_handle           *handle;
    vmk_NvmeIdentifyNamespace    *idNs;
+   vmk_Bool                     allocatedNs = false;
 
    while ((ch = getopt(argc, (char *const*)argv, "A:n:")) != -1) {
       switch (ch) {
@@ -1792,14 +1834,43 @@ NvmePlugin_DeviceNsGet(int argc, const char *argv[])
       return;
    }
 
+   /**
+    * If the namespace is allocated but not active,
+    * try to get the identify namespace for allocated
+    * namespace ID first.
+    */
+   if (nsId != VMK_NVME_DEFAULT_NSID) {
+      rc = Nvme_AttachedNsId(handle, nsId);
+      if (rc == 0) {
+         rc = Nvme_AllocatedNsId(handle, nsId);
+         if (rc == 1) {
+            allocatedNs = true;
+         }
+      }
+   }
+
    idNs = malloc(sizeof(*idNs));
    if (idNs == NULL) {
       Error("Out of memory.");
       goto out;
    }
 
-   rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_ACTIVE,
-                      0, nsId, idNs);
+   memset(idNs, 0, sizeof(*idNs));
+
+   if (allocatedNs) {
+      rc = Nvme_Identify(handle, NVME_CNS_IDENTIFY_NAMESPACE_ALLOCATED,
+                         0, nsId, idNs);
+      if (rc) {
+         LogInfo("Failed to get identify data for allocated namespace %d, 0x%x",
+                 nsId, rc);
+         memset(idNs, 0, sizeof(*idNs));
+         rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_ACTIVE,
+                            0, nsId, idNs);
+      }
+   } else {
+      rc = Nvme_Identify(handle, VMK_NVME_CNS_IDENTIFY_NAMESPACE_ACTIVE,
+                         0, nsId, idNs);
+   }
    if (rc) {
       Error("Failed to get identify data for namespace %d, %s.",
             nsId, strerror(rc));

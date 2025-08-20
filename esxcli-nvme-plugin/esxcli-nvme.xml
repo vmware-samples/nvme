@@ -422,13 +422,14 @@
          <execute>/opt/vmware/nvme/esxcli-nvme-plugin ++securitydom=esxcliNvmePluginDom --op nvme.device.namespace.detach -A $val{adapter} -n $val{namespace} -c $val{controller}</execute>
       </command>
 
+      <!-- esxcli nvme device namespace get -->
       <command path="nvme.device.namespace.get">
          <description>Get nvme namespace information</description>
          <input-spec>
             <parameter name="adapter" type="string" required="true" shortname="A">
                <description>Adapter to operate on</description>
             </parameter>
-            <parameter name="namespace" type="string" required="true" shortname="n">
+            <parameter name="namespace" type="int" required="true" shortname="n">
                <description>ID of namespace to get information from. ID starts from 1</description>
             </parameter>
          </input-spec>
@@ -440,6 +441,10 @@
                <field name="Thin Provisioning Support"> <bool/> </field>
                <field name="Namespace Atomic Support"> <bool/> </field>
                <field name="Deallocated or Unwritten Logical Block Error Support"> <bool/> </field>
+               <field name="UID Reuse"> <bool/> </field>
+               <field name="Optional Write Performance"> <int/> </field>
+               <field name="Multiple Atomicity Mode"> <bool/> </field>
+               <field name="Optional Read Performance"> <bool/> </field>
                <field name="Number of LBA Formats"> <int/> </field>
                <field name="LBA Format"> <int/> </field>
                <field name="Extended Metadata"> <bool/> </field>
@@ -453,6 +458,7 @@
                <field name="PI Enabled Type"> <int/> </field>
                <field name="MetaData Location"> <string/> </field>
                <field name="Namespace Shared by Multiple Controllers"> <bool/> </field>
+               <field name="Dispersed Namespace"> <bool/> </field>
                <field name="Persist Through Power Loss Support"> <bool/> </field>
                <field name="Write Exclusive Reservation Type Support"> <bool/> </field>
                <field name="Exclusive Access Reservation Type Support"> <bool/> </field>
@@ -460,15 +466,36 @@
                <field name="Exclusive Access Registrants Only Reservation Type Support"> <bool/> </field>
                <field name="Write Exclusive All Registrants Reservation Type Support"> <bool/> </field>
                <field name="Exclusive Access All Registrants Reservation Type Support"> <bool/> </field>
+               <field name="Ignore Existing Key Support"> <bool/> </field>
                <field name="Format Progress Indicator Support"> <bool/> </field>
                <field name="Percentage Remains to Be Formatted"> <int/> </field>
+               <field name="Deallocation Read Behavior"> <int/> </field>
+               <field name="Write Zeroes Deallocation Support"> <bool/> </field>
+               <field name="Guard Deallocation Status"> <int/> </field>
                <field name="Namespace Atomic Write Unit Normal"> <int/> </field>
                <field name="Namespace Atomic Write Unit Power Fail"> <int/> </field>
                <field name="Namespace Atomic Compare and Write Unit"> <int/> </field>
                <field name="Namespace Atomic Boundary Size Normal"> <int/> </field>
                <field name="Namespace Atomic Boundary Offset"> <int/> </field>
                <field name="Namespace Atomic Boundary Size Power Fail"> <int/> </field>
+               <field name="Namespace Optimal IO Boundary"> <int/> </field>
                <field name="NVM Capacity"> <string/> </field>
+               <field name="Namespace Preferred Write Granularity"> <int/> </field>
+               <field name="Namespace Preferred Write Alignment"> <int/> </field>
+               <field name="Namespace Preferred Deallocate Granularity"> <int/> </field>
+               <field name="Namespace Preferred Deallocate Alignment"> <int/> </field>
+               <field name="Namespace Optimal Write Size"> <int/> </field>
+               <field name="Maximum Single Source Range Length"> <int/> </field>
+               <field name="Maximum Copy Length"> <int/> </field>
+               <field name="Maximum Source Range Count"> <int/> </field>
+               <field name="Key Per IO Enabled"> <bool/> </field>
+               <field name="Key Per IO Supported"> <bool/> </field>
+               <field name="Number of Unique Attribute LBA Formats"> <int/> </field>
+               <field name="Key Per IO Data Access Alignment and Granularity"> <int/> </field>
+               <field name="ANA Group Identifier"> <int/> </field>
+               <field name="Write Protected"> <bool/> </field>
+               <field name="NVM Set Identifier"> <int/> </field>
+               <field name="Endurance Group Identifier"> <int/> </field>
                <field name="Namespace Globally Unique Identifier"> <string/> </field>
                <field name="IEEE Extended Unique Identifier"> <string/> </field>
                <field name="LBA Format Support">
@@ -486,7 +513,7 @@
          <format-parameters>
             <formatter>simple</formatter>
             <format-parameter name="header:NamespaceInfo">Namespace Identify Info:</format-parameter>
-	    <format-parameter name="fields:NamespaceInfo">Namespace Size,Namespace Capacity,Namespace Utilization,Thin Provisioning Support,Namespace Atomic Support,Deallocated or Unwritten Logical Block Error Support,Number of LBA Formats,LBA Format,Extended Metadata,Metadata as Seperate Buffer Support,Metadata as Extended Buffer Support,PI Type 1 Support,PI Type 2 Support,PI Type 3 Support,PI in First Eight Bytes of Metadata Support,PI in Last Eight Bytes of Metadata Support,PI Enabled Type,MetaData Location,Namespace Shared by Multiple Controllers,Persist Through Power Loss Support,Write Exclusive Reservation Type Support,Exclusive Access Reservation Type Support,Write Exclusive Registrants Only Reservation Type Support,Exclusive Access Registrants Only Reservation Type Support,Write Exclusive All Registrants Reservation Type Support,Exclusive Access All Registrants Reservation Type Support,Format Progress Indicator Support,Percentage Remains to Be Formatted,Namespace Atomic Write Unit Normal,Namespace Atomic Write Unit Power Fail,Namespace Atomic Compare and Write Unit,Namespace Atomic Boundary Size Normal,Namespace Atomic Boundary Offset,Namespace Atomic Boundary Size Power Fail,NVM Capacity,Namespace Globally Unique Identifier,IEEE Extended Unique Identifier,LBA Format Support</format-parameter>
+	    <format-parameter name="fields:NamespaceInfo">Namespace Size,Namespace Capacity,Namespace Utilization,Thin Provisioning Support,Namespace Atomic Support,Deallocated or Unwritten Logical Block Error Support,UID Reuse,Optional Write Performance,Multiple Atomicity Mode,Optional Read Performance,Number of LBA Formats,LBA Format,Extended Metadata,Metadata as Seperate Buffer Support,Metadata as Extended Buffer Support,PI Type 1 Support,PI Type 2 Support,PI Type 3 Support,PI in First Eight Bytes of Metadata Support,PI in Last Eight Bytes of Metadata Support,PI Enabled Type,MetaData Location,Namespace Shared by Multiple Controllers,Dispersed Namespace,Persist Through Power Loss Support,Write Exclusive Reservation Type Support,Exclusive Access Reservation Type Support,Write Exclusive Registrants Only Reservation Type Support,Exclusive Access Registrants Only Reservation Type Support,Write Exclusive All Registrants Reservation Type Support,Exclusive Access All Registrants Reservation Type Support,Ignore Existing Key Support,Format Progress Indicator Support,Percentage Remains to Be Formatted,Deallocation Read Behavior,Write Zeroes Deallocation Support,Guard Deallocation Status,Namespace Atomic Write Unit Normal,Namespace Atomic Write Unit Power Fail,Namespace Atomic Compare and Write Unit,Namespace Atomic Boundary Size Normal,Namespace Atomic Boundary Offset,Namespace Atomic Boundary Size Power Fail,Namespace Optimal IO Boundary,NVM Capacity,Namespace Preferred Write Granularity,Namespace Preferred Write Alignment,Namespace Preferred Deallocate Granularity,Namespace Preferred Deallocate Alignment,Namespace Optimal Write Size,Maximum Single Source Range Length,Maximum Copy Length,Maximum Source Range Count,Key Per IO Enabled,Key Per IO Supported,Number of Unique Attribute LBA Formats,Key Per IO Data Access Alignment and Granularity,ANA Group Identifier,Write Protected,NVM Set Identifier,Endurance Group Identifier,Namespace Globally Unique Identifier,IEEE Extended Unique Identifier,LBA Format Support</format-parameter>
             <format-parameter name="units:NamespaceInfo.Namespace Size">Logical Blocks</format-parameter>
             <format-parameter name="units:NamespaceInfo.Namespace Capacity">Logical Blocks</format-parameter>
             <format-parameter name="units:NamespaceInfo.Namespace Utilization">Logical Blocks</format-parameter>

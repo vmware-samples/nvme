@@ -6,6 +6,10 @@ This is the plugin of esxcli for NVMe device management.
 
 == Change Log ==
 
+2025/8/19 1.4.0.7-1vmw
+
+   Update the output of namespace get command.
+
 2025/5/8 1.4.0.6-1vmw
 
    Use esxcliNvmePluginDom for namespace list/detach/format commands.
