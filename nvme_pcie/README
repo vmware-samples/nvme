@@ -10,6 +10,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
 
+2025/8/21 1.4.0.4-1vmw
+
+   Relax the DMA constraint for buffer sizes.
+
 2025/5/28 1.4.0.3-1vmw
 
    Fix the gcc format-nonliteral error of performance statistics format string.

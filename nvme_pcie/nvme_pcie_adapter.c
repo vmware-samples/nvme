@@ -583,7 +583,7 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
     */
    constraints.sgMaxEntries = NVME_PCIE_SG_MAX_ENTRIES;
    constraints.sgElemMaxSize = 0;
-   constraints.sgElemSizeMult = 512;
+   constraints.sgElemSizeMult = 0;
    constraints.sgElemAlignment = 4;
    constraints.sgElemStraddle = VMK_ADDRESS_MASK_32BIT + 1;
 
