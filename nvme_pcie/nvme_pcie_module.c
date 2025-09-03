@@ -1,6 +1,10 @@
-/*****************************************************************************
- * Copyright (c) 2016-2023 VMware, Inc. All rights reserved.
- *****************************************************************************/
+/*
+ * ******************************************************************
+ * Copyright (c) 2016-2023, 2025 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
+ * ******************************************************************
+ */
 
 /*
  * @file: nvme_pcie_module.c --
@@ -31,6 +35,12 @@ int nvmePCIEPollAct = 1;
 VMK_MODPARAM(nvmePCIEPollAct, int, "NVMe PCIe hybrid poll activate,"
                                    " MSIX interrupt must be enabled."
                                    " Default activated.");
+
+vmk_uint32 nvmePCIEPerfFSA = 1;
+VMK_MODPARAM(nvmePCIEPerfFSA, uint, "NVMe PCIe Performance Finite State Automata."
+                                    " It will help to optimize hybrid polling. "
+                                    " Valid if hybrid poll activated."
+                                    " Default activated.");
 
 vmk_uint32 nvmePCIEPollOIOThr = 30;
 VMK_MODPARAM(nvmePCIEPollOIOThr, uint, "NVMe PCIe hybrid poll OIO threshold of"

@@ -10,6 +10,11 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
 
+2025/9/3 1.4.0.5-1vmw
+
+   Add feature of Performance Finite State Automata, it helps to optimize
+   hybrid polling for different OIO workloads.
+
 2025/6/12 1.4.0.4-1vmw
 
    Fix PR #3518263: Set the world wait time to 100ms in sync command processing.

@@ -27,6 +27,30 @@ NVMEPCIEKeyPollActGet(vmk_uint64 cookie, void *keyVal);
 static VMK_ReturnStatus
 NVMEPCIEKeyPollActSet(vmk_uint64 cookie, void *keyVal);
 static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAGet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSASet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAEvaSecGet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAEvaSecSet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAEvaRatioGet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAEvaRatioSet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAProtectSecGet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAProtectSecSet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAMonSecGet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAMonSecSet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAMonRatioGet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAMonRatioSet(vmk_uint64 cookie, void *keyVal);
+static VMK_ReturnStatus
 NVMEPCIEKeyPollOIOThrGet(vmk_uint64 cookie, void *keyVal);
 static VMK_ReturnStatus
 NVMEPCIEKeyPollOIOThrSet(vmk_uint64 cookie, void *keyVal);
@@ -70,6 +94,60 @@ static NVMEPCIEKVMgmtData nvmePCIEKVMgmtData[] = {
       "Display hybrid poll activation info of the device.",
       NVMEPCIEKeyPollActSet,
       "Set pollAct, non-zero for activation, 0 for deactivation",
+   },
+   {
+      "perfFSA",
+      VMK_MGMT_KEY_TYPE_LONG,
+      NVMEPCIEKeyPerfFSAGet,
+      "Display whether Performance Finite State Automata enabled."
+      " Valid if pollAct activated, default enabled.",
+      NVMEPCIEKeyPerfFSASet,
+      "Set perfFSA, non-zero to enable, 0 to disable.",
+   },
+   {
+      "perfFSAEvaSec",
+      VMK_MGMT_KEY_TYPE_LONG,
+      NVMEPCIEKeyPerfFSAEvaSecGet,
+      "Display perfFSA evaluation time window in seconds."
+      " Valid if perfFSA enabled, default 2.",
+      NVMEPCIEKeyPerfFSAEvaSecSet,
+      "Set perfFSAEvaSec in seconds. Must not less than 1.",
+   },
+   {
+      "perfFSAEvaRatio",
+      VMK_MGMT_KEY_TYPE_LONG,
+      NVMEPCIEKeyPerfFSAEvaRatioGet,
+      "Display perfFSA evaluation ratio in percentage."
+      " Valid if perfFSA enabled, default 10.",
+      NVMEPCIEKeyPerfFSAEvaRatioSet,
+      "Set perfFSAEvaSec in percentage.",
+   },
+   {
+      "perfFSAProtectSec",
+      VMK_MGMT_KEY_TYPE_LONG,
+      NVMEPCIEKeyPerfFSAProtectSecGet,
+      "Display perfFSA protection time window in seconds."
+      " Valid if perfFSA enabled, default 4.",
+      NVMEPCIEKeyPerfFSAProtectSecSet,
+      "Set perfFSAProtectSec in seconds. Must not less than 1.",
+   },
+   {
+      "perfFSAMonSec",
+      VMK_MGMT_KEY_TYPE_LONG,
+      NVMEPCIEKeyPerfFSAMonSecGet,
+      "Display perfFSA monitor time window in seconds."
+      " Valid if perfFSA enabled, default 60.",
+      NVMEPCIEKeyPerfFSAMonSecSet,
+      "Set perfFSAMonSec in seconds. Must not less than 1.",
+   },
+   {
+      "perfFSAMonRatio",
+      VMK_MGMT_KEY_TYPE_LONG,
+      NVMEPCIEKeyPerfFSAMonRatioGet,
+      "Display perfFSA monitor ratio in percentage."
+      " Valid if perfFSA enabled, default 15.",
+      NVMEPCIEKeyPerfFSAMonRatioSet,
+      "Set perfFSAMonRatio in percentage.",
    },
    {
       "pollOIOThr",
@@ -201,6 +279,180 @@ NVMEPCIEKeyPollActSet(vmk_uint64 cookie, void *keyVal)
 
 
 static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAGet(vmk_uint64 cookie, void *keyVal)
+{
+   vmk_uint64 *kv = (vmk_uint64 *) keyVal;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+
+   *kv = vmk_AtomicRead8(&ctrlr->perfFSA);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSASet(vmk_uint64 cookie, void *keyVal)
+{
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+   vmk_Bool perfFSA = (vmk_Strtoul((char *) keyVal, NULL, 10) != 0);
+
+   vmk_AtomicWrite8(&ctrlr->perfFSA, perfFSA);
+
+   IPRINT(ctrlr, "perfFSA is set as %d.", perfFSA);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAEvaSecGet(vmk_uint64 cookie, void *keyVal)
+{
+   vmk_uint64 *kv = (vmk_uint64 *) keyVal;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+
+   *kv = vmk_AtomicRead32(&ctrlr->perfFSAEvaSec);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAEvaSecSet(vmk_uint64 cookie, void *keyVal)
+{
+   VMK_ReturnStatus status = VMK_OK;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+   vmk_uint32 perfFSAEvaSec = vmk_Strtoul((char *) keyVal, NULL, 10);
+
+   if (perfFSAEvaSec >= 1) {
+      vmk_AtomicWrite32(&ctrlr->perfFSAEvaSec, perfFSAEvaSec);
+
+      IPRINT(ctrlr, "perfFSAEvaSec is set as %d.", perfFSAEvaSec);
+   } else {
+      WPRINT(ctrlr, "perfFSAEvaSec must not be less than 1.");
+      status = VMK_BAD_PARAM;
+   }
+
+   return status;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAEvaRatioGet(vmk_uint64 cookie, void *keyVal)
+{
+   vmk_uint64 *kv = (vmk_uint64 *) keyVal;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+
+   *kv = vmk_AtomicRead32(&ctrlr->perfFSAEvaRatio);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAEvaRatioSet(vmk_uint64 cookie, void *keyVal)
+{
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+   vmk_uint32 perfFSAEvaRatio = vmk_Strtoul((char *) keyVal, NULL, 10);
+
+   vmk_AtomicWrite32(&ctrlr->perfFSAEvaRatio, perfFSAEvaRatio);
+
+   IPRINT(ctrlr, "perfFSAEvaRatio is set as %d.", perfFSAEvaRatio);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAProtectSecGet(vmk_uint64 cookie, void *keyVal)
+{
+   vmk_uint64 *kv = (vmk_uint64 *) keyVal;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+
+   *kv = vmk_AtomicRead32(&ctrlr->perfFSAProtectSec);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAProtectSecSet(vmk_uint64 cookie, void *keyVal)
+{
+   VMK_ReturnStatus status = VMK_OK;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+   vmk_uint32 perfFSAProtectSec = vmk_Strtoul((char *) keyVal, NULL, 10);
+
+   if (perfFSAProtectSec >= 1) {
+      vmk_AtomicWrite32(&ctrlr->perfFSAProtectSec, perfFSAProtectSec);
+
+      IPRINT(ctrlr, "perfFSAProtectSec is set as %d.", perfFSAProtectSec);
+   } else {
+      WPRINT(ctrlr, "perfFSAProtectSec must not be less than 1.");
+      status = VMK_BAD_PARAM;
+   }
+
+   return status;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAMonSecGet(vmk_uint64 cookie, void *keyVal)
+{
+   vmk_uint64 *kv = (vmk_uint64 *) keyVal;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+
+   *kv = vmk_AtomicRead32(&ctrlr->perfFSAMonSec);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAMonSecSet(vmk_uint64 cookie, void *keyVal)
+{
+   VMK_ReturnStatus status = VMK_OK;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+   vmk_uint32 perfFSAMonSec = vmk_Strtoul((char *) keyVal, NULL, 10);
+
+   if (perfFSAMonSec >= 1) {
+      vmk_AtomicWrite32(&ctrlr->perfFSAMonSec, perfFSAMonSec);
+
+      IPRINT(ctrlr, "perfFSAMonSec is set as %d.", perfFSAMonSec);
+   } else {
+      WPRINT(ctrlr, "perfFSAMonSec must not be less than 1.");
+      status = VMK_BAD_PARAM;
+   }
+
+   return status;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAMonRatioGet(vmk_uint64 cookie, void *keyVal)
+{
+   vmk_uint64 *kv = (vmk_uint64 *) keyVal;
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+
+   *kv = vmk_AtomicRead32(&ctrlr->perfFSAMonRatio);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
+NVMEPCIEKeyPerfFSAMonRatioSet(vmk_uint64 cookie, void *keyVal)
+{
+   NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
+   vmk_uint32 perfFSAMonRatio = vmk_Strtoul((char *) keyVal, NULL, 10);
+
+   vmk_AtomicWrite32(&ctrlr->perfFSAMonRatio, perfFSAMonRatio);
+
+   IPRINT(ctrlr, "perfFSAMonRatio is set as %d.", perfFSAMonRatio);
+
+   return VMK_OK;
+}
+
+
+static VMK_ReturnStatus
 NVMEPCIEKeyPollOIOThrGet(vmk_uint64 cookie, void *keyVal)
 {
    vmk_uint64 *kv = (vmk_uint64 *) keyVal;
@@ -259,12 +511,15 @@ NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal)
    NVMEPCIEController *ctrlr = (NVMEPCIEController *) cookie;
    vmk_uint8 *buf = NULL;
    vmk_ByteCount out_len = 0;
+   // Map all IO queue's pollLastDoSwitch into bit sequentially
+   vmk_uint32 pollLastDoSwitch = 0;
    vmk_uint64 pollCount, pollBackToIntrCount, pollAccuCount;
    vmk_uint64 pollAccuCmd, pollCmdDone;
    vmk_uint64 intrCount = 0, intrCmdDone;
    vmk_uint32 i;
    const char perfStatsStr[] =
                         "{\n"
+                        "\tpollLastDoSwitch bitmap of each IO queue: 0x%x,\n"
                         "\tpollCount: %lu,\n"
                         "\tpollBackToIntrCount: %lu,\n"
                         "\tpollBackToIntrCount ratio: %lu/10000,\n"
@@ -279,22 +534,25 @@ NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal)
 
    buf = NVMEPCIEAlloc(NVMEPCIE_KVMGMT_BUF_SIZE, 0);
    if (buf == NULL) {
-      MOD_IPRINT("Failed to allocate buffer.");
+      WPRINT(ctrlr, "Failed to allocate buffer.");
+      status = VMK_NO_MEMORY;
+
       goto fail_alloc_buf;
    }
 
+   for (i = 1; i <= ctrlr->numIoQueues; i++) {
+      pollLastDoSwitch |= vmk_AtomicRead8(&ctrlr->queueList[i].pollLastDoSwitch) << (i - 1);
+      intrCount += vmk_AtomicRead64(&ctrlr->queueList[i].intrCount);
+   }
+   intrCmdDone = vmk_AtomicRead64(&ctrlr->perfStats.intrCmdDone);
    pollCount = vmk_AtomicRead64(&ctrlr->perfStats.pollCount);
    pollBackToIntrCount = vmk_AtomicRead64(&ctrlr->perfStats.pollBackToIntrCount);
    pollAccuCount = vmk_AtomicRead64(&ctrlr->perfStats.pollAccuCount);
    pollCmdDone = vmk_AtomicRead64(&ctrlr->perfStats.pollCmdDone);
    pollAccuCmd = vmk_AtomicRead64(&ctrlr->perfStats.pollAccuCmd);
-   for (i = 1; i <= ctrlr->numIoQueues; i++) {
-      intrCount += vmk_AtomicRead64(&ctrlr->queueList[i].intrCount);
-   }
-   intrCmdDone = vmk_AtomicRead64(&ctrlr->perfStats.intrCmdDone);
    status = vmk_StringFormat(buf, NVMEPCIE_KVMGMT_BUF_SIZE,
                              &out_len, perfStatsStr,
-                             pollCount, pollBackToIntrCount,
+                             pollLastDoSwitch, pollCount, pollBackToIntrCount,
                              pollCount ? ((pollBackToIntrCount * 10000) / pollCount) : 0,
                              pollAccuCount,
                              pollCount ? ((pollAccuCount * 10000) / pollCount) : 0,
@@ -302,6 +560,9 @@ NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal)
                              pollCmdDone ? ((pollAccuCmd * 10000) / pollCmdDone) : 0,
                              intrCount, intrCmdDone);
    if (status != VMK_OK) {
+      WPRINT(ctrlr, "Failed to get perfStats, %s.",
+             vmk_StatusToString(status));
+
       goto fail_to_get_perfStats;
    }
 
@@ -310,7 +571,7 @@ NVMEPCIEKeyPerfStatsGet(vmk_uint64 cookie, void *keyVal)
 fail_to_get_perfStats:
    NVMEPCIEFree(buf);
 fail_alloc_buf:
-   return VMK_OK;
+   return status;
 }
 
 
@@ -327,6 +588,7 @@ NVMEPCIEKeyPerfStatsSet(vmk_uint64 cookie, void *keyVal)
    vmk_AtomicWrite64(&ctrlr->perfStats.pollCmdDone, 0);
    for (i = 0; i <= ctrlr->numIoQueues; i++) {
       vmk_AtomicWrite64(&ctrlr->queueList[i].intrCount, 0);
+      vmk_AtomicWrite8(&ctrlr->queueList[i].pollLastDoSwitch, 0);
    }
    vmk_AtomicWrite64(&ctrlr->perfStats.intrCmdDone, 0);
 

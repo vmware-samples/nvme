@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
+ * Copyright (c) 2016-2025 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  *****************************************************************************/
@@ -23,6 +23,12 @@ static void NVMEPCIECreatePerfTimer(NVMEPCIEController *ctrlr);
 static void NVMEPCIEStartPerfTimer(NVMEPCIEController *ctrlr);
 static void NVMEPCIEStopPerfTimer(NVMEPCIEController *ctrlr);
 static void NVMEPCIEDestroyPerfTimer(NVMEPCIEController *ctrlr);
+#if NVME_PCIE_STORAGE_POLL
+static void
+NVMEPCIEPerfFSA(NVMEPCIEQueueInfo *qinfo,
+                vmk_uint32 iopsThisSec,
+                vmk_uint32 iopsLastSec);
+#endif
 
 /**
  * startAdapter callback of adapter ops
@@ -681,6 +687,136 @@ NVMEPCIEAdapterDestroy(NVMEPCIEController *ctrlr)
    return VMK_OK;
 }
 
+#if NVME_PCIE_STORAGE_POLL
+/**
+ * @brief Performance Finite State Automata (perfFSA).
+ *
+ * This perfFSA is a platform-independent strategy that switch between polling
+ * and interrupt mode for different OIO workloads, it tries to guarantee that
+ *    1. The mode that gives higher IOPs will be perferred first.
+ *    2. The polling will also be perferred if similar IOPs compared with
+ *       interrupt, due to less cpu cycles cost.
+ *
+ * @param[in]  qinfo        Queue instance.
+ * @param[in]  iopsThisSec  The IOPs of this second.
+ * @param[in]  iopsLastSec  The IOPs of last second.
+ */
+static void
+NVMEPCIEPerfFSA(NVMEPCIEQueueInfo *qinfo,
+                vmk_uint32 iopsThisSec,
+                vmk_uint32 iopsLastSec)
+{
+   NVMEPCIEController *ctrlr = qinfo->ctrlr;
+   vmk_uint32 ratio, queueRatio, diff;
+
+   switch (vmk_AtomicRead32(&qinfo->perfFSAState)) {
+      case NVME_PCIE_PERF_FSA_EVA:
+         vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_EVA_POLL);
+         qinfo->perfFSAEvaIntrIOPs = qinfo->perfFSAEvaPollIOPs = 0;
+         // Drop the first 1sec perf data to get reliable result
+         vmk_AtomicWrite32(&qinfo->perfFSAEvaSec,
+                           vmk_AtomicRead32(&ctrlr->perfFSAEvaSec) + 1);
+         vmk_AtomicWrite8(&qinfo->perfFSAPollAct, 1);
+
+         break;
+
+      case NVME_PCIE_PERF_FSA_EVA_POLL:
+         if (vmk_AtomicReadDec32(&qinfo->perfFSAEvaSec) >
+             vmk_AtomicRead32(&ctrlr->perfFSAEvaSec)) {
+            break;
+         }
+
+         qinfo->perfFSAEvaPollIOPs += iopsThisSec;
+         if (vmk_AtomicReadDec32(&qinfo->perfFSAEvaSec) > 1) {
+            break;
+         }
+
+         vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_EVA_INTR);
+         // Drop the first 1sec perf data to get reliable result
+         vmk_AtomicWrite32(&qinfo->perfFSAEvaSec,
+                           vmk_AtomicRead32(&ctrlr->perfFSAEvaSec) + 1);
+         vmk_AtomicWrite8(&qinfo->perfFSAPollAct, 0);
+
+         break;
+
+      case NVME_PCIE_PERF_FSA_EVA_INTR:
+         if (vmk_AtomicReadDec32(&qinfo->perfFSAEvaSec) >
+             vmk_AtomicRead32(&ctrlr->perfFSAEvaSec)) {
+            break;
+         }
+
+         qinfo->perfFSAEvaIntrIOPs += iopsThisSec;
+         if (vmk_AtomicReadDec32(&qinfo->perfFSAEvaSec) > 1) {
+            break;
+         }
+
+         vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_PROTECT);
+         if (qinfo->perfFSAEvaIntrIOPs <= qinfo->perfFSAEvaPollIOPs) {
+            vmk_AtomicWrite8(&qinfo->perfFSAPollAct, 1);
+         } else {
+            ratio = (qinfo->perfFSAEvaIntrIOPs - qinfo->perfFSAEvaPollIOPs) *
+                     10000 / qinfo->perfFSAEvaIntrIOPs;
+            queueRatio = vmk_AtomicRead32(&ctrlr->perfFSAEvaRatio) * 100;
+            if (ratio > queueRatio) {
+               vmk_AtomicWrite8(&qinfo->perfFSAPollAct, 0);
+            } else {
+               vmk_AtomicWrite8(&qinfo->perfFSAPollAct, 1);
+            }
+         }
+         vmk_AtomicWrite32(&qinfo->perfFSAProtectSec,
+                           vmk_AtomicRead32(&ctrlr->perfFSAProtectSec));
+
+         break;
+
+      case NVME_PCIE_PERF_FSA_PROTECT:
+         if (vmk_AtomicReadDec32(&qinfo->perfFSAProtectSec) == 1) {
+            vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_MON);
+            vmk_AtomicWrite32(&qinfo->perfFSAMonSec,
+                              vmk_AtomicRead32(&ctrlr->perfFSAMonSec));
+         }
+
+         break;
+
+      case NVME_PCIE_PERF_FSA_MON:
+         if (vmk_AtomicReadDec32(&qinfo->perfFSAMonSec) == 1) {
+            vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_FIN);
+
+            break;
+         }
+
+         // Enter finish state directly if IOPs is low
+         if ((iopsLastSec < (NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE >> 1)) &&
+             (iopsThisSec < (NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE >> 1))){
+            vmk_AtomicWrite8(&qinfo->perfFSAPollAct, 0);
+            vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_FIN);
+
+            break;
+         }
+
+         if (iopsLastSec == 0){
+            vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_FIN);
+
+            break;
+         }
+
+         diff = (iopsThisSec < iopsLastSec) ? (iopsLastSec - iopsThisSec) :
+                                              (iopsThisSec - iopsLastSec);
+         ratio = diff * 10000 / iopsLastSec;
+         queueRatio = vmk_AtomicRead32(&ctrlr->perfFSAMonRatio) * 100;
+         if (ratio > queueRatio) {
+            vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_FIN);
+            vmk_AtomicWrite8(&qinfo->perfFSAPollAct, 1);
+         }
+
+         break;
+
+      default:
+         // NVME_PCIE_PERF_FSA_FIN
+         break;
+   }
+}
+#endif
+
 /**
  * Timer handler which will update performance stats of last second.
  *
@@ -691,16 +827,24 @@ NVMEPCIEPerfTimerHandler(vmk_TimerCookie data)
 {
    NVMEPCIEController *ctrlr = (NVMEPCIEController *) data.ptr;
    NVMEPCIEQueueInfo *qinfo = NULL;
-   vmk_uint32 i, numCmdComplLastSec;
+   vmk_uint32 i, iopsThisSec, iopsLastSec;
 
    for (i = 1; i <= ctrlr->numIoQueues; i++) {
       qinfo = &ctrlr->queueList[i];
       vmk_AtomicInc32(&qinfo->refCount);
       if (VMK_LIKELY(vmk_AtomicRead32(&qinfo->state) !=
                      NVME_PCIE_QUEUE_NON_EXIST)) {
-         numCmdComplLastSec = vmk_AtomicReadWrite32(&qinfo->numCmdComplThisSec,
-                                                    0);
-         vmk_AtomicWrite32(&qinfo->iopsLastSec, numCmdComplLastSec);
+         iopsThisSec = vmk_AtomicReadWrite32(&qinfo->numCmdComplThisSec, 0);
+         iopsLastSec = vmk_AtomicReadWrite32(&qinfo->iopsLastSec, iopsThisSec);
+#if NVME_PCIE_STORAGE_POLL
+         if (vmk_AtomicRead8(&ctrlr->pollAct) &&
+             vmk_AtomicRead8(&ctrlr->perfFSA)) {
+            NVMEPCIEPerfFSA(qinfo, iopsThisSec, iopsLastSec);
+         } else {
+            // perfFSA enter final state, reset
+            vmk_AtomicWrite32(&qinfo->perfFSAState, NVME_PCIE_PERF_FSA_FIN);
+         }
+#endif
       } else {
          IPRINT(qinfo->ctrlr, "Trying to record IOPs of non exist queue %d.",
                 qinfo->id);
@@ -813,6 +957,12 @@ NVMEPCIEControllerInit(NVMEPCIEController *ctrlr)
    // Init StoragePoll related configs
 #if NVME_PCIE_STORAGE_POLL
    ctrlr->pollAct = nvmePCIEPollAct && (!nvmePCIEMsiEnbaled);
+   ctrlr->perfFSA = nvmePCIEPerfFSA;
+   ctrlr->perfFSAEvaSec = NVME_PCIE_PERF_FSA_EVA_SECONDS;
+   ctrlr->perfFSAEvaRatio = NVME_PCIE_PERF_FSA_EVA_RATIO;
+   ctrlr->perfFSAProtectSec = NVME_PCIE_PERF_FSA_PROTECT_SECONDS;
+   ctrlr->perfFSAMonSec = NVME_PCIE_PERF_FSA_MON_SECONDS;
+   ctrlr->perfFSAMonRatio = NVME_PCIE_PERF_FSA_MON_RATIO;
    ctrlr->pollOIOThr = nvmePCIEPollOIOThr;
    ctrlr->pollInterval = nvmePCIEPollInterval;
 #if NVME_PCIE_BLOCKSIZE_AWARE

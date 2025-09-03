@@ -1649,6 +1649,8 @@ NVMEPCIEStoragePollCreate(NVMEPCIEQueueInfo *qinfo)
          /** Set as NULL to claim that failed to create poll handler */
          qinfo->pollHandler = NULL;
          vmk_AtomicWrite8(&qinfo->isPollHdlrEnabled, VMK_FALSE);
+      } else {
+         qinfo->perfFSAState = NVME_PCIE_PERF_FSA_FIN;
       }
    }
 }
@@ -1711,8 +1713,8 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
    NVMEPCIEController *ctrlr = qinfo->ctrlr;
    vmk_atomic32 *nrActPtr = &qinfo->cmdList->nrAct;
    vmk_atomic32 *iopsLastSecPtr;
-   vmk_Bool doSwitch = VMK_FALSE;
    vmk_uint32 pollOIOThr;
+   vmk_uint8 doSwitch = 0;
 
    /**
     * If 'perfTimer' is invalid, queue's 'iopsLastSec' will never be reset,
@@ -1727,30 +1729,54 @@ NVMEPCIEStoragePollSwitch(NVMEPCIEQueueInfo *qinfo)
    if (vmk_AtomicRead8(&ctrlr->pollAct) &&
        VMK_LIKELY(qinfo->pollHandler != NULL)) {
       /**
-       * Activate polling Strategy
+       * Activate polling strategy -- Part 1
        *
        * 1. If OIO is adequate, it is appropriate to replace a large quantity
        *    of interrupts by polling
        * 2. If IOPs is greater than 'NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE',
        *    but the OIO is low, device may have low latency feature, enable
        *    polling as well
+       * 3. Not switch polling if block size aware strategy not satisfied
        */
       pollOIOThr = vmk_AtomicRead32(&ctrlr->pollOIOThr);
       if (vmk_AtomicRead32(nrActPtr) >= pollOIOThr) {
-         doSwitch = VMK_TRUE;
+         doSwitch |= 0x1;
       } else if (VMK_LIKELY(iopsLastSecPtr != NULL) &&
                  (vmk_AtomicRead32(iopsLastSecPtr) >=
                   NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE)) {
-         doSwitch = VMK_TRUE;
+         doSwitch |= 0x2;
       }
 #if NVME_PCIE_BLOCKSIZE_AWARE
       if (doSwitch && !NVMEPCIEStoragePollBlkSizeAwareSwitch(qinfo)) {
-         doSwitch = VMK_FALSE;
+         doSwitch = 0;
       }
 #endif
+
+      /**
+       * Activate polling strategy -- Part 2
+       *
+       * Performance Finite State Automata (perfFSA)
+       *
+       * 1. When the IOPs satisfied, enable the perfFSA
+       * 2. When perfFSA enabled, not switch polling if perfFSA not satisfied
+       */
+      if (doSwitch && vmk_AtomicRead8(&ctrlr->perfFSA)) {
+         if ((doSwitch & 0x2) &&
+             (vmk_AtomicReadIfEqualWrite32(&qinfo->perfFSAState,
+                 NVME_PCIE_PERF_FSA_FIN,
+                 NVME_PCIE_PERF_FSA_EVA) == NVME_PCIE_PERF_FSA_FIN)) {
+            // Nothing to do, already enabled perfFSA
+         } else if (vmk_AtomicRead32(&qinfo->perfFSAState) != NVME_PCIE_PERF_FSA_FIN) {
+            if (!vmk_AtomicRead8(&qinfo->perfFSAPollAct)) {
+               doSwitch = 0;
+            }
+         }
+      }
    }
 
-   return doSwitch;
+   vmk_AtomicWrite8(&qinfo->pollLastDoSwitch, doSwitch != 0);
+
+   return doSwitch != 0;
 }
 #endif
 

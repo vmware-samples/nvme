@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
+ * Copyright (c) 2016-2025 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  *****************************************************************************/
@@ -46,10 +46,21 @@
 
 #if NVME_PCIE_STORAGE_POLL
 extern int nvmePCIEPollAct;
+extern vmk_uint32 nvmePCIEPerfFSA;
 extern vmk_uint64 nvmePCIEPollInterval;
 extern vmk_uint32 nvmePCIEPollOIOThr;
 // IOPs threshold to enable polling per queue, currently 100k
 #define NVME_PCIE_POLL_IOPS_THRES_PER_QUEUE (100 * 1024)
+// Performance FSA evaluation time window
+#define NVME_PCIE_PERF_FSA_EVA_SECONDS (2)
+// Performance FSA evaluation ratio in percentage
+#define NVME_PCIE_PERF_FSA_EVA_RATIO (10)
+// Performance FSA protection time window
+#define NVME_PCIE_PERF_FSA_PROTECT_SECONDS (4)
+// Performance FSA monitor time window
+#define NVME_PCIE_PERF_FSA_MON_SECONDS (60)
+// Performance FSA monitor ratio in percentage
+#define NVME_PCIE_PERF_FSA_MON_RATIO (15)
 #if NVME_PCIE_BLOCKSIZE_AWARE
 extern int nvmePCIEBlkSizeAwarePollAct;
 #endif
@@ -161,6 +172,24 @@ typedef struct NVMEPCIECompQueueInfo {
  */
 typedef void (*NVMEPCIECompleteCommandCb)(NVMEPCIEQueueInfo *qinfo,
                                           NVMEPCIECmdInfo *cmdInfo);
+
+#if NVME_PCIE_STORAGE_POLL
+// The states of Performance Finite State Automata (perfFSA)
+typedef enum NVMEPCIEPerfFSAState {
+   // Init state, prepare the perfFSA
+   NVME_PCIE_PERF_FSA_EVA = 0,
+   // Evaluating polling mode performance
+   NVME_PCIE_PERF_FSA_EVA_POLL,
+   // Evaluating interrupt mode performance and choose proper mode
+   NVME_PCIE_PERF_FSA_EVA_INTR,
+   // Keep certain mode for a while to protect the workload stability
+   NVME_PCIE_PERF_FSA_PROTECT,
+   // Monitor the performance change
+   NVME_PCIE_PERF_FSA_MON,
+   // The final state
+   NVME_PCIE_PERF_FSA_FIN,
+} NVMEPCIEPerfFSAState;
+#endif
 
 typedef enum NVMEPCIECmdType {
    NVME_PCIE_FREE_CONTEXT,
@@ -274,8 +303,32 @@ typedef struct NVMEPCIEQueueInfo {
     * it will create a high priority system world inside.
     */
    vmk_atomic8 isPollHdlrEnabled;
+   /**
+    * It will change automatically by Performance Finite State Automata
+    * (perfFSA), one of the polling active strategies. It claims whether
+    * polling of the queue can be activated. Valid if controller's perfFSA
+    * enabled.
+    */
+   vmk_atomic8 perfFSAPollAct;
+   /**
+    * Whether switch to polling in the last check, it depends on the
+    * controller's pollAct and polling active strategies
+    */
+   vmk_atomic8 pollLastDoSwitch;
    // StoragePoll handler. Set as NULL, if failed to create
    vmk_StoragePoll pollHandler;
+   // The state of perfFSA
+   volatile NVMEPCIEPerfFSAState perfFSAState;
+   // The perfFSA evaluation time left
+   vmk_atomic32 perfFSAEvaSec;
+   // The IOPs of perfFSA polling evaluation
+   vmk_atomic32 perfFSAEvaPollIOPs;
+   // The IOPs of perfFSA interrupt evaluation
+   vmk_atomic32 perfFSAEvaIntrIOPs;
+   // The perfFSA protection time left
+   vmk_atomic32 perfFSAProtectSec;
+   // The perfFSA monitor time left
+   vmk_atomic32 perfFSAMonSec;
 #endif
    /**
     * Will update per second by 'perfTimer'
@@ -318,16 +371,32 @@ typedef struct NVMEPCIEController {
    vmk_Timer perfTimer;
 #if NVME_PCIE_STORAGE_POLL
    /**
-    * Always setup poll handlers, and it depends on 'pollAct' to activate
-    * poll routine.
+    * As always setup poll handlers, use it to control whether polling routine
+    * of this controller can be activated.
     */
    vmk_atomic8 pollAct;
+   /**
+    * Whether Performance Finite State Automata enabled, it helps to optimize
+    * the hybrid polling for different OIO workloads. Valid if pollAct
+    * activated.
+    */
+   vmk_atomic8 perfFSA;
+   // The perfFSA evaluation time window
+   vmk_atomic32 perfFSAEvaSec;
+   // The perfFSA evaluation ratio
+   vmk_atomic32 perfFSAEvaRatio;
+   // The perfFSA protection time window
+   vmk_atomic32 perfFSAProtectSec;
+   // The perfFSA monitor time window
+   vmk_atomic32 perfFSAMonSec;
+   // The perfFSA monitor ratio
+   vmk_atomic32 perfFSAMonRatio;
    vmk_atomic32 pollOIOThr;
    vmk_atomic64 pollInterval;
    NVMEPCIEPerfStats perfStats;
 #endif
 #if NVME_PCIE_BLOCKSIZE_AWARE
-       vmk_atomic8 blkSizeAwarePollAct;
+   vmk_atomic8 blkSizeAwarePollAct;
 #endif
    vmk_MgmtHandle kvMgmtHandle;
    vmk_MgmtApiSignature kvMgmtSig;
