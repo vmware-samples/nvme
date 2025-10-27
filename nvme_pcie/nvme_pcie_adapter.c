@@ -577,6 +577,22 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
    vmk_NvmeAdapterAllocProps adapterProps;
    vmk_DMAConstraints constraints;
    vmk_DMAEngineProps props;
+   vmk_ConfigParamHandle configParam;
+   vmk_uint32 relaxDma = 0;
+
+   vmkStatus = vmk_ConfigParamOpen(VMK_CONFIG_GROUP_MISC,
+                                   "nvmePcieRelaxDmaConstraints",
+                                   &configParam);
+   if (vmkStatus != VMK_OK) {
+      WPRINT(ctrlr, "Failed to open config nvmePcieRelaxDmaConstraints, 0x%x", vmkStatus);
+   } else {
+      vmkStatus = vmk_ConfigParamGetUint(configParam, &relaxDma);
+      if (vmkStatus != VMK_OK) {
+         WPRINT(ctrlr, "Failed to get config nvmePcieRelaxDmaConstraints, 0x%x", vmkStatus);
+	 relaxDma = 0;
+      }
+      vmk_ConfigParamClose(configParam);
+   }
 
    /** Create DMA engine for IO */
    constraints.addressMask = VMK_ADDRESS_MASK_64BIT;
@@ -589,7 +605,11 @@ NVMEPCIEAdapterInit(NVMEPCIEController *ctrlr)
     */
    constraints.sgMaxEntries = NVME_PCIE_SG_MAX_ENTRIES;
    constraints.sgElemMaxSize = 0;
-   constraints.sgElemSizeMult = 512;
+   if (relaxDma) {
+      constraints.sgElemSizeMult = 0;
+   } else {
+      constraints.sgElemSizeMult = 512;
+   }
    constraints.sgElemAlignment = 4;
    constraints.sgElemStraddle = VMK_ADDRESS_MASK_32BIT + 1;
 

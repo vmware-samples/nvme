@@ -10,6 +10,11 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
 
+2025/10/15 1.4.0.6-1vmw
+
+   Fix PR #3598381: Set DMA constraint sgElemSizeMult to 0 if config option
+   nvmePcieRelaxDmaConstraints is enabled.
+
 2025/9/3 1.4.0.5-1vmw
 
    Add feature of Performance Finite State Automata, it helps to optimize
