@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2025 Broadcom. All Rights Reserved.
+ * Copyright (c) 2016-2026 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  *****************************************************************************/
@@ -1883,7 +1883,7 @@ NVMEPCIEProcessCq(NVMEPCIEQueueInfo *qinfo)
    vmk_uint32 numCmdCompleted = 0;
 #ifdef NVME_STATS
    vmk_TimerRelCycles latency = 0;
-   vmk_TimerCycles lastValidTs = 0;
+   vmk_TimerCycles lastValidTs = vmk_GetTimerCycles();
 #endif
    vmk_uint16 cid;
 
@@ -2263,6 +2263,9 @@ NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status, vmk_Bool flu
    NVMEPCIECmdInfo *cmdInfo = NULL;
    vmk_atomic32 atomicStatus;
    int i;
+#ifdef NVME_STATS
+   vmk_TimerRelCycles latency = 0;
+#endif
 
    /** An active command may be freed in submission path. Wait for queue
     * refCount to be zero to avoid accessing command list when I/O
@@ -2293,6 +2296,15 @@ NVMEPCIEFlushQueue(NVMEPCIEQueueInfo *qinfo, vmk_NvmeStatus status, vmk_Bool flu
              atomicStatus == NVME_PCIE_CMD_STATUS_FREE_ON_COMPLETE) {
             cmdInfo->vmkCmd->nvmeStatus = status;
             VMK_ASSERT(cmdInfo->done);
+#ifdef NVME_STATS
+            if (cmdInfo->statsOn) {
+               latency = vmk_GetTimerCycles() - cmdInfo->sendToHwTs;
+               if (VMK_UNLIKELY(latency < 0)) {
+                  latency = 0;
+               }
+               cmdInfo->vmkCmd->deviceLatency = latency;
+            }
+#endif
             cmdInfo->done(qinfo, cmdInfo);
          }
          cmdInfo++;

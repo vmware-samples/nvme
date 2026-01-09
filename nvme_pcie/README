@@ -10,6 +10,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
 
+2026/1/8 1.4.0.7-1vmw
+
+   Fix PR #3638060: Correct the device latency if the command is aborted in driver.
+
 2025/10/15 1.4.0.6-1vmw
 
    Fix PR #3598381: Set DMA constraint sgElemSizeMult to 0 if config option
