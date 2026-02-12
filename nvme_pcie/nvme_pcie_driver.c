@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2024 Broadcom. All Rights Reserved.
+ * Copyright (c) 2016-2026 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  *****************************************************************************/
@@ -688,18 +688,11 @@ SetupAdminQueue(NVMEPCIEController *ctrlr)
 {
    VMK_ReturnStatus vmkStatus;
 
-   if (!nvmePCIEMsiEnbaled) {
-      vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, 1);
-      if (vmkStatus != VMK_OK) {
-         EPRINT(ctrlr, "Failed to allocate msix admin queue interrupt, 0x%x.", vmkStatus);
-         return vmkStatus;
-      }
-   } else{
-      vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSI, 1);
-      if (vmkStatus != VMK_OK) {
-         EPRINT(ctrlr, "Failed to allocate msi admin queue interrupt, 0x%x.", vmkStatus);
-         return vmkStatus;
-      }
+   vmkStatus = NVMEPCIEIntrAlloc(ctrlr, VMK_PCI_INTERRUPT_TYPE_MSIX, 1);
+   if (vmkStatus != VMK_OK) {
+      //TODO: Try other types of interrupts.
+      EPRINT(ctrlr, "Failed to allocate msix admin queue interrupt, 0x%x.", vmkStatus);
+      return vmkStatus;
    }
 
    vmkStatus = NVMEPCIEQueueCreate(ctrlr, 0, nvmePCIEAdminQueueSize);

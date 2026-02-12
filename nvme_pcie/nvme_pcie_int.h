@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2025 Broadcom. All Rights Reserved.
+ * Copyright (c) 2016-2026 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  *****************************************************************************/
@@ -65,7 +65,6 @@ extern vmk_uint32 nvmePCIEPollOIOThr;
 extern int nvmePCIEBlkSizeAwarePollAct;
 #endif
 #endif
-extern int nvmePCIEMsiEnbaled;
 
 /**
  * Driver name. This should be the name of the SC file.
@@ -616,11 +615,6 @@ VMK_ReturnStatus NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
                                    vmk_PCIInterruptType type,
                                    vmk_uint32 numDesired);
 void NVMEPCIEIntrFree(NVMEPCIEController *ctrlr);
-
-VMK_ReturnStatus NVMEPCIECtrlMsiAck(void *handlerData,
-                                     vmk_IntrCookie intrCookie);
-void NVMEPCIECtrlMsiHandler(void *handlerData,
-                              vmk_IntrCookie intrCookie);
 
 VMK_ReturnStatus NVMEPCIEQueueIntrAck(void *handlerData,
                                       vmk_IntrCookie intrCookie);

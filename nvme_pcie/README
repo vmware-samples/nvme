@@ -10,6 +10,10 @@ This is VMware native NVMe PCIe driver compatible with NVMe Specification 1.4.
 
 == Change Log ==
 
+2026/2/3 1.4.0.8-1vmw
+
+   Deprecate module parameter nvmePCIEMsiEnbaled.
+
 2026/1/8 1.4.0.7-1vmw
 
    Fix PR #3638060: Correct the device latency if the command is aborted in driver.

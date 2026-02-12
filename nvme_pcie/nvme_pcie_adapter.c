@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Copyright (c) 2016-2025 Broadcom. All Rights Reserved.
+ * Copyright (c) 2016-2026 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  *****************************************************************************/
@@ -325,7 +325,7 @@ SetNumberIOQueues(vmk_NvmeController controller,
    }
 
    // Only reallocate intr in controller init or IO queue number is changed in reset.
-   if (!nvmePCIEMsiEnbaled) {
+   if (ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX) {
       if (ctrlr->osRes.numIntrs == 1 || ctrlr->osRes.numIntrs != 1 + nrIoQueues) {
          vmkStatus = ReallocIntr(ctrlr, 1 + nrIoQueues);
          if (vmkStatus != VMK_OK) {
@@ -475,11 +475,9 @@ static vmk_IntrCookie
 GetIntrCookie(vmk_NvmeController controller, vmk_NvmeQueueID qid)
 {
    NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
-   if (!nvmePCIEMsiEnbaled) {
-      if (ctrlr->osRes.intrType != VMK_PCI_INTERRUPT_TYPE_MSIX ||
-          qid >= ctrlr->osRes.numIntrs) {
-         return VMK_INVALID_INTRCOOKIE;
-      }
+   if (ctrlr->osRes.intrType != VMK_PCI_INTERRUPT_TYPE_MSIX ||
+      qid >= ctrlr->osRes.numIntrs) {
+      return VMK_INVALID_INTRCOOKIE;
    }
    return ctrlr->osRes.intrArray[qid];
 }
@@ -976,7 +974,9 @@ NVMEPCIEControllerInit(NVMEPCIEController *ctrlr)
 
    // Init StoragePoll related configs
 #if NVME_PCIE_STORAGE_POLL
-   ctrlr->pollAct = nvmePCIEPollAct && (!nvmePCIEMsiEnbaled);
+   if (ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX) {
+      ctrlr->pollAct = nvmePCIEPollAct;
+   }
    ctrlr->perfFSA = nvmePCIEPerfFSA;
    ctrlr->perfFSAEvaSec = NVME_PCIE_PERF_FSA_EVA_SECONDS;
    ctrlr->perfFSAEvaRatio = NVME_PCIE_PERF_FSA_EVA_RATIO;

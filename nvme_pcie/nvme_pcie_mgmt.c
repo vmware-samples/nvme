@@ -1,6 +1,6 @@
 /*
  * ******************************************************************
- * Copyright (c) 2022-2025 Broadcom. All Rights Reserved.
+ * Copyright (c) 2022-2026 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  * ******************************************************************
@@ -264,7 +264,7 @@ NVMEPCIEKeyPollActSet(vmk_uint64 cookie, void *keyVal)
 
          IPRINT(ctrlr, "pollAct is set as 0.");
       } else {
-         if (nvmePCIEMsiEnbaled) {
+         if (ctrlr->osRes.intrType != VMK_PCI_INTERRUPT_TYPE_MSIX) {
             IPRINT(ctrlr, "To activate polling, interrupt type should"
                           " be MSIX.");
          } else {

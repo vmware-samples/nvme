@@ -1,6 +1,10 @@
-/*****************************************************************************
- * Copyright (c) 2016, 2018, 2020-2023 VMware, Inc. All rights reserved.
- *****************************************************************************/
+/*
+ * ******************************************************************
+ * Copyright (c) 2016-2026 Broadcom. All Rights Reserved.
+ * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+ * and/or its subsidiaries.
+ * ******************************************************************
+ */
 
 /*
  * @file: nvme_pcie_os.c --
@@ -309,16 +313,6 @@ NVMEPCIEIntrAlloc(NVMEPCIEController *ctrlr,
    if (vmkStatus == VMK_OK) {
       ctrlr->osRes.intrType = type;
       ctrlr->osRes.numIntrs = numAllocated;
-      if (type == VMK_PCI_INTERRUPT_TYPE_MSI) {
-         vmkStatus = NVMEPCIEIntrRegister(ctrlr->osRes.device,
-                     ctrlr->osRes.intrArray[0],
-                     ctrlr,
-                     NVMEPCIEGetCtrlrName(ctrlr),
-                     NVMEPCIECtrlMsiAck,
-                     NVMEPCIECtrlMsiHandler);
-
-         vmk_IntrEnable(ctrlr->osRes.intrArray[0]);
-      }
    } else {
       ctrlr->osRes.intrType = VMK_PCI_INTERRUPT_TYPE_NONE;
       ctrlr->osRes.numIntrs = 0;

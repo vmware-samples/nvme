@@ -75,11 +75,7 @@ NVMEPCIEQueueCreate(NVMEPCIEController *ctrlr,
       return VMK_OK;
    }
 
-   if (ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX) {
-      vmkStatus = QueueConstruct(ctrlr, qinfo, qid, qsize, qsize, qid);
-   } else {
-      vmkStatus = QueueConstruct(ctrlr, qinfo, qid, qsize, qsize, 0);
-   }
+   vmkStatus = QueueConstruct(ctrlr, qinfo, qid, qsize, qsize, qid);
 
    if (vmkStatus != VMK_OK) {
       EPRINT(ctrlr, "Failed to construct IO queue [%d], 0x%x.", qid, vmkStatus);
@@ -703,29 +699,6 @@ QueueDestroy(NVMEPCIEQueueInfo *qinfo)
    }
 
    return vmkStatus;
-}
-
-VMK_ReturnStatus
-NVMEPCIECtrlMsiAck(void *handlerData, vmk_IntrCookie intrCookie)
-{
-   return VMK_OK;
-}
-
-void
-NVMEPCIECtrlMsiHandler(void *handlerData, vmk_IntrCookie intrCookie)
-{
-   NVMEPCIEController *ctrlr = (NVMEPCIEController *)handlerData;
-   NVMEPCIEQueueInfo *qinfo;
-   int i;
-
-   NVMEPCIEQueueIntrHandler(&ctrlr->queueList[0], intrCookie);
-
-   for (i = 1; i <= ctrlr->numIoQueues; i++) {
-      qinfo = &ctrlr->queueList[i];
-      vmk_SpinlockLock(qinfo->cqInfo->lock);
-      NVMEPCIEProcessCq(qinfo);
-      vmk_SpinlockUnlock(qinfo->cqInfo->lock);
-   }
 }
 
 /**
@@ -2063,11 +2036,7 @@ CreateCq(NVMEPCIEController *ctrlr, NVMEPCIEQueueInfo *qinfo)
    createCqCmd->cdw10.qsize = qinfo->cqInfo->qsize - 1;
    createCqCmd->cdw11.pc = 1;
    createCqCmd->cdw11.ien = 1;
-   if (ctrlr->osRes.intrType == VMK_PCI_INTERRUPT_TYPE_MSIX) {
-      createCqCmd->cdw11.iv = qinfo->cqInfo->intrIndex;
-   } else {
-      createCqCmd->cdw11.iv = 0;
-   }
+   createCqCmd->cdw11.iv = qinfo->cqInfo->intrIndex;
 
    vmkStatus = NVMEPCIESubmitSyncCommand(ctrlr, vmkCmd, 0, NULL, 0, ADMIN_TIMEOUT);
 

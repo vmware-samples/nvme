@@ -1,6 +1,6 @@
 /*
  * ******************************************************************
- * Copyright (c) 2016-2023, 2025 Broadcom. All Rights Reserved.
+ * Copyright (c) 2016-2023, 2025-2026 Broadcom. All Rights Reserved.
  * Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
  * and/or its subsidiaries.
  * ******************************************************************
@@ -25,7 +25,7 @@ int nvmePCIEDma4KSwitch = 0;
 VMK_MODPARAM(nvmePCIEDma4KSwitch, int, "NVMe PCIe 4k-alignment DMA");
 
 int nvmePCIEMsiEnbaled = 0;
-VMK_MODPARAM(nvmePCIEMsiEnbaled, int, "NVMe PCIe MSI interrupt enable");
+VMK_MODPARAM(nvmePCIEMsiEnbaled, int, "NVMe PCIe MSI interrupt enable (deprecated)");
 
 vmk_uint32 nvmePCIEFakeAdminQSize = 0;
 VMK_MODPARAM(nvmePCIEFakeAdminQSize, uint, "NVMe PCIe fake ADMIN queue size. 0's based");
