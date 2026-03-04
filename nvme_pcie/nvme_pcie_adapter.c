@@ -522,8 +522,8 @@ GetStatistics(vmk_NvmeController controller,
    NVMEPCIEController *ctrlr = vmk_NvmeGetControllerDriverData(controller);
    NVMEPCIEQueueInfo *qinfo = &ctrlr->queueList[qid];
 
-   if (VMK_NVME_STATS_CAT_PCIE) {
-      stats->pcie.intrCount = qinfo->stats->intrCount;
+   if (cat == VMK_NVME_STATS_CAT_PCIE) {
+      stats->pcie.intrCount = vmk_AtomicRead64(&qinfo->intrCount);
       vmkStatus = VMK_OK;
    }
    return vmkStatus;

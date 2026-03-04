@@ -272,7 +272,6 @@ typedef enum NVMEPCIEQueueState {
 } NVMEPCIEQueueState;
 
 typedef struct NVMEPCIEQueueStats {
-   vmk_uint64 intrCount;
    /* Additional tracker for CQ entries. */
    vmk_uint16 cqHead;
    vmk_uint16 cqePhase;

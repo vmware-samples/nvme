@@ -491,7 +491,6 @@ QueueStatsContruct(NVMEPCIEQueueInfo *qinfo)
    }
    qinfo->stats->cqHead = 0;
    qinfo->stats->cqePhase = 1;
-   qinfo->stats->intrCount = 0;
    return VMK_OK;
 }
 
@@ -508,10 +507,9 @@ QueueStatsDestroy(NVMEPCIEQueueInfo *qinfo)
  * Walk through CQ, collect nvme-stats.
  *
  * @param[in] qinfo      Queue instance
- * @param[in] countIntr  Whether to count interrupts
  */
 static void
-NVMEPCIEStatsWalkThrough(NVMEPCIEQueueInfo *qinfo, vmk_Bool countIntr)
+NVMEPCIEStatsWalkThrough(NVMEPCIEQueueInfo *qinfo)
 {
    NVMEPCIECompQueueInfo *cqInfo = qinfo->cqInfo;
    NVMEPCIEController *ctrlr = qinfo->ctrlr;
@@ -537,11 +535,6 @@ NVMEPCIEStatsWalkThrough(NVMEPCIEQueueInfo *qinfo, vmk_Bool countIntr)
    head = stats->cqHead;
    phase = stats->cqePhase;
    ts = vmk_GetTimerCycles();
-
-   // In interruption mode, count interrupts while not in polling mode
-   if (countIntr) {
-      stats->intrCount = vmk_AtomicRead64(&qinfo->intrCount);
-   }
 
    while (1) {
       cqEntry = &cqInfo->compq[head];
@@ -717,7 +710,7 @@ NVMEPCIEQueueIntrAck(void *handlerData, vmk_IntrCookie intrCookie)
    vmk_AtomicInc64(&qinfo->intrCount);
 
 #if NVME_STATS
-   NVMEPCIEStatsWalkThrough(qinfo, VMK_TRUE);
+   NVMEPCIEStatsWalkThrough(qinfo);
 #endif
    return VMK_OK;
 }
@@ -1439,7 +1432,7 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
 
       vmk_SpinlockLock(qinfo->cqInfo->lock);
 #if NVME_STATS
-      NVMEPCIEStatsWalkThrough(qinfo, VMK_FALSE);
+      NVMEPCIEStatsWalkThrough(qinfo);
 #endif
       ret += NVMEPCIEProcessCq(qinfo);
       vmk_SpinlockUnlock(qinfo->cqInfo->lock);
@@ -1470,7 +1463,7 @@ NVMEPCIEStoragePollCB(vmk_AddrCookie driverData,          // IN
        */
       vmk_SpinlockLock(qinfo->cqInfo->lock);
 #if NVME_STATS
-      NVMEPCIEStatsWalkThrough(qinfo, VMK_FALSE);
+      NVMEPCIEStatsWalkThrough(qinfo);
 #endif
       vmk_AtomicAdd64(&ctrlr->perfStats.pollCmdDone, NVMEPCIEProcessCq(qinfo));
       vmk_SpinlockUnlock(qinfo->cqInfo->lock);
